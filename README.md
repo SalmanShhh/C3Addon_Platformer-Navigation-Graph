@@ -1,21 +1,22 @@
 <img src="./src/icon.svg" width="100" /><br>
-# Sample Addon
-<i>Description</i> <br>
-### Version 0.0.0.0
+# Platformer Navigation Graph
+<i>-</i> <br>
+### Version 0.0.1.0
 
-[<img src="https://placehold.co/200x50/4493f8/FFF?text=Download&font=montserrat" width="200"/>](https://github.com/ConstructFund/construct-addon-wizard-scaffold/releases/download/sample_addon-0.0.0.0.c3addon/sample_addon-0.0.0.0.c3addon)
+[<img src="https://placehold.co/200x50/4493f8/FFF?text=Download&font=montserrat" width="200"/>](https://github.com/SalmanShhh/Platformer-Navigation-Graph-V2/releases/download/salmanshh_platformer_navigationgraph-0.0.1.0.c3addon/salmanshh_platformer_navigationgraph-0.0.1.0.c3addon)
 <br>
-<sub> [See all releases](https://github.com/ConstructFund/construct-addon-wizard-scaffold/releases) </sub> <br>
+<sub> [See all releases](https://github.com/SalmanShhh/Platformer-Navigation-Graph-V2/releases) </sub> <br>
 
-#### What's New in 0.0.0.0
+#### What's New in 0.0.1.0
 **Added:**
-Initial release.
+Phase 0:
+Create minimal working behavior that loads without errors.
 
 
 <sub>[View full changelog](#changelog)</sub>
 
 ---
-<b><u>Author:</u></b> skymen <br>
+<b><u>Author:</u></b> SalmanShh <br>
 <sub>Made using [CAW](https://marketplace.visualstudio.com/items?itemName=skymen.caw) </sub><br>
 
 ## Table of Contents
@@ -47,15 +48,14 @@ npm run dev
 ## Properties
 | Property Name | Description | Type |
 | --- | --- | --- |
+| Enable Debug Logging | Show console output | check |
+| Cell Size | Grid resolution (32 recommended) | integer |
 
 
 ---
 ## Actions
 | Action | Description | Params
 | --- | --- | --- |
-| Sample Action Combo | This is a sample action | Param1             *(combo)* <br> |
-| Sample Action | This is a sample action | Param1             *(string)* <br> |
-| Sample Action Async | This is a sample action |  |
 | Sample Action | This is a sample action | Param1             *(string)* <br> |
 
 
@@ -63,9 +63,6 @@ npm run dev
 ## Conditions
 | Condition | Description | Params
 | --- | --- | --- |
-| Sample Condition | This is a sample condition | Param1 *(combo)* <br> |
-| Sample Condition | This is a sample condition | Param1 *(string)* <br> |
-| Sample Trigger | This is a sample trigger |  |
 | Sample Condition | This is a sample condition |  |
 
 
@@ -73,13 +70,19 @@ npm run dev
 ## Expressions
 | Expression | Description | Return Type | Params
 | --- | --- | --- | --- |
-| Expression2 | Sample Expression | string |  | 
-| Expression | Sample Expression | number |  | 
 | SampleExpression | This is a sample expression | string |  | 
 
 
 ---
 ## Changelog
+
+### Version 0.0.1.0
+
+**Added:**
+Phase 0:
+Create minimal working behavior that loads without errors.
+
+---
 
 ### Version 0.0.0.0
 

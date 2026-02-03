@@ -3,5 +3,10 @@
     "added": "Initial release.",
     "changed": "",
     "fixed": ""
+  },
+  "0.0.1.0": {
+    "added": "Phase 0:\nCreate minimal working behavior that loads without errors.",
+    "changed": "",
+    "fixed": ""
   }
 }

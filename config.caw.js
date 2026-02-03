@@ -79,45 +79,22 @@ export const info = {
 };
 
 export const properties = [
-  /*
+  {
+    type: PROPERTY_TYPE.CHECK,
+    id: "enable_debug",
+    name: "Enable Debug Logging",
+    desc: "Show console output",
+    options: { initialValue: true }
+  },
   {
     type: PROPERTY_TYPE.INTEGER,
-    id: "property_id",
+    id: "cell_size",
+    name: "Cell Size",
+    desc: "Grid resolution (32 recommended)",
     options: {
-      initialValue: 0,
-      interpolatable: false,
-
-      // minValue: 0, // omit to disable
-      // maxValue: 100, // omit to disable
-
-      // for type combo only
-      // items: [
-      //   {itemId1: "item name1" },
-      //   {itemId2: "item name2" },
-      // ],
-
-      // dragSpeedMultiplier: 1, // omit to disable
-
-      // for type object only
-      // allowedPluginIds: ["Sprite", "<world>"],
-
-      // for type link only
-      // linkCallback: function(instOrObj) {},
-      // linkText: "Link Text",
-      // callbackType:
-      //   "for-each-instance"
-      //   "once-for-type"
-
-      // for type info only
-      // infoCallback: function(inst) {},
-
-      // for type projectfile only (plugins only, Addon SDK v2, r426+)
-      // A dropdown list from which any project file in the project can be chosen.
-      // The property value at runtime is a relative path to fetch the project file from.
-      // filter: ".txt", // optional: filter list by file extension (e.g., ".txt" to only list .txt files)
-    },
-    name: "Property Name",
-    desc: "Property Description",
+      initialValue: 32,
+      minValue: 8,
+      maxValue: 128
+    }
   }
-  */
 ];
