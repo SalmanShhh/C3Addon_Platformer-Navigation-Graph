@@ -8,5 +8,10 @@
     "added": "Phase 0:\nCreate minimal working behavior that loads without errors.",
     "changed": "",
     "fixed": ""
+  },
+  "0.1.0.0": {
+    "added": "WIP Skeleton of Features.\n- Basic Pathfinding.\n- Obstacle Maps.\n- Hazard System.\n- Debugging & Tuning\n- Advanced Usage Features.",
+    "changed": "",
+    "fixed": ""
   }
 }
