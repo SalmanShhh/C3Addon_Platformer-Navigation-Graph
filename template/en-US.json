@@ -359,6 +359,18 @@
             "display-text": "Has active path",
             "description": "Check if the character is currently following a path to a destination. True while moving, false when stopped or path completed.",
             "params": {}
+          },
+          "OnPathFailed": {
+            "list-name": "On path failed",
+            "display-text": "On path failed",
+            "description": "Triggered when pathfinding fails to find a valid route to the target. Use this to handle unreachable destinations.",
+            "params": {}
+          },
+          "OnPathFound": {
+            "list-name": "On path found",
+            "display-text": "On path found",
+            "description": "Triggered when a path is successfully calculated to the target. Use this to react when the AI finds a valid route.",
+            "params": {}
           }
         },
         "expressions": {

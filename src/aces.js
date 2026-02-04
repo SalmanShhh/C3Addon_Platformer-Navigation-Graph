@@ -44,6 +44,24 @@ condition("Pathfinding", "HasPath", {
   return this.aceHasPath();
 });
 
+condition("Pathfinding", "OnPathFound", {
+  listName: "On path found",
+  displayText: "On path found",
+  description: "Triggered when a path is successfully calculated to the target. Use this to react when the AI finds a valid route.",
+  isTrigger: true,
+}, function() {
+  return true;
+});
+
+condition("Pathfinding", "OnPathFailed", {
+  listName: "On path failed",
+  displayText: "On path failed",
+  description: "Triggered when pathfinding fails to find a valid route to the target. Use this to handle unreachable destinations.",
+  isTrigger: true,
+}, function() {
+  return true;
+});
+
 // ════════════════════════════════════════════════════════════
 // CUSTOM OBSTACLE MAP Actions & Conditions
 // ════════════════════════════════════════════════════════════

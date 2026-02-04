@@ -1462,9 +1462,11 @@ export default function(parentClass) {
         this.currentWaypoint = 0;
         this.hasPath = true;
         this.timeAtWaypoint = 0;
+        this._trigger("OnPathFound");
         return true;
       }
       
+      this._trigger("OnPathFailed");
       return false;
     }
 

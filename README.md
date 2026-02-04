@@ -97,6 +97,8 @@ npm run dev
 | On obstacle map created | Triggered when obstacle map is created or regenerated |  |
 | On obstacle map removed | Triggered when obstacle map is cleared |  |
 | Has path | Check if the character is currently following a path to a destination. True while moving, false when stopped or path completed. |  |
+| On path failed | Triggered when pathfinding fails to find a valid route to the target. Use this to handle unreachable destinations. |  |
+| On path found | Triggered when a path is successfully calculated to the target. Use this to react when the AI finds a valid route. |  |
 
 
 ---
