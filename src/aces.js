@@ -9,14 +9,25 @@ const category = "Aces_In_Single_File";
 // ════════════════════════════════════════════════════════════
 action("Pathfinding", "FindPath", {
   listName: "Find path to position",
-  displayText: "Find path to ({0}, {1})",
-  description: "Tell the AI to calculate and follow a path from current position to the target coordinates. Character will automatically move if Auto-Control is enabled.",
+  displayText: "Find path to ({0}, {1}) [Ground correction: {2}]",
+  description: "Tell the AI to calculate and follow a path from current position to the target coordinates. Character will automatically move if Auto-Control is enabled. Enable 'Correct to ground' to automatically snap start/end positions to the nearest walkable ground.",
   params: [
     { id: "x", name: "X", desc: "Target X position in pixels", type: "number", initialValue: "0" },
-    { id: "y", name: "Y", desc: "Target Y position in pixels", type: "number", initialValue: "0" }
+    { id: "y", name: "Y", desc: "Target Y position in pixels", type: "number", initialValue: "0" },
+    {
+      id: "correctToGround",
+      name: "Correct to ground",
+      desc: "Automatically snap start and target positions to the nearest walkable ground position. Useful when positions may be in mid-air.",
+      type: "combo",
+      initialValue: "no",
+      items: [
+        { no: "No" },
+        { yes: "Yes" }
+      ]
+    }
   ]
-}, function(x, y) {
-  this.aceFindPath(x, y);
+}, function(x, y, correctToGround) {
+  this.aceFindPath(x, y, correctToGround === "yes");
 });
 
 action("Pathfinding", "StopPathfinding", {
@@ -62,6 +73,42 @@ condition("Pathfinding", "OnPathFailed", {
   return true;
 });
 
+condition("Pathfinding", "OnGraphGenerated", {
+  listName: "On navigation graph generated",
+  displayText: "On navigation graph generated",
+  description: "Triggered when the navigation graph finishes creating all nodes and their connections. Use this to know when pathfinding is ready to use.",
+  isTrigger: true,
+}, function() {
+  return true;
+});
+
+condition("Pathfinding", "NodeExistsGrid", {
+  listName: "Node exists at grid position",
+  displayText: "Node exists at grid ({0}, {1})",
+  description: "Check if a navigation node exists at the specified grid coordinates. A node exists where the character can stand (empty cell above a solid cell).",
+  isInvertible: true,
+  params: [
+    { id: "gx", name: "Grid X", desc: "Grid X coordinate", type: "number", initialValue: "0" },
+    { id: "gy", name: "Grid Y", desc: "Grid Y coordinate", type: "number", initialValue: "0" }
+  ]
+}, function(gx, gy) {
+  return this.getNode(gx, gy) !== null;
+});
+
+condition("Pathfinding", "NodeExistsWorld", {
+  listName: "Node exists at world position",
+  displayText: "Node exists at ({0}, {1})",
+  description: "Check if a navigation node exists at the specified world position (pixels). Automatically converts to grid coordinates.",
+  isInvertible: true,
+  params: [
+    { id: "x", name: "X", desc: "World X position in pixels", type: "number", initialValue: "0" },
+    { id: "y", name: "Y", desc: "World Y position in pixels", type: "number", initialValue: "0" }
+  ]
+}, function(x, y) {
+  const grid = this.worldToGrid(x, y);
+  return this.getNode(grid.gx, grid.gy) !== null;
+});
+
 // ════════════════════════════════════════════════════════════
 // CUSTOM OBSTACLE MAP Actions & Conditions
 // ════════════════════════════════════════════════════════════
@@ -89,8 +136,8 @@ action("ObstacleMap", "CreateCustomObstacleMap", {
 
 action("ObstacleMap", "SetObstacleCell", {
   listName: "Set obstacle cell",
-  displayText: "Set cell ({0}, {1}) blocked: {2}",
-  description: "Set whether a specific grid cell is blocked",
+  displayText: "Set cell ({0}, {1}) Solid: {2}",
+  description: "Set whether a specific grid cell is Solid/blocked.",
   params: [
     { id: "gx", name: "Grid X", desc: "X coordinate in grid cells", type: "number", initialValue: "0" },
     { id: "gy", name: "Grid Y", desc: "Y coordinate in grid cells", type: "number", initialValue: "0" },
@@ -145,11 +192,32 @@ action("ObstacleMap", "LoadObstacleMapFromJSON", {
 });
 
 action("ObstacleMap", "GenerateNodesFromCustomMap", {
-  listName: "Generate nodes from custom map",
-  displayText: "Generate nodes from custom obstacle map",
-  description: "Build navigation graph from custom obstacle map"
+  listName: "Generate Navigation Graph",
+  displayText: "Generate navigation graph from obstacle map",
+  description: "Build the navigation graph from the current obstacle map. Works with any obstacle map source (custom or from Pathfinding behavior). Call this after modifying the obstacle map manually."
 }, function() {
   this.aceGenerateNodesFromCustomMap();
+});
+
+action("ObstacleMap", "UsePathfindingObstacleMap", {
+  listName: "Use Pathfinding obstacle map",
+  displayText: "Use Pathfinding obstacle map (auto-regenerate: {0})",
+  description: "Get the obstacle map from the Pathfinding behavior. This is the easiest way to set up platformer pathfinding! Just call this once at 'On start of layout'. If the map is already ready, it copies immediately. If not, it waits automatically. Triggers 'On Pathfinding map ready' when done.",
+  params: [
+    {
+      id: "autoRegen",
+      name: "Auto-Regenerate Navigation Graph",
+      desc: "Automatically build navigation graph after copying (recommended: Yes)",
+      type: "combo",
+      initialValue: "yes",
+      items: [
+        { yes: "Yes (recommended)" },
+        { no: "No (manual)" }
+      ]
+    }
+  ]
+}, function(autoRegen) {
+  this.aceUsePathfindingObstacleMap(autoRegen === "yes");
 });
 
 
@@ -169,6 +237,69 @@ condition("ObstacleMap", "OnObstacleMapRemoved", {
   isTrigger: true
 }, function() {
   return true;
+});
+
+condition("ObstacleMap", "OnPathfindingMapReady", {
+  listName: "On Pathfinding map ready",
+  displayText: "On Pathfinding map ready",
+  description: "Triggered when 'Wait for Pathfinding obstacle map' succeeds. This means the obstacle map is copied and ready - you can now use 'Find path to position'!",
+  isTrigger: true
+}, function() {
+  return true;
+});
+
+condition("ObstacleMap", "OnPathfindingMapFailed", {
+  listName: "On Pathfinding map failed",
+  displayText: "On Pathfinding map failed",
+  description: "Triggered if getting the Pathfinding map fails. Usually means no Pathfinding behavior exists on this object.",
+  isTrigger: true
+}, function() {
+  return true;
+});
+
+condition("ObstacleMap", "OnPathfindingMapTimeout", {
+  listName: "On Pathfinding map timeout",
+  displayText: "On Pathfinding map timeout",
+  description: "Triggered if waiting for Pathfinding map takes too long (~10 seconds). Make sure Pathfinding behavior exists and has obstacles to detect.",
+  isTrigger: true
+}, function() {
+  return true;
+});
+
+condition("ObstacleMap", "IsSettingUpPathfinding", {
+  listName: "Is setting up Pathfinding map",
+  displayText: "Is setting up Pathfinding map",
+  description: "True if currently waiting for the Pathfinding behavior's obstacle map to become ready.",
+  isInvertible: true
+}, function() {
+  return this.isWaitingForPathfindingMap;
+});
+
+condition("ObstacleMap", "IsCellSolidGrid", {
+  listName: "Is cell solid (grid)",
+  displayText: "Cell at grid ({0}, {1}) is solid",
+  description: "Check if a specific grid cell is blocked/solid. Use grid coordinates (cell numbers, not pixels).",
+  isInvertible: true,
+  params: [
+    { id: "gx", name: "Grid X", desc: "Grid X coordinate (cell number)", type: "number", initialValue: "0" },
+    { id: "gy", name: "Grid Y", desc: "Grid Y coordinate (cell number)", type: "number", initialValue: "0" }
+  ]
+}, function(gx, gy) {
+  return this.isCellBlocked(gx, gy);
+});
+
+condition("ObstacleMap", "IsCellSolidWorld", {
+  listName: "Is cell solid (world)",
+  displayText: "Cell at ({0}, {1}) is solid",
+  description: "Check if a grid cell at a world position (in pixels) is blocked/solid. Automatically converts pixel coordinates to grid cell.",
+  isInvertible: true,
+  params: [
+    { id: "x", name: "X", desc: "World X position in pixels", type: "number", initialValue: "0" },
+    { id: "y", name: "Y", desc: "World Y position in pixels", type: "number", initialValue: "0" }
+  ]
+}, function(x, y) {
+  const grid = this.worldToGrid(x, y);
+  return this.isCellBlocked(grid.gx, grid.gy);
 });
 
 // ════════════════════════════════════════
@@ -316,6 +447,82 @@ expression("Pathfinding", "PortalCount", {
   return this.aceGetPortalCount();
 });
 
+expression("Pathfinding", "CurrentWaypointX", {
+  returnType: "number",
+  description: "Get the X position of the current waypoint in pixels. Returns -1 if no active path."
+}, function() {
+  return this.aceGetCurrentWaypointX();
+});
+
+expression("Pathfinding", "CurrentWaypointY", {
+  returnType: "number",
+  description: "Get the Y position of the current waypoint in pixels. Returns -1 if no active path."
+}, function() {
+  return this.aceGetCurrentWaypointY();
+});
+
+expression("Pathfinding", "WaypointGridX", {
+  returnType: "number",
+  description: "Get the grid X coordinate of the waypoint at the specified index. Returns -1 if index is invalid.",
+  params: [
+    { id: "index", name: "Index", desc: "Waypoint index (0-based)", type: "number" }
+  ]
+}, function(index) {
+  return this.aceGetWaypointGridX(index);
+});
+
+expression("Pathfinding", "WaypointGridY", {
+  returnType: "number",
+  description: "Get the grid Y coordinate of the waypoint at the specified index. Returns -1 if index is invalid.",
+  params: [
+    { id: "index", name: "Index", desc: "Waypoint index (0-based)", type: "number" }
+  ]
+}, function(index) {
+  return this.aceGetWaypointGridY(index);
+});
+
+expression("Pathfinding", "WaypointX", {
+  returnType: "number",
+  description: "Get the world X position (pixels) of the waypoint at the specified index. Returns -1 if index is invalid.",
+  params: [
+    { id: "index", name: "Index", desc: "Waypoint index (0-based)", type: "number" }
+  ]
+}, function(index) {
+  return this.aceGetWaypointX(index);
+});
+
+expression("Pathfinding", "WaypointY", {
+  returnType: "number",
+  description: "Get the world Y position (pixels) of the waypoint at the specified index. Returns -1 if index is invalid.",
+  params: [
+    { id: "index", name: "Index", desc: "Waypoint index (0-based)", type: "number" }
+  ]
+}, function(index) {
+  return this.aceGetWaypointY(index);
+});
+
+expression("Pathfinding", "NodeWorldX", {
+  returnType: "number",
+  description: "Get the pixel X position of a node at grid coordinates. Returns -1 if no node exists at that position.",
+  params: [
+    { id: "gx", name: "Grid X", desc: "Grid X coordinate", type: "number" },
+    { id: "gy", name: "Grid Y", desc: "Grid Y coordinate", type: "number" }
+  ]
+}, function(gx, gy) {
+  return this.aceGetNodeWorldX(gx, gy);
+});
+
+expression("Pathfinding", "NodeWorldY", {
+  returnType: "number",
+  description: "Get the pixel Y position of a node at grid coordinates. Returns -1 if no node exists at that position.",
+  params: [
+    { id: "gx", name: "Grid X", desc: "Grid X coordinate", type: "number" },
+    { id: "gy", name: "Grid Y", desc: "Grid Y coordinate", type: "number" }
+  ]
+}, function(gx, gy) {
+  return this.aceGetNodeWorldY(gx, gy);
+});
+
 
 // ════════════════════════════════════════════════════════════
 // EXPRESSIONS - OBSTACLE MAP
@@ -340,6 +547,13 @@ expression("ObstacleMap", "GridWidth", {
   description: "Get the width of the navigation grid in cells (not pixels). Multiply by cell size to get pixel width."
 }, function() {
   return this.aceGetGridWidth();
+});
+
+expression("ObstacleMap", "GridCellSize", {
+  returnType: "number",
+  description: "Get the grid cell size in pixels."
+}, function() {
+  return this.cellSize;
 });
 
 expression("ObstacleMap", "GridHeight", {
@@ -367,7 +581,7 @@ expression("ObstacleMap", "WorldToGridX", {
     { id: "x", desc: "World X position in pixels to convert", name: "X", type: "number" }
   ]
 }, function(x) {
-  const y = this._inst.y;
+  const y = this.instance.y;
   const grid = this.worldToGrid(x, y);
   return grid.gx;
 });
@@ -379,9 +593,16 @@ expression("ObstacleMap", "WorldToGridY", {
     { id: "y", desc: "Y Position to convert to grid Y position", name: "Y", type: "number" }
   ]
 }, function(y) {
-  const x = this._inst.x;
+  const x = this.instance.x;
   const grid = this.worldToGrid(x, y);
   return grid.gy;
+});
+
+expression("ObstacleMap", "WaitTickCount", {
+  returnType: "number",
+  description: "Get how many ticks spent waiting for Pathfinding map. Useful for debugging if it's taking too long."
+}, function() {
+  return this.waitTickCount || 0;
 });
 
 // ════════════════════════════════════════════════════════════

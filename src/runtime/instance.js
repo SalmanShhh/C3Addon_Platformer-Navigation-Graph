@@ -1,3 +1,6 @@
+import { id, addonType, name } from "../../config.caw.js";
+import AddonTypeMap from "../../template/addonTypeMap.js";
+
 export default function(parentClass) {
 
   // ════════════════════════════════════════════════════════════
@@ -72,16 +75,16 @@ export default function(parentClass) {
       this.cellSize = props[1];
       this.characterHeight = props[2];
       this.maxSearchNodes = props[3];
-      this.maxJumpHeight = props[4];
-      this.maxJumpDistance = props[5];
-      this.maxFallDistance = props[6];
-      this.autoControl = props[7];
-      this.graphMode = props[8];
-      this.enablePortals = props[9];
-      this.smoothPaths = props[10];
-      this.maxWaypointTime = props[11];
-      this.setupPreset = props[12];
-      this.enableHazards = props[13]
+      this.setupPreset = props[4];
+      this.maxJumpHeight = props[5];
+      this.maxJumpDistance = props[6];
+      this.maxFallDistance = props[7];
+      this.autoControl = props[8];
+      this.graphMode = props[9];
+      this.enablePortals = props[10];
+      this.smoothPaths = props[11];
+      this.maxWaypointTime = props[12];
+      this.enableHazards = props[13];
       
       if (this.enableDebug) {
         console.log("╔═══════════════════════════════════════╗");
@@ -93,8 +96,8 @@ export default function(parentClass) {
       this._initializeState();
 
       // Get behaviors and read properties
-      this.platformBehavior = this._getPlatformBehavior();
-      this.pathfindingBehavior = this._getPathfindingBehavior();
+      this.platformBehavior = null;
+      this.pathfindingBehavior = null;
       this._readPlatformProperties();
       
       // Apply preset
@@ -147,6 +150,7 @@ export default function(parentClass) {
         gravity: 1500,
         maxFallSpeed: 1000
       };
+      
 
        // Hazards ⭐ NEW
       this.hazards = new Map();
@@ -155,7 +159,16 @@ export default function(parentClass) {
       // Portals
       this.portals = new Map();
       this.nextPortalId = 1;
-      
+
+      // Pathfinding map waiting state
+      this.isWaitingForPathfindingMap = false;
+      this.waitTickCount = 0;
+      this.autoRegenOnReady = true;
+      this.maxWaitTicks = 600; // ~10 seconds at 60fps
+
+      // Events
+      this.events = {};
+
       // Constants
       this.WALK_COST = 1.0;
       this.JUMP_COST = 1.5;
@@ -193,12 +206,31 @@ export default function(parentClass) {
 
     _tick() {
       const dt = this.instance.dt;
-      
+
+      // Try to get behaviors if not already set (may not be available in constructor)
+      if (!this.platformBehavior) {
+        this.platformBehavior = this._getPlatformBehavior();
+        if (this.platformBehavior) {
+          this._readPlatformProperties();
+          if (this.setupPreset !== "custom") {
+            this._applyPreset();
+          }
+        }
+      }
+      if (!this.pathfindingBehavior) {
+        this.pathfindingBehavior = this._getPathfindingBehavior();
+      }
+
+      // Check if waiting for Pathfinding map
+      if (this.isWaitingForPathfindingMap) {
+        this._checkPathfindingMapReady();
+      }
+
       // Generate graph if needed
       if (this._needsGraphRegeneration()) {
         this._generateGraph();
       }
-      
+
       // Follow path
       if (this.hasPath) {
         this._followPath(dt);
@@ -222,6 +254,48 @@ export default function(parentClass) {
 
     }
 
+    /// ════════════════════════════════════════
+    /// Make sure trigger condition events work.
+    // ════════════════════════════════════════
+
+    _trigger(method) {
+      this.dispatch(method);
+      super._trigger(self.C3[AddonTypeMap[addonType]][id].Cnds[method]);
+    }
+
+    on(tag, callback, options) {
+      if (!this.events[tag]) {
+        this.events[tag] = [];
+      }
+      this.events[tag].push({ callback, options });
+    }
+
+    off(tag, callback) {
+      if (this.events[tag]) {
+        this.events[tag] = this.events[tag].filter(
+          (event) => event.callback !== callback
+        );
+      }
+    }
+
+    dispatch(tag) {
+      if (this.events[tag]) {
+        this.events[tag].forEach((event) => {
+          if (event.options && event.options.params) {
+            const fn = self.C3[AddonTypeMap[addonType]][id].Cnds[tag];
+            if (fn && !fn.call(this, ...event.options.params)) {
+              return;
+            }
+          }
+          event.callback();
+          if (event.options && event.options.once) {
+            this.off(tag, event.callback);
+          }
+        });
+      }
+    }
+
+
 
     // ════════════════════════════════════════
     // BEHAVIOR DETECTION & PROPERTY READING
@@ -229,7 +303,7 @@ export default function(parentClass) {
 
     _getPlatformBehavior(behaviorName) {
       // failback to common names if none provided
-      behaviorName = behaviorName || "Platform" ;
+      behaviorName = behaviorName || "Platform" || "Platformer" || "PlatformerObject" || "PlatformBehavior" || "PlatformerBehavior" || "PlatformMovement" || "PlatformerMovement";
 
       // commented out debug check.
       if(!this.instance || !this.instance.behaviors){
@@ -237,21 +311,27 @@ export default function(parentClass) {
         return null;
       }
       // returns the behavior if found.
+      this.log("Found Platform behavior", { behaviorName, found: !!this.instance.behaviors[behaviorName] });
+      if(!this.instance.behaviors[behaviorName].isEnabled){
+        this.log("Platform behavior is disabled - enable it so the addon can work properly.");
+      }
       return this.instance.behaviors[behaviorName] || null;
     }
 
-    _getPathfindingBehavior(behavior) {
-
+    _getPathfindingBehavior(behaviorName) {
       // failback to common names if none provided
-      behaviorName = behaviorName || "Pathfinding" ;
-      if(!this.instance || !this.instance.behaviors) {
+      behaviorName = behaviorName || "Pathfinding" || "Pathfind";
+      if (!this.instance || !this.instance.behaviors) {
         // Log error only if debug enabled.
         this.error("[PlatformNavGraph] Instance or behaviors not found (looking for Pathfinding Behavior)  ");
         return null;
-        }
-        
+      }
+      this.log("Found Pathfinding Behaviour", { behaviorName, found: !!this.instance.behaviors[behaviorName] });
+      if(this.instance.behaviors[behaviorName] && !this.instance.behaviors[behaviorName].isEnabled){
+        this.log("Pathfinding behavior is disabled - enable it or use custom obstacle map ACEs for the addon to work properly.");
+      }
       // returns the behavior if found.
-      return this.instance.behaviors[behaviorName] || null; 
+      return this.instance.behaviors[behaviorName] || null;
     }
 
     _readPlatformProperties() {
@@ -457,22 +537,23 @@ export default function(parentClass) {
         this.error("2. Use custom obstacle map ACEs");
         this.error("═══════════════════════════════════════");
         return;
-      } this.log("Pathfinding behavior found, generating obstacle map...");
-      
+      }
+
+      this.log("Pathfinding behavior found, generating obstacle map...");
+
       // Get layout dimensions
       const layout = this.instance.layer.layout;
       this.gridWidth = Math.ceil(layout.width / this.cellSize);
       this.gridHeight = Math.ceil(layout.height / this.cellSize);
-      
+
       this.log("Grid dimensions", {
         width: this.gridWidth,
         height: this.gridHeight
       });
-      
-      // Force Pathfinding to regenerate
-      pathfinding.regenerateObstacleMap();
-      
-      // Copy obstacle map
+
+      // Copy obstacle map from Pathfinding behavior
+      // Note: The Pathfinding behavior's map is generated automatically by C3
+      // and accessed via pathfinding.map - there's no regenerate method in the API
       this._copyObstacleMapFromPathfinding(pathfinding);
       
       this.obstacleMapSource = "pathfinding";
@@ -667,8 +748,90 @@ export default function(parentClass) {
       this._connectAllPortals();
       
       this._markGraphAsGenerated();
-      
+
       this.log("Node generation complete!", { nodes: graph.size });
+    }
+
+    // ════════════════════════════════════════
+    // USE PATHFINDING OBSTACLE MAP
+    // ════════════════════════════════════════
+
+    aceUsePathfindingObstacleMap(autoRegen) {
+      this.autoRegenOnReady = autoRegen;
+
+      // Check if Pathfinding behavior exists
+      if (!this.pathfindingBehavior) {
+        this.error("No Pathfinding behavior found on this object!");
+        this._triggerPathfindingMapFailed();
+        return;
+      }
+
+      // Try to get the map immediately
+      const pfMap = this.pathfindingBehavior.map;
+      if (pfMap && pfMap.widthInCells > 0 && pfMap.heightInCells > 0) {
+        // Map is already ready - copy it immediately
+        this._copyFromPathfindingBehavior(autoRegen);
+      } else {
+        // Map not ready yet - start waiting
+        this.isWaitingForPathfindingMap = true;
+        this.waitTickCount = 0;
+        this.log("Waiting for Pathfinding obstacle map...");
+      }
+    }
+
+    _checkPathfindingMapReady() {
+      this.waitTickCount++;
+
+      // Check for timeout
+      if (this.waitTickCount > this.maxWaitTicks) {
+        this.isWaitingForPathfindingMap = false;
+        this.warn("Timeout waiting for Pathfinding map");
+        this._triggerPathfindingMapTimeout();
+        return;
+      }
+
+      // Check if map is ready
+      const pfMap = this.pathfindingBehavior?.map;
+      if (pfMap && pfMap.widthInCells > 0 && pfMap.heightInCells > 0) {
+        this.isWaitingForPathfindingMap = false;
+        this._copyFromPathfindingBehavior(this.autoRegenOnReady);
+      }
+    }
+
+    _copyFromPathfindingBehavior(autoRegen) {
+      // Get layout dimensions
+      const layout = this.instance.layer.layout;
+      this.gridWidth = Math.ceil(layout.width / this.cellSize);
+      this.gridHeight = Math.ceil(layout.height / this.cellSize);
+
+      this.log("Copying obstacle map from Pathfinding...", {
+        gridWidth: this.gridWidth,
+        gridHeight: this.gridHeight
+      });
+
+      // Copy the obstacle map
+      this._copyObstacleMapFromPathfinding(this.pathfindingBehavior);
+
+      this.obstacleMapSource = "pathfinding";
+      this._triggerObstacleMapCreated();
+      this._triggerPathfindingMapReady();
+
+      // Auto-regenerate if requested
+      if (autoRegen) {
+        const graph = this._getNavigationGraph();
+        graph.clear();
+
+        this._generateNodes();
+        this._connectWalk();
+        this._connectJump();
+        this._connectFall();
+        this._connectAllPortals();
+        this._updateHazardCosts();
+
+        this._markGraphAsGenerated();
+
+        this.log("Navigation graph generated!", { nodes: graph.size });
+      }
     }
 
     // ════════════════════════════════════════
@@ -681,6 +844,22 @@ export default function(parentClass) {
 
     _triggerObstacleMapRemoved() {
       this._trigger("OnObstacleMapRemoved");
+    }
+
+    _triggerGraphGenerated() {
+      this._trigger("OnGraphGenerated");
+    }
+
+    _triggerPathfindingMapReady() {
+      this._trigger("OnPathfindingMapReady");
+    }
+
+    _triggerPathfindingMapFailed() {
+      this._trigger("OnPathfindingMapFailed");
+    }
+
+    _triggerPathfindingMapTimeout() {
+      this._trigger("OnPathfindingMapTimeout");
     }
 
 
@@ -1193,6 +1372,9 @@ export default function(parentClass) {
         console.log(`║  Time:  ${elapsed.toFixed(1).padStart(5)}ms                       ║`);
         console.log("╚═══════════════════════════════════════╝");
       }
+
+      // Trigger event to notify graph is ready
+      this._triggerGraphGenerated();
     }
 
     // ════════════════════════════════════════
@@ -1310,6 +1492,23 @@ export default function(parentClass) {
       return null;
     }
 
+    /**
+     * Correct a world position to the nearest walkable ground position.
+     * Searches in expanding rings around the position to find a valid node.
+     * @param {number} x - World X coordinate
+     * @param {number} y - World Y coordinate
+     * @returns {{x: number, y: number}} Corrected world position
+     */
+    _correctToGround(x, y) {
+      const node = this._findNearestNode(x, y);
+      if (node) {
+        return { x: node.x, y: node.y };
+      }
+      // No node found - return original position
+      this.warn(`Could not find ground near (${Math.round(x)}, ${Math.round(y)})`);
+      return { x, y };
+    }
+
     _heuristic(nodeA, nodeB) {
       const dx = Math.abs(nodeB.x - nodeA.x);
       const dy = nodeA.y - nodeB.y;
@@ -1410,7 +1609,7 @@ export default function(parentClass) {
         return;
       }
       
-      const dist = this.distance(this._inst.x, this._inst.y, waypoint.x, waypoint.y);
+      const dist = this.distance(this.instance.x, this.instance.y, waypoint.x, waypoint.y);
       
       if (dist < 16) {
         this.currentWaypoint++;
@@ -1432,21 +1631,21 @@ export default function(parentClass) {
       } else if (action === "walk_right") {
         this.platformBehavior.simulateControl("right");
       } else if (action === "jump") {
-        if (targetX < this._inst.x) {
+        if (targetX < this.instance.x) {
           this.platformBehavior.simulateControl("left");
         } else {
           this.platformBehavior.simulateControl("right");
         }
         this.platformBehavior.simulateControl("jump");
       } else if (action === "fall") {
-        if (targetX < this._inst.x) {
+        if (targetX < this.instance.x) {
           this.platformBehavior.simulateControl("left");
-        } else if (targetX > this._inst.x) {
+        } else if (targetX > this.instance.x) {
           this.platformBehavior.simulateControl("right");
         }
       } else if (action.includes("portal")) {
-        this._inst.x = targetX;
-        this._inst.y = targetY;
+        this.instance.x = targetX;
+        this.instance.y = targetY;
       }
     }
 
@@ -1454,9 +1653,26 @@ export default function(parentClass) {
     // PUBLIC API (Called from ACEs)
     // ════════════════════════════════════════
 
-    aceFindPath(targetX, targetY) {
-      const path = this.findPath(this._inst.x, this._inst.y, targetX, targetY);
-      
+    aceFindPath(targetX, targetY, correctToGround = false) {
+      let startX = this.instance.x;
+      let startY = this.instance.y;
+
+      // Apply ground correction if requested
+      if (correctToGround) {
+        const correctedStart = this._correctToGround(startX, startY);
+        const correctedTarget = this._correctToGround(targetX, targetY);
+        startX = correctedStart.x;
+        startY = correctedStart.y;
+        targetX = correctedTarget.x;
+        targetY = correctedTarget.y;
+        this.log("Ground correction applied", {
+          start: [Math.round(startX), Math.round(startY)],
+          target: [Math.round(targetX), Math.round(targetY)]
+        });
+      }
+
+      const path = this.findPath(startX, startY, targetX, targetY);
+
       if (path) {
         this.currentPath = path;
         this.currentWaypoint = 0;
@@ -1543,6 +1759,63 @@ export default function(parentClass) {
       return this.isCellBlocked(gx, gy) ? 1 : 0;
     }
 
+    aceGetCurrentWaypointX() {
+      if (!this.hasPath || this.currentWaypoint >= this.currentPath.length) {
+        return -1;
+      }
+      return this.currentPath[this.currentWaypoint].x;
+    }
+
+    aceGetCurrentWaypointY() {
+      if (!this.hasPath || this.currentWaypoint >= this.currentPath.length) {
+        return -1;
+      }
+      return this.currentPath[this.currentWaypoint].y;
+    }
+
+    aceGetWaypointGridX(index) {
+      if (!this.hasPath || index < 0 || index >= this.currentPath.length) {
+        return -1;
+      }
+      return this.currentPath[index].node.gx;
+    }
+
+    aceGetWaypointGridY(index) {
+      if (!this.hasPath || index < 0 || index >= this.currentPath.length) {
+        return -1;
+      }
+      return this.currentPath[index].node.gy;
+    }
+
+    aceGetWaypointX(index) {
+      if (!this.hasPath || index < 0 || index >= this.currentPath.length) {
+        return -1;
+      }
+      return this.currentPath[index].x;
+    }
+
+    aceGetWaypointY(index) {
+      if (!this.hasPath || index < 0 || index >= this.currentPath.length) {
+        return -1;
+      }
+      return this.currentPath[index].y;
+    }
+
+    aceGetNodeWorldX(gx, gy) {
+      const node = this.getNode(gx, gy);
+      if (!node) {
+        return -1;
+      }
+      return node.x;
+    }
+
+    aceGetNodeWorldY(gx, gy) {
+      const node = this.getNode(gx, gy);
+      if (!node) {
+        return -1;
+      }
+      return node.y;
+    }
 
 
   };

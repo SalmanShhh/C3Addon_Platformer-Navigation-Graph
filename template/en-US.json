@@ -31,6 +31,16 @@
             "name": "Max Search Nodes",
             "desc": "Maximum pathfinding effort before giving up. Higher = finds paths in larger levels but may cause lag. Lower = faster but may fail on complex paths."
           },
+          "setup_preset": {
+            "name": "Setup Preset",
+            "desc": "Pre-configured jump/fall settings. Auto: detects from Platform behavior. Beginner: short jumps, safe falls. Intermediate: moderate mobility. Advanced: maximum jump/fall distances for complex levels.",
+            "items": {
+              "auto": "Auto (detect from Platform behavior)",
+              "beginner": "Beginner (short jumps, safe falls)",
+              "intermediate": "Intermediate (moderate mobility)",
+              "advanced": "Advanced (maximum distances)"
+            }
+          },
           "max_jump_height": {
             "name": "Max Jump Height",
             "desc": "Highest platform your character can jump to reach (in pixels). Should match your Platform behavior's jump strength. AI will only attempt jumps within this limit."
@@ -66,16 +76,6 @@
           "max_waypoint_time": {
             "name": "Max Waypoint Time",
             "desc": "How long (in seconds) AI tries to reach each waypoint before giving up and recalculating path. Prevents infinite loops when stuck."
-          },
-          "setup_preset": {
-            "name": "Setup Preset",
-            "desc": "Pre-configured jump/fall settings. Auto: detects from Platform behavior. Beginner: short jumps, safe falls. Intermediate: moderate mobility. Advanced: maximum jump/fall distances for complex levels.",
-            "items": {
-              "auto": "Auto (detect from Platform behavior)",
-              "beginner": "Beginner (short jumps, safe falls)",
-              "intermediate": "Intermediate (moderate mobility)",
-              "advanced": "Advanced (maximum distances)"
-            }
           },
           "enable_hazards": {
             "name": "Enable Hazard Avoidance",
@@ -199,9 +199,9 @@
             }
           },
           "GenerateNodesFromCustomMap": {
-            "list-name": "Generate nodes from custom map",
-            "display-text": "Generate nodes from custom obstacle map",
-            "description": "Build navigation graph from custom obstacle map",
+            "list-name": "Generate Navigation Graph",
+            "display-text": "Generate navigation graph from obstacle map",
+            "description": "Build the navigation graph from the current obstacle map. Works with any obstacle map source (custom or from Pathfinding behavior). Call this after modifying the obstacle map manually.",
             "params": {}
           },
           "LoadObstacleMapFromJSON": {
@@ -217,8 +217,8 @@
           },
           "SetObstacleCell": {
             "list-name": "Set obstacle cell",
-            "display-text": "Set cell ({0}, {1}) blocked: {2}",
-            "description": "Set whether a specific grid cell is blocked",
+            "display-text": "Set cell ({0}, {1}) Solid: {2}",
+            "description": "Set whether a specific grid cell is Solid/blocked.",
             "params": {
               "gx": {
                 "name": "Grid X",
@@ -261,10 +261,25 @@
               }
             }
           },
+          "UsePathfindingObstacleMap": {
+            "list-name": "Use Pathfinding obstacle map",
+            "display-text": "Use Pathfinding obstacle map (auto-regenerate: {0})",
+            "description": "Get the obstacle map from the Pathfinding behavior. This is the easiest way to set up platformer pathfinding! Just call this once at 'On start of layout'. If the map is already ready, it copies immediately. If not, it waits automatically. Triggers 'On Pathfinding map ready' when done.",
+            "params": {
+              "autoRegen": {
+                "name": "Auto-Regenerate Navigation Graph",
+                "desc": "Automatically build navigation graph after copying (recommended: Yes)",
+                "items": {
+                  "yes": "Yes (recommended)",
+                  "no": "No (manual)"
+                }
+              }
+            }
+          },
           "FindPath": {
             "list-name": "Find path to position",
-            "display-text": "Find path to ({0}, {1})",
-            "description": "Tell the AI to calculate and follow a path from current position to the target coordinates. Character will automatically move if Auto-Control is enabled.",
+            "display-text": "Find path to ({0}, {1}) [Ground correction: {2}]",
+            "description": "Tell the AI to calculate and follow a path from current position to the target coordinates. Character will automatically move if Auto-Control is enabled. Enable 'Correct to ground' to automatically snap start/end positions to the nearest walkable ground.",
             "params": {
               "x": {
                 "name": "X",
@@ -273,6 +288,14 @@
               "y": {
                 "name": "Y",
                 "desc": "Target Y position in pixels"
+              },
+              "correctToGround": {
+                "name": "Correct to ground",
+                "desc": "Automatically snap start and target positions to the nearest walkable ground position. Useful when positions may be in mid-air.",
+                "items": {
+                  "no": "No",
+                  "yes": "Yes"
+                }
               }
             }
           },
@@ -342,6 +365,42 @@
               }
             }
           },
+          "IsCellSolidGrid": {
+            "list-name": "Is cell solid (grid)",
+            "display-text": "Cell at grid ({0}, {1}) is solid",
+            "description": "Check if a specific grid cell is blocked/solid. Use grid coordinates (cell numbers, not pixels).",
+            "params": {
+              "gx": {
+                "name": "Grid X",
+                "desc": "Grid X coordinate (cell number)"
+              },
+              "gy": {
+                "name": "Grid Y",
+                "desc": "Grid Y coordinate (cell number)"
+              }
+            }
+          },
+          "IsCellSolidWorld": {
+            "list-name": "Is cell solid (world)",
+            "display-text": "Cell at ({0}, {1}) is solid",
+            "description": "Check if a grid cell at a world position (in pixels) is blocked/solid. Automatically converts pixel coordinates to grid cell.",
+            "params": {
+              "x": {
+                "name": "X",
+                "desc": "World X position in pixels"
+              },
+              "y": {
+                "name": "Y",
+                "desc": "World Y position in pixels"
+              }
+            }
+          },
+          "IsSettingUpPathfinding": {
+            "list-name": "Is setting up Pathfinding map",
+            "display-text": "Is setting up Pathfinding map",
+            "description": "True if currently waiting for the Pathfinding behavior's obstacle map to become ready.",
+            "params": {}
+          },
           "OnObstacleMapCreated": {
             "list-name": "On obstacle map created",
             "display-text": "On obstacle map created",
@@ -354,10 +413,64 @@
             "description": "Triggered when obstacle map is cleared",
             "params": {}
           },
+          "OnPathfindingMapFailed": {
+            "list-name": "On Pathfinding map failed",
+            "display-text": "On Pathfinding map failed",
+            "description": "Triggered if getting the Pathfinding map fails. Usually means no Pathfinding behavior exists on this object.",
+            "params": {}
+          },
+          "OnPathfindingMapReady": {
+            "list-name": "On Pathfinding map ready",
+            "display-text": "On Pathfinding map ready",
+            "description": "Triggered when 'Wait for Pathfinding obstacle map' succeeds. This means the obstacle map is copied and ready - you can now use 'Find path to position'!",
+            "params": {}
+          },
+          "OnPathfindingMapTimeout": {
+            "list-name": "On Pathfinding map timeout",
+            "display-text": "On Pathfinding map timeout",
+            "description": "Triggered if waiting for Pathfinding map takes too long (~10 seconds). Make sure Pathfinding behavior exists and has obstacles to detect.",
+            "params": {}
+          },
           "HasPath": {
             "list-name": "Has path",
             "display-text": "Has active path",
             "description": "Check if the character is currently following a path to a destination. True while moving, false when stopped or path completed.",
+            "params": {}
+          },
+          "NodeExistsGrid": {
+            "list-name": "Node exists at grid position",
+            "display-text": "Node exists at grid ({0}, {1})",
+            "description": "Check if a navigation node exists at the specified grid coordinates. A node exists where the character can stand (empty cell above a solid cell).",
+            "params": {
+              "gx": {
+                "name": "Grid X",
+                "desc": "Grid X coordinate"
+              },
+              "gy": {
+                "name": "Grid Y",
+                "desc": "Grid Y coordinate"
+              }
+            }
+          },
+          "NodeExistsWorld": {
+            "list-name": "Node exists at world position",
+            "display-text": "Node exists at ({0}, {1})",
+            "description": "Check if a navigation node exists at the specified world position (pixels). Automatically converts to grid coordinates.",
+            "params": {
+              "x": {
+                "name": "X",
+                "desc": "World X position in pixels"
+              },
+              "y": {
+                "name": "Y",
+                "desc": "World Y position in pixels"
+              }
+            }
+          },
+          "OnGraphGenerated": {
+            "list-name": "On navigation graph generated",
+            "display-text": "On navigation graph generated",
+            "description": "Triggered when the navigation graph finishes creating all nodes and their connections. Use this to know when pathfinding is ready to use.",
             "params": {}
           },
           "OnPathFailed": {
@@ -427,6 +540,11 @@
               }
             }
           },
+          "GridCellSize": {
+            "translated-name": "GridCellSize",
+            "description": "Get the grid cell size in pixels.",
+            "params": {}
+          },
           "GridHeight": {
             "translated-name": "GridHeight",
             "description": "Get the height of the navigation grid in cells (not pixels). Multiply by cell size to get pixel height.",
@@ -461,6 +579,11 @@
             "description": "Get how the obstacle map was created. Returns 'pathfinding' (from Pathfinding behavior), 'custom' (manually set), or 'none' (not generated yet).",
             "params": {}
           },
+          "WaitTickCount": {
+            "translated-name": "WaitTickCount",
+            "description": "Get how many ticks spent waiting for Pathfinding map. Useful for debugging if it's taking too long.",
+            "params": {}
+          },
           "WorldToGridX": {
             "translated-name": "WorldToGridX",
             "description": "Convert a world X coordinate (in pixels) to grid X coordinate. Use this to check which cell a position is in.",
@@ -486,10 +609,48 @@
             "description": "Current waypoint index (0-based)",
             "params": {}
           },
+          "CurrentWaypointX": {
+            "translated-name": "CurrentWaypointX",
+            "description": "Get the X position of the current waypoint in pixels. Returns -1 if no active path.",
+            "params": {}
+          },
+          "CurrentWaypointY": {
+            "translated-name": "CurrentWaypointY",
+            "description": "Get the Y position of the current waypoint in pixels. Returns -1 if no active path.",
+            "params": {}
+          },
           "NodeCount": {
             "translated-name": "NodeCount",
             "description": "Total number of navigation nodes",
             "params": {}
+          },
+          "NodeWorldX": {
+            "translated-name": "NodeWorldX",
+            "description": "Get the pixel X position of a node at grid coordinates. Returns -1 if no node exists at that position.",
+            "params": {
+              "gx": {
+                "name": "Grid X",
+                "desc": "Grid X coordinate"
+              },
+              "gy": {
+                "name": "Grid Y",
+                "desc": "Grid Y coordinate"
+              }
+            }
+          },
+          "NodeWorldY": {
+            "translated-name": "NodeWorldY",
+            "description": "Get the pixel Y position of a node at grid coordinates. Returns -1 if no node exists at that position.",
+            "params": {
+              "gx": {
+                "name": "Grid X",
+                "desc": "Grid X coordinate"
+              },
+              "gy": {
+                "name": "Grid Y",
+                "desc": "Grid Y coordinate"
+              }
+            }
           },
           "PathLength": {
             "translated-name": "PathLength",
@@ -500,6 +661,46 @@
             "translated-name": "PortalCount",
             "description": "Total number of portals",
             "params": {}
+          },
+          "WaypointGridX": {
+            "translated-name": "WaypointGridX",
+            "description": "Get the grid X coordinate of the waypoint at the specified index. Returns -1 if index is invalid.",
+            "params": {
+              "index": {
+                "name": "Index",
+                "desc": "Waypoint index (0-based)"
+              }
+            }
+          },
+          "WaypointGridY": {
+            "translated-name": "WaypointGridY",
+            "description": "Get the grid Y coordinate of the waypoint at the specified index. Returns -1 if index is invalid.",
+            "params": {
+              "index": {
+                "name": "Index",
+                "desc": "Waypoint index (0-based)"
+              }
+            }
+          },
+          "WaypointX": {
+            "translated-name": "WaypointX",
+            "description": "Get the world X position (pixels) of the waypoint at the specified index. Returns -1 if index is invalid.",
+            "params": {
+              "index": {
+                "name": "Index",
+                "desc": "Waypoint index (0-based)"
+              }
+            }
+          },
+          "WaypointY": {
+            "translated-name": "WaypointY",
+            "description": "Get the world Y position (pixels) of the waypoint at the specified index. Returns -1 if index is invalid.",
+            "params": {
+              "index": {
+                "name": "Index",
+                "desc": "Waypoint index (0-based)"
+              }
+            }
           }
         }
       }
