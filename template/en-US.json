@@ -8,7 +8,10 @@
         "description": "AI pathfinding for platformer games with jumping and falling",
         "help-url": "https://www.construct.net",
         "aceCategories": {
+          "AdvancedTuning": "AdvancedTuning",
+          "GraphData": "GraphData",
           "Hazards": "Hazards",
+          "MultiAgent": "MultiAgent",
           "ObstacleMap": "ObstacleMap",
           "Pathfinding": "Pathfinding",
           "Portals": "Portals",
@@ -20,8 +23,8 @@
             "desc": "Show helpful debug messages in browser console (F12) to troubleshoot pathfinding issues. Disable for better performance in final game."
           },
           "cell_size": {
-            "name": "Cell Size",
-            "desc": "Size of each grid square in pixels. MUST match the Cell Size in your Pathfinding behavior! Smaller = more precise paths but slower performance."
+            "name": "Tile Size",
+            "desc": "Size of each grid tile in pixels. MUST match the Cell Size in your Pathfinding behavior! Smaller = more precise paths but slower performance."
           },
           "character_height": {
             "name": "Character Height",
@@ -43,15 +46,15 @@
           },
           "max_jump_height": {
             "name": "Max Jump Height",
-            "desc": "Highest platform your character can jump to reach (in pixels). Should match your Platform behavior's jump strength. AI will only attempt jumps within this limit."
+            "desc": "Highest platform your character can jump to reach (in pixels). Automatically calculated from Platform behavior's jump strength and gravity when Setup Preset is 'Auto'. Only used as a manual override with other presets."
           },
           "max_jump_distance": {
             "name": "Max Jump Distance",
-            "desc": "Farthest gap your character can jump across (in pixels). Should match your character's movement speed and jump duration. AI won't attempt longer jumps."
+            "desc": "Farthest gap your character can jump across (in pixels). Automatically calculated from Platform behavior's max speed and jump duration when Setup Preset is 'Auto'. Only used as a manual override with other presets."
           },
           "max_fall_distance": {
             "name": "Max Fall Distance",
-            "desc": "Maximum height your character can safely fall from (in pixels). AI will avoid longer drops that might cause damage or death in your game."
+            "desc": "Maximum height your character can safely fall from (in pixels). Automatically calculated from Platform behavior's gravity and max fall speed when Setup Preset is 'Auto'. Only used as a manual override with other presets."
           },
           "auto_control": {
             "name": "Auto-Control Movement",
@@ -80,206 +83,334 @@
           "enable_hazards": {
             "name": "Enable Hazard Avoidance",
             "desc": "AI will try to avoid dangerous areas like spikes, fire, or enemy patrol zones. Makes pathfinding slower but smarter."
+          },
+          "coyote_time": {
+            "name": "Coyote Time",
+            "desc": "Seconds after walking off a ledge where a jump can still be executed. Allows AI to walk off edges and jump mid-air for greater reach. 0 = disabled."
+          },
+          "ledge_restriction": {
+            "name": "Ledge Restriction",
+            "desc": "When enabled, auto-movement prevents the AI from walking off platform edges. Only affects auto-control movement, not the navigation graph itself."
+          },
+          "ledge_leniency": {
+            "name": "Ledge Leniency",
+            "desc": "Pixels of tolerance past a ledge edge before stopping (0 = strict, stays on platform). Only used when Ledge Restriction is enabled."
+          },
+          "repath_threshold": {
+            "name": "Re-Path Threshold",
+            "desc": "How many tiles the character can deviate from its path before automatically recalculating. Useful when the character gets knocked off course. 0 = disabled."
+          },
+          "hazard_radius": {
+            "name": "Hazard Radius",
+            "desc": "Tile radius for hazard cost falloff buffer zone. Nearby tiles within this radius of a hazard get cost penalties. 0 = no buffer, only exact hazard tiles affected."
           }
         },
         "actions": {
+          "AddLadder": {
+            "list-name": "Add ladder",
+            "display-text": "Add ladder from ({0}, {1}) to ({2}, {3}) [Climb speed: {4}]",
+            "description": "Add a ladder connection between two points. The AI can use this to climb vertically. Returns ladder ID for later reference. Note: This feature may not be fully implemented yet.",
+            "params": {
+              "bottomX": {
+                "name": "Bottom X",
+                "desc": "Bottom world X position"
+              },
+              "bottomY": {
+                "name": "Bottom Y",
+                "desc": "Bottom world Y position"
+              },
+              "topX": {
+                "name": "Top X",
+                "desc": "Top world X position"
+              },
+              "topY": {
+                "name": "Top Y",
+                "desc": "Top world Y position"
+              },
+              "climbSpeed": {
+                "name": "Climb speed",
+                "desc": "Climbing speed in pixels per second"
+              }
+            }
+          },
+          "RemoveLadder": {
+            "list-name": "Remove ladder",
+            "display-text": "Remove ladder {0}",
+            "description": "Remove a ladder by its ID. Use when a ladder is no longer accessible or has been destroyed.",
+            "params": {
+              "id": {
+                "name": "ID",
+                "desc": "Ladder ID to remove"
+              }
+            }
+          },
+          "SetLadderClimbSpeed": {
+            "list-name": "Set ladder climb speed",
+            "display-text": "Set ladder {0} climb speed to {1}",
+            "description": "Change the climbing speed for a specific ladder. Use to adjust ladder traversal speed dynamically.",
+            "params": {
+              "id": {
+                "name": "ID",
+                "desc": "Ladder ID"
+              },
+              "speed": {
+                "name": "Speed",
+                "desc": "New climb speed in pixels per second"
+              }
+            }
+          },
+          "LogGraphStats": {
+            "list-name": "Log graph stats to console",
+            "display-text": "Log navigation graph statistics to console",
+            "description": "Output detailed navigation graph statistics to the browser console. Use for debugging graph generation and connectivity issues.",
+            "params": {}
+          },
           "AddCircleHazard": {
             "list-name": "Add circle hazard",
-            "display-text": "Add circle hazard at ({0},{1}) radius {2} severity {3}",
-            "description": "Mark a circular area as dangerous. AI will avoid this region when pathfinding. Good for explosions, magic zones, or round enemy patrol areas.",
+            "display-text": "Add circle hazard at ({0}, {1}) [Radius: {2}] [Severity: {3}]",
+            "description": "Add a circular hazard area. The AI will avoid this area based on severity. Returns a hazard ID for later removal. Use for dynamic danger zones like explosions or enemy AOE.",
             "params": {
               "x": {
                 "name": "X",
-                "desc": "Center X coordinate in pixels"
+                "desc": "World X position (center)"
               },
               "y": {
                 "name": "Y",
-                "desc": "Center Y coordinate in pixels"
+                "desc": "World Y position (center)"
               },
               "radius": {
                 "name": "Radius",
-                "desc": "Size of hazardous area in pixels from centre"
+                "desc": "Radius in pixels"
               },
               "severity": {
                 "name": "Severity",
-                "desc": "How much AI avoids this area (1.0 = slight avoidance, 10.0 = strong avoidance)"
+                "desc": "Hazard severity (higher = more dangerous)"
               }
             }
           },
           "AddRectHazard": {
             "list-name": "Add rectangle hazard",
-            "display-text": "Add rectangle hazard at ({0},{1}) size ({2}×{3}) severity {4}",
-            "description": "Mark a rectangular area as dangerous. AI will avoid this region when pathfinding. Use for spikes, fire, enemy zones, etc.",
+            "display-text": "Add rectangle hazard at ({0}, {1}) [Size: {2} x {3}] [Severity: {4}]",
+            "description": "Add a rectangular hazard area. The AI will avoid this area based on severity. Returns a hazard ID for later removal. Use for static danger zones like spike pits.",
             "params": {
               "x": {
                 "name": "X",
-                "desc": "Left edge X coordinate in pixels, preferably use bounding box of hazard object"
+                "desc": "World X position (center)"
               },
               "y": {
                 "name": "Y",
-                "desc": "Top edge Y coordinate in pixels, preferably use bounding box of hazard object"
+                "desc": "World Y position (center)"
               },
               "width": {
                 "name": "Width",
-                "desc": "Width of hazardous area in pixels, preferably use bounding box of hazard object"
+                "desc": "Width in pixels"
               },
               "height": {
                 "name": "Height",
-                "desc": "Height of hazardous area in pixels, preferably use bounding box of hazard object"
+                "desc": "Height in pixels"
               },
               "severity": {
                 "name": "Severity",
-                "desc": "How much AI avoids this area (1.0 = slight avoidance, 10.0 = strong avoidance)"
-              }
-            }
-          },
-          "AddRectHazardGrid": {
-            "list-name": "Add rectangle hazard (grid)",
-            "display-text": "Add rectangle hazard at grid ({0},{1}) size ({2}×{3}) severity {4}",
-            "description": "Mark rectangular region as hazardous using grid coordinates",
-            "params": {
-              "gx": {
-                "name": "Grid X",
-                "desc": "Grid X coordinate of the hazard"
-              },
-              "gy": {
-                "name": "Grid Y",
-                "desc": "Grid Y coordinate of the hazard"
-              },
-              "gw": {
-                "name": "Grid Width",
-                "desc": "Grid width of the hazard"
-              },
-              "gh": {
-                "name": "Grid Height",
-                "desc": "Grid height of the hazard"
-              },
-              "severity": {
-                "name": "Severity",
-                "desc": "Severity of the hazard"
+                "desc": "Hazard severity (higher = more dangerous)"
               }
             }
           },
           "ClearAllHazards": {
             "list-name": "Clear all hazards",
-            "display-text": "Clear all hazards",
-            "description": "Remove all hazardous regions at once. Use this to reset the hazard map when changing levels or game states.",
+            "display-text": "Clear all circle and rectangle hazards",
+            "description": "Remove all circular and rectangular hazards. This does NOT clear tile-based hazards. Use when resetting a level or clearing all dynamic dangers.",
+            "params": {}
+          },
+          "ClearAllHazardTiles": {
+            "list-name": "Clear all tile hazards",
+            "display-text": "Clear all tile hazards",
+            "description": "Reset all tile hazard severities to 0. This does NOT remove circle/rect hazards. Use when you want to clear static tile dangers.",
             "params": {}
           },
           "RemoveHazard": {
             "list-name": "Remove hazard",
-            "display-text": "Remove hazard ID {0}",
-            "description": "Remove a specific hazard by its unique ID number. Get the ID when adding hazards or use expressions to check.",
+            "display-text": "Remove hazard {0}",
+            "description": "Remove a hazard by its ID. Use this when a danger zone is no longer active. The graph will be regenerated if needed.",
             "params": {
-              "hazard_id": {
-                "name": "Hazard ID",
-                "desc": "Unique ID number of the hazard to remove"
+              "id": {
+                "name": "ID",
+                "desc": "Hazard ID to remove"
               }
             }
+          },
+          "SetMultiAgentAvoidance": {
+            "list-name": "Set multi-agent avoidance",
+            "display-text": "Set multi-agent avoidance: {0}",
+            "description": "Enable or disable multi-agent collision avoidance. When enabled, AI agents will attempt to avoid colliding with each other during pathfinding. Note: This feature may not be fully implemented yet.",
+            "params": {
+              "enabled": {
+                "name": "Enabled",
+                "desc": "Enable or disable multi-agent avoidance",
+                "items": {
+                  "yes": "Enabled",
+                  "no": "Disabled"
+                }
+              }
+            }
+          },
+          "ClearAllSlopes": {
+            "list-name": "Clear all slope markings",
+            "display-text": "Clear all slope markings",
+            "description": "Remove all slope markings from the obstacle map. Slopes will be treated as regular solid tiles. Use this to reset slope data.",
+            "params": {}
           },
           "ClearObstacleMap": {
             "list-name": "Clear obstacle map",
             "display-text": "Clear obstacle map",
-            "description": "Remove the obstacle map and navigation graph",
+            "description": "Remove the obstacle map and all associated data. Use this when switching levels or resetting the navigation system.",
             "params": {}
           },
           "CreateCustomObstacleMap": {
             "list-name": "Create custom obstacle map",
-            "display-text": "Create custom obstacle map {0} × {1} cells",
-            "description": "Create empty obstacle map with specified dimensions (in grid cells)",
+            "display-text": "Create custom obstacle map [Width: {0} tiles] [Height: {1} tiles]",
+            "description": "Create a custom obstacle map with the specified dimensions in tiles. All tiles are initialized to 'clear' state. Use this when not using the Pathfinding behavior's obstacle map.",
             "params": {
               "width": {
-                "name": "Width (cells)",
-                "desc": "Width in grid cells"
+                "name": "Width",
+                "desc": "Width in tiles"
               },
               "height": {
-                "name": "Height (cells)",
-                "desc": "Height in grid cells"
+                "name": "Height",
+                "desc": "Height in tiles"
               }
             }
           },
           "GenerateNodesFromCustomMap": {
-            "list-name": "Generate Navigation Graph",
+            "list-name": "Generate navigation graph",
             "display-text": "Generate navigation graph from obstacle map",
-            "description": "Build the navigation graph from the current obstacle map. Works with any obstacle map source (custom or from Pathfinding behavior). Call this after modifying the obstacle map manually.",
+            "description": "Generate the navigation graph from the current obstacle map. Call this after setting up all tiles and before pathfinding. This is an expensive operation.",
             "params": {}
           },
           "LoadObstacleMapFromJSON": {
             "list-name": "Load obstacle map from JSON",
             "display-text": "Load obstacle map from JSON: {0}",
-            "description": "Load obstacle map data from JSON string",
+            "description": "Load a previously saved obstacle map from JSON string. Use this to restore saved maps or load pre-built level data.",
             "params": {
               "json": {
-                "name": "JSON Data",
+                "name": "JSON",
                 "desc": "JSON string containing obstacle map data"
               }
             }
           },
-          "SetObstacleCell": {
-            "list-name": "Set obstacle cell",
-            "display-text": "Set cell ({0}, {1}) Solid: {2}",
-            "description": "Set whether a specific grid cell is Solid/blocked.",
+          "SetHazardRadius": {
+            "list-name": "Set hazard radius",
+            "display-text": "Set hazard radius to {0} tiles",
+            "description": "Set the radius in tiles for circular/rectangular hazard influence. Tiles within this radius of a hazard will have their pathfinding cost increased.",
+            "params": {
+              "tiles": {
+                "name": "Tiles",
+                "desc": "Radius in tiles"
+              }
+            }
+          },
+          "SetRePathThreshold": {
+            "list-name": "Set re-path threshold",
+            "display-text": "Set re-path threshold to {0} tiles",
+            "description": "Set how many tiles the character can drift from the path before automatic re-pathing triggers. Higher values = more tolerance for deviation.",
+            "params": {
+              "tiles": {
+                "name": "Tiles",
+                "desc": "Threshold in tiles"
+              }
+            }
+          },
+          "SetTileHazard": {
+            "list-name": "Set tile hazard severity",
+            "display-text": "Set tile hazard at ({0}, {1}) to {2}",
+            "description": "Set the hazard severity for a specific tile. Higher values make the AI avoid this tile more strongly. 0 = no hazard. Use this to mark dangerous areas like spikes or lava.",
             "params": {
               "gx": {
                 "name": "Grid X",
-                "desc": "X coordinate in grid cells"
+                "desc": "Grid X coordinate (tile number)"
               },
               "gy": {
                 "name": "Grid Y",
-                "desc": "Y coordinate in grid cells"
+                "desc": "Grid Y coordinate (tile number)"
               },
-              "solid": {
-                "name": "Solid",
-                "desc": "Is the cell blocked/solid?",
+              "severity": {
+                "name": "Severity",
+                "desc": "Hazard severity (0 = none, higher = more dangerous)"
+              }
+            }
+          },
+          "SetTileState": {
+            "list-name": "Set tile state",
+            "display-text": "Set tile at ({0}, {1}) to {2}",
+            "description": "Set the state of a tile at the specified grid coordinates. Use this to mark tiles as solid obstacles, clear space, jump-thru platforms, areas to avoid, or slopes.",
+            "params": {
+              "gx": {
+                "name": "Grid X",
+                "desc": "Grid X coordinate (tile number)"
+              },
+              "gy": {
+                "name": "Grid Y",
+                "desc": "Grid Y coordinate (tile number)"
+              },
+              "state": {
+                "name": "State",
+                "desc": "Tile state to set",
                 "items": {
-                  "yes": "Yes (blocked)",
-                  "no": "No (clear)"
+                  "solid": "Solid",
+                  "clear": "Clear",
+                  "jump-thru": "Jump-thru",
+                  "avoid": "Avoid",
+                  "slope-left": "Slope left",
+                  "slope-right": "Slope right"
                 }
               }
             }
           },
-          "SetObstacleCellXY": {
-            "list-name": "Set obstacle cell at world position",
-            "display-text": "Set cell at ({0}, {1}) Solid: {2}",
-            "description": "Set whether cell at world position is solid",
+          "SetTileStateWorld": {
+            "list-name": "Set tile state at world position",
+            "display-text": "Set tile at world ({0}, {1}) to {2}",
+            "description": "Set the state of a tile at the specified world coordinates. The world position is automatically converted to grid coordinates.",
             "params": {
               "x": {
                 "name": "X",
-                "desc": "X coordinate in world pixels"
+                "desc": "World X position in pixels"
               },
               "y": {
                 "name": "Y",
-                "desc": "Y coordinate in world pixels"
+                "desc": "World Y position in pixels"
               },
-              "solid": {
-                "name": "Solid",
-                "desc": "Is the cell blocked/solid?",
+              "state": {
+                "name": "State",
+                "desc": "Tile state to set",
                 "items": {
-                  "yes": "Yes (blocked)",
-                  "no": "No (clear)"
+                  "solid": "Solid",
+                  "clear": "Clear",
+                  "jump-thru": "Jump-thru",
+                  "avoid": "Avoid",
+                  "slope-left": "Slope left",
+                  "slope-right": "Slope right"
                 }
               }
             }
           },
           "UsePathfindingObstacleMap": {
             "list-name": "Use Pathfinding obstacle map",
-            "display-text": "Use Pathfinding obstacle map (auto-regenerate: {0})",
-            "description": "Get the obstacle map from the Pathfinding behavior. This is the easiest way to set up platformer pathfinding! Just call this once at 'On start of layout'. If the map is already ready, it copies immediately. If not, it waits automatically. Triggers 'On Pathfinding map ready' when done.",
+            "display-text": "Use Pathfinding obstacle map [Auto-regenerate: {0}]",
+            "description": "Use the obstacle map from the Pathfinding behavior instead of a custom map. Enable auto-regenerate to automatically rebuild the graph when the Pathfinding map changes.",
             "params": {
               "autoRegen": {
-                "name": "Auto-Regenerate Navigation Graph",
-                "desc": "Automatically build navigation graph after copying (recommended: Yes)",
+                "name": "Auto-regenerate",
+                "desc": "Automatically regenerate graph when Pathfinding map changes",
                 "items": {
-                  "yes": "Yes (recommended)",
-                  "no": "No (manual)"
+                  "yes": "Yes",
+                  "no": "No"
                 }
               }
             }
           },
           "FindPath": {
             "list-name": "Find path to position",
-            "display-text": "Find path to ({0}, {1}) [Ground correction: {2}]",
-            "description": "Tell the AI to calculate and follow a path from current position to the target coordinates. Character will automatically move if Auto-Control is enabled. Enable 'Correct to ground' to automatically snap start/end positions to the nearest walkable ground.",
+            "display-text": "Find path to ({0}, {1}) [Ground correction: {2}] [Mode: {3}]",
+            "description": "Calculate a path from the character's position to the target coordinates. Use this when you want the AI to navigate to a specific point. Requires: Navigation graph must be generated first.",
             "params": {
               "x": {
                 "name": "X",
@@ -291,10 +422,18 @@
               },
               "correctToGround": {
                 "name": "Correct to ground",
-                "desc": "Automatically snap start and target positions to the nearest walkable ground position. Useful when positions may be in mid-air.",
+                "desc": "Snap start/target to nearest walkable ground position",
                 "items": {
                   "no": "No",
                   "yes": "Yes"
+                }
+              },
+              "mode": {
+                "name": "Mode",
+                "desc": "Path mode: 'reach' finds complete path or fails. 'jump_toward' paths to nearest reachable point then jumps toward target.",
+                "items": {
+                  "reach": "Reach (default)",
+                  "jump_toward": "Jump toward"
                 }
               }
             }
@@ -302,88 +441,139 @@
           "RegenerateGraph": {
             "list-name": "Regenerate navigation graph",
             "display-text": "Regenerate navigation graph",
-            "description": "Rebuild the pathfinding map from scratch. Use this after moving platforms or changing the level layout during gameplay.",
+            "description": "Rebuild the navigation graph from scratch. Use after modifying the level layout, adding/removing obstacles, or changing platform positions.",
             "params": {}
+          },
+          "SetAutoControl": {
+            "list-name": "Set auto-control",
+            "display-text": "Set auto-control: {0}",
+            "description": "Toggle auto-movement on/off. When enabled, the behavior automatically controls the Platform behavior to follow paths. When disabled, you control movement yourself using path data expressions.",
+            "params": {
+              "enabled": {
+                "name": "Enabled",
+                "desc": "Enable or disable auto-control",
+                "items": {
+                  "yes": "Enabled",
+                  "no": "Disabled"
+                }
+              }
+            }
+          },
+          "SetCoyoteTime": {
+            "list-name": "Set coyote time",
+            "display-text": "Set coyote time to {0} seconds",
+            "description": "Set the coyote time window in seconds. The AI can jump within this window after walking off a ledge. Set to 0 to disable coyote time.",
+            "params": {
+              "seconds": {
+                "name": "Seconds",
+                "desc": "Coyote time window in seconds"
+              }
+            }
+          },
+          "SetLedgeLeniency": {
+            "list-name": "Set ledge leniency",
+            "display-text": "Set ledge leniency to {0} pixels",
+            "description": "Set pixels of tolerance past a ledge edge before stopping (0 = strict stop at edge). Only used when ledge restriction is enabled.",
+            "params": {
+              "pixels": {
+                "name": "Pixels",
+                "desc": "Pixels past ledge edge before stopping"
+              }
+            }
+          },
+          "SetLedgeRestriction": {
+            "list-name": "Set ledge restriction",
+            "display-text": "Set ledge restriction: {0}",
+            "description": "Toggle ledge restriction for auto-movement. When enabled, the AI avoids walking off platform edges unless the path requires it. When disabled, the AI can walk freely to edges.",
+            "params": {
+              "enabled": {
+                "name": "Enabled",
+                "desc": "Enable or disable ledge restriction",
+                "items": {
+                  "yes": "Enabled",
+                  "no": "Disabled"
+                }
+              }
+            }
           },
           "StopPathfinding": {
             "list-name": "Stop pathfinding",
             "display-text": "Stop pathfinding",
-            "description": "Stop the character immediately and clear the current path. Character will stand still until given a new path.",
+            "description": "Stop the character immediately and clear the current path. Use when you want to cancel AI navigation and regain manual control.",
             "params": {}
           },
           "AddPortal": {
             "list-name": "Add portal",
-            "display-text": "Add {0} portal from ({1},{2}) to ({3},{4}) cost {5}",
-            "description": "Create a special connection between two points (teleporter, ladder, elevator, door). AI can use this to instantly travel between locations.",
+            "display-text": "Add {0} portal from ({1}, {2}) to ({3}, {4}) [Cost: {5}] [Ignore hazards: {6}]",
+            "description": "Add a portal (teleport) connection between two points. The AI can use this as part of paths. Use for teleporters, ladders, or special traversal. Returns portal ID.",
             "params": {
               "type": {
                 "name": "Type",
-                "desc": "What kind of portal connection this represents",
-                "items": {
-                  "teleport": "Teleporter",
-                  "ladder": "Ladder",
-                  "elevator": "Elevator",
-                  "zipline": "Zipline"
-                }
+                "desc": "Portal type name (for identification)"
               },
-              "entry_x": {
+              "entryX": {
                 "name": "Entry X",
-                "desc": "Entry X coordinate"
+                "desc": "Entry world X position"
               },
-              "entry_y": {
+              "entryY": {
                 "name": "Entry Y",
-                "desc": "Entry Y coordinate"
+                "desc": "Entry world Y position"
               },
-              "exit_x": {
+              "exitX": {
                 "name": "Exit X",
-                "desc": "Exit X coordinate"
+                "desc": "Exit world X position"
               },
-              "exit_y": {
+              "exitY": {
                 "name": "Exit Y",
-                "desc": "Exit Y coordinate"
+                "desc": "Exit world Y position"
               },
               "cost": {
                 "name": "Cost",
-                "desc": "Cost to use the portal"
+                "desc": "Movement cost (lower = preferred)"
+              },
+              "ignoreHazards": {
+                "name": "Ignore hazards",
+                "desc": "Should this portal ignore hazards when calculating cost",
+                "items": {
+                  "yes": "Yes",
+                  "no": "No"
+                }
               }
             }
           }
         },
         "conditions": {
-          "Is_Position_Hazardous": {
-            "list-name": "Is position hazardous",
-            "display-text": "Is position ({0},{1}) hazardous",
-            "description": "Check if a specific coordinate is inside any hazardous area. Returns true if position is dangerous, false if safe.",
-            "params": {
-              "x": {
-                "name": "X",
-                "desc": "X coordinate in pixels to check"
-              },
-              "y": {
-                "name": "Y",
-                "desc": "Y coordinate in pixels to check"
-              }
-            }
+          "IsClimbingLadder": {
+            "list-name": "Is climbing ladder",
+            "display-text": "Is climbing ladder",
+            "description": "Check if the character is currently climbing a ladder. Returns true during ladder traversal, false otherwise.",
+            "params": {}
           },
-          "IsCellSolidGrid": {
-            "list-name": "Is cell solid (grid)",
-            "display-text": "Cell at grid ({0}, {1}) is solid",
-            "description": "Check if a specific grid cell is blocked/solid. Use grid coordinates (cell numbers, not pixels).",
+          "OnLadderClimbComplete": {
+            "list-name": "On ladder climb complete",
+            "display-text": "On ladder climb complete",
+            "description": "Triggered when the character finishes climbing a ladder. Use to trigger animations or next actions after ladder traversal.",
+            "params": {}
+          },
+          "IsNodeLedge": {
+            "list-name": "Is node at ledge",
+            "display-text": "Is node at ({0}, {1}) a ledge",
+            "description": "Check if a specific node is marked as a ledge (platform edge). Returns true if the node is a left or right ledge.",
             "params": {
               "gx": {
                 "name": "Grid X",
-                "desc": "Grid X coordinate (cell number)"
+                "desc": "Grid X coordinate (tile number)"
               },
               "gy": {
                 "name": "Grid Y",
-                "desc": "Grid Y coordinate (cell number)"
+                "desc": "Grid Y coordinate (tile number)"
               }
             }
           },
-          "IsCellSolidWorld": {
-            "list-name": "Is cell solid (world)",
-            "display-text": "Cell at ({0}, {1}) is solid",
-            "description": "Check if a grid cell at a world position (in pixels) is blocked/solid. Automatically converts pixel coordinates to grid cell.",
+          "IsPositionHazardous": {
+            "list-name": "Is position hazardous",
+            "display-text": "Is position ({0}, {1}) hazardous",
+            "description": "Check if a specific world position is within any hazard area (circle, rect, or tile). Returns true if any hazard affects this position.",
             "params": {
               "x": {
                 "name": "X",
@@ -395,67 +585,143 @@
               }
             }
           },
+          "IsMultiAgentAvoidanceEnabled": {
+            "list-name": "Is multi-agent avoidance enabled",
+            "display-text": "Multi-agent avoidance is enabled",
+            "description": "Check if multi-agent collision avoidance is currently enabled. Returns true if enabled, false otherwise.",
+            "params": {}
+          },
           "IsSettingUpPathfinding": {
-            "list-name": "Is setting up Pathfinding map",
+            "list-name": "Is setting up Pathfinding",
             "display-text": "Is setting up Pathfinding map",
-            "description": "True if currently waiting for the Pathfinding behavior's obstacle map to become ready.",
+            "description": "Check if the behavior is currently waiting for the Pathfinding obstacle map to initialize. Returns true during async setup.",
             "params": {}
           },
           "OnObstacleMapCreated": {
             "list-name": "On obstacle map created",
             "display-text": "On obstacle map created",
-            "description": "Triggered when obstacle map is created or regenerated",
+            "description": "Triggered when a custom obstacle map is successfully created. Use this to start configuring tiles after map creation.",
             "params": {}
           },
           "OnObstacleMapRemoved": {
             "list-name": "On obstacle map removed",
             "display-text": "On obstacle map removed",
-            "description": "Triggered when obstacle map is cleared",
+            "description": "Triggered when the obstacle map is cleared or removed. Use this to clean up related data or reset systems.",
             "params": {}
           },
           "OnPathfindingMapFailed": {
             "list-name": "On Pathfinding map failed",
             "display-text": "On Pathfinding map failed",
-            "description": "Triggered if getting the Pathfinding map fails. Usually means no Pathfinding behavior exists on this object.",
+            "description": "Triggered when the Pathfinding behavior's obstacle map fails to initialize. Use this to implement fallback error handling.",
             "params": {}
           },
           "OnPathfindingMapReady": {
             "list-name": "On Pathfinding map ready",
             "display-text": "On Pathfinding map ready",
-            "description": "Triggered when 'Wait for Pathfinding obstacle map' succeeds. This means the obstacle map is copied and ready - you can now use 'Find path to position'!",
+            "description": "Triggered when the Pathfinding behavior's obstacle map is ready for use. Use this to start graph generation after Pathfinding initialization.",
             "params": {}
           },
           "OnPathfindingMapTimeout": {
             "list-name": "On Pathfinding map timeout",
             "display-text": "On Pathfinding map timeout",
-            "description": "Triggered if waiting for Pathfinding map takes too long (~10 seconds). Make sure Pathfinding behavior exists and has obstacles to detect.",
+            "description": "Triggered when waiting for the Pathfinding obstacle map times out. Use this to handle slow or stuck initialization.",
             "params": {}
           },
+          "TileHasState": {
+            "list-name": "Tile has state",
+            "display-text": "Tile at ({0}, {1}) has state {2}",
+            "description": "Check if a tile at the given grid position has the specified state. Use this to query tile properties before actions.",
+            "params": {
+              "gx": {
+                "name": "Grid X",
+                "desc": "Grid X coordinate (tile number)"
+              },
+              "gy": {
+                "name": "Grid Y",
+                "desc": "Grid Y coordinate (tile number)"
+              },
+              "state": {
+                "name": "State",
+                "desc": "Tile state to check for",
+                "items": {
+                  "solid": "Solid",
+                  "clear": "Clear",
+                  "jump-thru": "Jump-thru",
+                  "avoid": "Avoid",
+                  "slope": "Slope (any direction)"
+                }
+              }
+            }
+          },
+          "TileHasStateWorld": {
+            "list-name": "Tile has state at world position",
+            "display-text": "Tile at world ({0}, {1}) has state {2}",
+            "description": "Check if a tile at the given world position has the specified state. World coordinates are automatically converted to grid coordinates.",
+            "params": {
+              "x": {
+                "name": "X",
+                "desc": "World X position in pixels"
+              },
+              "y": {
+                "name": "Y",
+                "desc": "World Y position in pixels"
+              },
+              "state": {
+                "name": "State",
+                "desc": "Tile state to check for",
+                "items": {
+                  "solid": "Solid",
+                  "clear": "Clear",
+                  "jump-thru": "Jump-thru",
+                  "avoid": "Avoid",
+                  "slope": "Slope (any direction)"
+                }
+              }
+            }
+          },
           "HasPath": {
-            "list-name": "Has path",
+            "list-name": "Has active path",
             "display-text": "Has active path",
-            "description": "Check if the character is currently following a path to a destination. True while moving, false when stopped or path completed.",
+            "description": "Check if the character currently has an active pathfinding path. Returns true while navigating, false when idle or path is complete.",
+            "params": {}
+          },
+          "IsAtIsland": {
+            "list-name": "Is at island",
+            "display-text": "Is at island",
+            "description": "Check if the character is standing on a single-tile platform (isolated platform). Use this to detect precarious positions or trigger special behaviors.",
+            "params": {}
+          },
+          "IsAtLedge": {
+            "list-name": "Is at ledge",
+            "display-text": "Is at ledge",
+            "description": "Check if the character is currently standing on a ledge node (edge of a platform). Use this to trigger ledge-specific behaviors or animations.",
+            "params": {}
+          },
+          "IsPlatformEnabled": {
+            "list-name": "Is platform enabled",
+            "display-text": "Platform behavior is enabled",
+            "description": "Check if the associated Platform behavior is currently enabled. Returns false if Platform behavior is disabled or not found.",
             "params": {}
           },
           "NodeExistsGrid": {
             "list-name": "Node exists at grid position",
             "display-text": "Node exists at grid ({0}, {1})",
-            "description": "Check if a navigation node exists at the specified grid coordinates. A node exists where the character can stand (empty cell above a solid cell).",
+            "description": "Check if a navigation node exists at the specified grid coordinates. Use this to validate positions before pathfinding or placing objects.",
             "params": {
               "gx": {
                 "name": "Grid X",
-                "desc": "Grid X coordinate"
+                "desc": "Grid X coordinate (tile number)"
               },
               "gy": {
                 "name": "Grid Y",
-                "desc": "Grid Y coordinate"
+                "desc": "Grid Y coordinate (tile number)"
               }
             }
           },
           "NodeExistsWorld": {
             "list-name": "Node exists at world position",
-            "display-text": "Node exists at ({0}, {1})",
-            "description": "Check if a navigation node exists at the specified world position (pixels). Automatically converts to grid coordinates.",
+            "display-text": "Node exists at world ({0}, {1})",
+            "description": "Check if a navigation node exists at the specified world coordinates. Use this to validate world positions before pathfinding.",
             "params": {
               "x": {
                 "name": "X",
@@ -470,163 +736,573 @@
           "OnGraphGenerated": {
             "list-name": "On navigation graph generated",
             "display-text": "On navigation graph generated",
-            "description": "Triggered when the navigation graph finishes creating all nodes and their connections. Use this to know when pathfinding is ready to use.",
+            "description": "Triggered when the navigation graph has been successfully generated. Use this to start pathfinding operations after map setup.",
+            "params": {}
+          },
+          "OnJumpTowardExecuted": {
+            "list-name": "On jump toward executed",
+            "display-text": "On jump toward executed",
+            "description": "Triggered when the 'jump_toward' mode executes the final jump toward an unreachable target. Use this to handle partial path completion.",
+            "params": {}
+          },
+          "OnPathComplete": {
+            "list-name": "On path complete",
+            "display-text": "On path complete",
+            "description": "Triggered when the AI arrives at the final destination. Use this to trigger arrival animations, next actions, or goal completion logic.",
             "params": {}
           },
           "OnPathFailed": {
             "list-name": "On path failed",
             "display-text": "On path failed",
-            "description": "Triggered when pathfinding fails to find a valid route to the target. Use this to handle unreachable destinations.",
+            "description": "Triggered when pathfinding fails to find a valid path to the target. Use this to handle unreachable destinations or implement fallback behaviors.",
             "params": {}
           },
           "OnPathFound": {
             "list-name": "On path found",
             "display-text": "On path found",
-            "description": "Triggered when a path is successfully calculated to the target. Use this to react when the AI finds a valid route.",
+            "description": "Triggered when a path has been successfully calculated. Use this to start custom actions when pathfinding succeeds.",
+            "params": {}
+          },
+          "OnRePathTriggered": {
+            "list-name": "On re-path triggered",
+            "display-text": "On re-path triggered",
+            "description": "Triggered when automatic re-pathing occurs due to the character drifting too far from the path. Use this to monitor navigation accuracy.",
+            "params": {}
+          },
+          "OnWaypointReached": {
+            "list-name": "On waypoint reached",
+            "display-text": "On waypoint reached",
+            "description": "Triggered each time the character reaches a waypoint along the path. Use this to play footstep sounds, particle effects, or update animations.",
             "params": {}
           }
         },
         "expressions": {
+          "ClimbingLadder": {
+            "translated-name": "ClimbingLadder",
+            "description": "Check if currently climbing a ladder. Returns 1 if climbing, 0 if not.",
+            "params": {}
+          },
+          "LadderProgress": {
+            "translated-name": "LadderProgress",
+            "description": "Get the current ladder climbing progress as a value from 0 to 1. Returns 0 if not climbing a ladder.",
+            "params": {}
+          },
           "CalculatedJumpDistance": {
             "translated-name": "CalculatedJumpDistance",
-            "description": "Get the maximum horizontal distance the AI thinks your character can jump (in pixels). Compare with actual performance for tuning.",
+            "description": "Get the calculated maximum horizontal jump distance in pixels based on Platform behavior settings. Used for determining reachable positions.",
             "params": {}
           },
           "CalculatedJumpHeight": {
             "translated-name": "CalculatedJumpHeight",
-            "description": "Get the maximum jump height the AI thinks your character can reach (in pixels). Compare with your actual jump height for tuning.",
+            "description": "Get the calculated maximum jump height in pixels based on Platform behavior settings. Used for determining reachable positions.",
             "params": {}
           },
           "PlatformJumpStrength": {
             "translated-name": "PlatformJumpStrength",
-            "description": "Get the jump strength value from the Platform behavior. Used for debugging jump height calculations.",
+            "description": "Get the jump strength from the Platform behavior. Used for internal pathfinding calculations. Returns 0 if Platform behavior not found.",
             "params": {}
           },
           "PlatformMaxSpeed": {
             "translated-name": "PlatformMaxSpeed",
-            "description": "Platform behavior max speed",
+            "description": "Get the max speed from the Platform behavior. Used for internal pathfinding calculations. Returns 0 if Platform behavior not found.",
             "params": {}
+          },
+          "IsNodeIsland": {
+            "translated-name": "IsNodeIsland",
+            "description": "Check if a node at grid coordinates is an island (single-tile platform). Returns 1 if true, 0 if false or node doesn't exist.",
+            "params": {
+              "gx": {
+                "name": "Grid X",
+                "desc": "Grid X coordinate"
+              },
+              "gy": {
+                "name": "Grid Y",
+                "desc": "Grid Y coordinate"
+              }
+            }
+          },
+          "IsNodeLeftLedge": {
+            "translated-name": "IsNodeLeftLedge",
+            "description": "Check if a node at grid coordinates is a left ledge. Returns 1 if true, 0 if false or node doesn't exist.",
+            "params": {
+              "gx": {
+                "name": "Grid X",
+                "desc": "Grid X coordinate"
+              },
+              "gy": {
+                "name": "Grid Y",
+                "desc": "Grid Y coordinate"
+              }
+            }
+          },
+          "IsNodeRightLedge": {
+            "translated-name": "IsNodeRightLedge",
+            "description": "Check if a node at grid coordinates is a right ledge. Returns 1 if true, 0 if false or node doesn't exist.",
+            "params": {
+              "gx": {
+                "name": "Grid X",
+                "desc": "Grid X coordinate"
+              },
+              "gy": {
+                "name": "Grid Y",
+                "desc": "Grid Y coordinate"
+              }
+            }
+          },
+          "IsTileJumpThru": {
+            "translated-name": "IsTileJumpThru",
+            "description": "Check if a tile at grid coordinates is a jump-thru platform. Returns 1 if true, 0 if false or tile doesn't exist.",
+            "params": {
+              "gx": {
+                "name": "Grid X",
+                "desc": "Grid X coordinate"
+              },
+              "gy": {
+                "name": "Grid Y",
+                "desc": "Grid Y coordinate"
+              }
+            }
+          },
+          "NearestNodeGridX": {
+            "translated-name": "NearestNodeGridX",
+            "description": "Get the grid X coordinate of the nearest navigation node to a world position. Returns -1 if no nodes exist.",
+            "params": {
+              "x": {
+                "name": "X",
+                "desc": "World X position in pixels"
+              },
+              "y": {
+                "name": "Y",
+                "desc": "World Y position in pixels"
+              }
+            }
+          },
+          "NearestNodeGridY": {
+            "translated-name": "NearestNodeGridY",
+            "description": "Get the grid Y coordinate of the nearest navigation node to a world position. Returns -1 if no nodes exist.",
+            "params": {
+              "x": {
+                "name": "X",
+                "desc": "World X position in pixels"
+              },
+              "y": {
+                "name": "Y",
+                "desc": "World Y position in pixels"
+              }
+            }
+          },
+          "NearestNodeX": {
+            "translated-name": "NearestNodeX",
+            "description": "Get the world X position of the nearest navigation node to a world position. Returns 0 if no nodes exist.",
+            "params": {
+              "x": {
+                "name": "X",
+                "desc": "World X position in pixels"
+              },
+              "y": {
+                "name": "Y",
+                "desc": "World Y position in pixels"
+              }
+            }
+          },
+          "NearestNodeY": {
+            "translated-name": "NearestNodeY",
+            "description": "Get the world Y position of the nearest navigation node to a world position. Returns 0 if no nodes exist.",
+            "params": {
+              "x": {
+                "name": "X",
+                "desc": "World X position in pixels"
+              },
+              "y": {
+                "name": "Y",
+                "desc": "World Y position in pixels"
+              }
+            }
+          },
+          "NodeAtIndexConnectionCount": {
+            "translated-name": "NodeAtIndexConnectionCount",
+            "description": "Get the number of connections (edges) from a node by its index. Returns 0 if index is out of bounds.",
+            "params": {
+              "index": {
+                "name": "Index",
+                "desc": "Node index (0-based)"
+              }
+            }
+          },
+          "NodeAtIndexGridX": {
+            "translated-name": "NodeAtIndexGridX",
+            "description": "Get the grid X coordinate of a node by its index in the node array. Returns -1 if index is out of bounds.",
+            "params": {
+              "index": {
+                "name": "Index",
+                "desc": "Node index (0-based)"
+              }
+            }
+          },
+          "NodeAtIndexGridY": {
+            "translated-name": "NodeAtIndexGridY",
+            "description": "Get the grid Y coordinate of a node by its index in the node array. Returns -1 if index is out of bounds.",
+            "params": {
+              "index": {
+                "name": "Index",
+                "desc": "Node index (0-based)"
+              }
+            }
+          },
+          "NodeAtIndexIsLeftLedge": {
+            "translated-name": "NodeAtIndexIsLeftLedge",
+            "description": "Check if a node is a left ledge by its index. Returns 1 if true, 0 if false or index is out of bounds.",
+            "params": {
+              "index": {
+                "name": "Index",
+                "desc": "Node index (0-based)"
+              }
+            }
+          },
+          "NodeAtIndexIsRightLedge": {
+            "translated-name": "NodeAtIndexIsRightLedge",
+            "description": "Check if a node is a right ledge by its index. Returns 1 if true, 0 if false or index is out of bounds.",
+            "params": {
+              "index": {
+                "name": "Index",
+                "desc": "Node index (0-based)"
+              }
+            }
+          },
+          "NodeAtIndexIsSlope": {
+            "translated-name": "NodeAtIndexIsSlope",
+            "description": "Check if a node is on a slope by its index. Returns 1 if true, 0 if false or index is out of bounds.",
+            "params": {
+              "index": {
+                "name": "Index",
+                "desc": "Node index (0-based)"
+              }
+            }
+          },
+          "NodeAtIndexX": {
+            "translated-name": "NodeAtIndexX",
+            "description": "Get the world X position of a node by its index in the node array. Returns 0 if index is out of bounds.",
+            "params": {
+              "index": {
+                "name": "Index",
+                "desc": "Node index (0-based)"
+              }
+            }
+          },
+          "NodeAtIndexY": {
+            "translated-name": "NodeAtIndexY",
+            "description": "Get the world Y position of a node by its index in the node array. Returns 0 if index is out of bounds.",
+            "params": {
+              "index": {
+                "name": "Index",
+                "desc": "Node index (0-based)"
+              }
+            }
+          },
+          "NodeConnectionAction": {
+            "translated-name": "NodeConnectionAction",
+            "description": "Get the action name for a connection (e.g., 'walk', 'jump', 'fall'). Returns empty string if node/connection doesn't exist.",
+            "params": {
+              "gx": {
+                "name": "Grid X",
+                "desc": "Source node grid X"
+              },
+              "gy": {
+                "name": "Grid Y",
+                "desc": "Source node grid Y"
+              },
+              "index": {
+                "name": "Connection index",
+                "desc": "Connection index (0-based)"
+              }
+            }
+          },
+          "NodeConnectionCost": {
+            "translated-name": "NodeConnectionCost",
+            "description": "Get the movement cost for a connection. Returns 0 if node/connection doesn't exist.",
+            "params": {
+              "gx": {
+                "name": "Grid X",
+                "desc": "Source node grid X"
+              },
+              "gy": {
+                "name": "Grid Y",
+                "desc": "Source node grid Y"
+              },
+              "index": {
+                "name": "Connection index",
+                "desc": "Connection index (0-based)"
+              }
+            }
+          },
+          "NodeConnectionCount": {
+            "translated-name": "NodeConnectionCount",
+            "description": "Get the number of connections (edges) from a node at grid coordinates. Returns 0 if node doesn't exist.",
+            "params": {
+              "gx": {
+                "name": "Grid X",
+                "desc": "Grid X coordinate"
+              },
+              "gy": {
+                "name": "Grid Y",
+                "desc": "Grid Y coordinate"
+              }
+            }
+          },
+          "NodeConnectionTargetX": {
+            "translated-name": "NodeConnectionTargetX",
+            "description": "Get the world X position of a connection's target node. Returns 0 if node/connection doesn't exist.",
+            "params": {
+              "gx": {
+                "name": "Grid X",
+                "desc": "Source node grid X"
+              },
+              "gy": {
+                "name": "Grid Y",
+                "desc": "Source node grid Y"
+              },
+              "index": {
+                "name": "Connection index",
+                "desc": "Connection index (0-based)"
+              }
+            }
+          },
+          "NodeConnectionTargetY": {
+            "translated-name": "NodeConnectionTargetY",
+            "description": "Get the world Y position of a connection's target node. Returns 0 if node/connection doesn't exist.",
+            "params": {
+              "gx": {
+                "name": "Grid X",
+                "desc": "Source node grid X"
+              },
+              "gy": {
+                "name": "Grid Y",
+                "desc": "Source node grid Y"
+              },
+              "index": {
+                "name": "Connection index",
+                "desc": "Connection index (0-based)"
+              }
+            }
           },
           "HazardCount": {
             "translated-name": "HazardCount",
-            "description": "Get the total number of hazardous regions currently active. Useful for debugging or UI display.",
+            "description": "Get the total number of active hazards (circles and rectangles). Does not include tile hazards.",
             "params": {}
           },
           "HazardSeverity": {
             "translated-name": "HazardSeverity",
-            "description": "Get the hazard severity at a position. Returns 1.0 for safe areas, higher values for more dangerous areas.",
+            "description": "Get the total hazard severity at a world position from all sources (circles, rects, tiles). Higher values = more dangerous.",
             "params": {
               "x": {
                 "name": "X",
-                "desc": "X position in pixels to check"
+                "desc": "World X position in pixels"
               },
               "y": {
                 "name": "Y",
-                "desc": "Y position in pixels to check"
+                "desc": "World Y position in pixels"
               }
             }
           },
-          "IsPositionHazardous": {
-            "translated-name": "IsPositionHazardous",
-            "description": "Check if a position is inside any hazardous area. Returns 1 if dangerous, 0 if safe.",
+          "PositionIsHazardous": {
+            "translated-name": "PositionIsHazardous",
+            "description": "Check if a world position is hazardous. Returns 1 if hazardous, 0 if safe.",
             "params": {
               "x": {
                 "name": "X",
-                "desc": "X position in pixels to check"
+                "desc": "World X position in pixels"
               },
               "y": {
                 "name": "Y",
-                "desc": "Y position in pixels to check"
+                "desc": "World Y position in pixels"
               }
             }
           },
-          "GridCellSize": {
-            "translated-name": "GridCellSize",
-            "description": "Get the grid cell size in pixels.",
+          "TileHazardSeverity": {
+            "translated-name": "TileHazardSeverity",
+            "description": "Get the hazard severity of a specific tile. Returns 0 if no hazard. Only checks tile-based hazards, not circles/rects.",
+            "params": {
+              "gx": {
+                "name": "Grid X",
+                "desc": "Grid X coordinate"
+              },
+              "gy": {
+                "name": "Grid Y",
+                "desc": "Grid Y coordinate"
+              }
+            }
+          },
+          "NearbyAgentCount": {
+            "translated-name": "NearbyAgentCount",
+            "description": "Get the number of nearby AI agents within detection range. Used for multi-agent avoidance calculations. Returns 0 if multi-agent avoidance is disabled.",
             "params": {}
           },
           "GridHeight": {
             "translated-name": "GridHeight",
-            "description": "Get the height of the navigation grid in cells (not pixels). Multiply by cell size to get pixel height.",
+            "description": "Get the height of the obstacle map in tiles. Returns 0 if no map exists.",
+            "params": {}
+          },
+          "GridTileSize": {
+            "translated-name": "GridTileSize",
+            "description": "Get the tile size in pixels. Returns 0 if no map exists.",
             "params": {}
           },
           "GridWidth": {
             "translated-name": "GridWidth",
-            "description": "Get the width of the navigation grid in cells (not pixels). Multiply by cell size to get pixel width.",
+            "description": "Get the width of the obstacle map in tiles. Returns 0 if no map exists.",
             "params": {}
           },
-          "IsCellSolid": {
-            "translated-name": "IsCellSolid",
-            "description": "Check if a specific grid cell is blocked by an obstacle. Returns 1 if blocked/solid, 0 if clear/walkable.",
-            "params": {
-              "gx": {
-                "name": "Grid X",
-                "desc": "Grid X coordinate (not pixel position)"
-              },
-              "gy": {
-                "name": "Grid Y",
-                "desc": "Grid Y coordinate (not pixel position)"
-              }
-            }
+          "HazardRadius": {
+            "translated-name": "HazardRadius",
+            "description": "Get the current hazard radius setting in tiles. This affects how far hazard influence spreads.",
+            "params": {}
           },
           "ObstacleMapJSON": {
             "translated-name": "ObstacleMapJSON",
-            "description": "Get the obstacle map as a JSON text string. Use this to save level layouts to Local Storage or send to server.",
+            "description": "Get the current obstacle map as a JSON string. Use this to save the map to local storage or export to files.",
             "params": {}
           },
           "ObstacleMapSource": {
             "translated-name": "ObstacleMapSource",
-            "description": "Get how the obstacle map was created. Returns 'pathfinding' (from Pathfinding behavior), 'custom' (manually set), or 'none' (not generated yet).",
+            "description": "Get the source of the current obstacle map. Returns 'custom', 'pathfinding', or 'none'.",
             "params": {}
+          },
+          "RePathThreshold": {
+            "translated-name": "RePathThreshold",
+            "description": "Get the current re-path threshold in tiles. This is how far the character can drift before automatic re-pathing triggers.",
+            "params": {}
+          },
+          "SlopeDirection": {
+            "translated-name": "SlopeDirection",
+            "description": "Get the slope direction of a tile at the specified grid coordinates. Returns 'left', 'right', or empty string if not a slope.",
+            "params": {
+              "gx": {
+                "name": "Grid X",
+                "desc": "Grid X coordinate"
+              },
+              "gy": {
+                "name": "Grid Y",
+                "desc": "Grid Y coordinate"
+              }
+            }
+          },
+          "TileState": {
+            "translated-name": "TileState",
+            "description": "Get the state of a tile at the specified grid coordinates. Returns 'solid', 'clear', 'jump-thru', 'avoid', 'slope-left', 'slope-right', or empty string if out of bounds.",
+            "params": {
+              "gx": {
+                "name": "Grid X",
+                "desc": "Grid X coordinate"
+              },
+              "gy": {
+                "name": "Grid Y",
+                "desc": "Grid Y coordinate"
+              }
+            }
           },
           "WaitTickCount": {
             "translated-name": "WaitTickCount",
-            "description": "Get how many ticks spent waiting for Pathfinding map. Useful for debugging if it's taking too long.",
+            "description": "Get the number of ticks spent waiting for the Pathfinding obstacle map to initialize. Used for debugging timeout issues.",
             "params": {}
           },
           "WorldToGridX": {
             "translated-name": "WorldToGridX",
-            "description": "Convert a world X coordinate (in pixels) to grid X coordinate. Use this to check which cell a position is in.",
+            "description": "Convert a world X position to grid X coordinate. Returns the grid tile number at the given pixel position.",
             "params": {
               "x": {
                 "name": "X",
-                "desc": "World X position in pixels to convert"
+                "desc": "World X position in pixels"
               }
             }
           },
           "WorldToGridY": {
             "translated-name": "WorldToGridY",
-            "description": "Convert world Y to grid Y",
+            "description": "Convert a world Y position to grid Y coordinate. Returns the grid tile number at the given pixel position.",
             "params": {
               "y": {
                 "name": "Y",
-                "desc": "Y Position to convert to grid Y position"
+                "desc": "World Y position in pixels"
+              }
+            }
+          },
+          "AngleToWaypoint": {
+            "translated-name": "AngleToWaypoint",
+            "description": "Get the angle in degrees from the character to the current waypoint. Returns 0 if no path is active.",
+            "params": {}
+          },
+          "CoyoteTime": {
+            "translated-name": "CoyoteTime",
+            "description": "Get the current coyote time setting in seconds. This is the window after walking off a ledge where jumps are still allowed.",
+            "params": {}
+          },
+          "CoyoteTimer": {
+            "translated-name": "CoyoteTimer",
+            "description": "Get the current coyote timer value in seconds. This counts down after leaving the ground. Returns 0 when on ground or timer expired.",
+            "params": {}
+          },
+          "CurrentPathAction": {
+            "translated-name": "CurrentPathAction",
+            "description": "Get the action name for a waypoint by index (e.g., 'walk', 'jump', 'fall', 'portal'). Returns empty string if index is out of bounds.",
+            "params": {
+              "index": {
+                "name": "Index",
+                "desc": "Waypoint index (0-based)"
               }
             }
           },
           "CurrentWaypoint": {
             "translated-name": "CurrentWaypoint",
-            "description": "Current waypoint index (0-based)",
+            "description": "Get the index of the current waypoint the character is moving toward. Returns -1 if no path is active.",
             "params": {}
           },
           "CurrentWaypointX": {
             "translated-name": "CurrentWaypointX",
-            "description": "Get the X position of the current waypoint in pixels. Returns -1 if no active path.",
+            "description": "Get the world X position of the current waypoint. Returns 0 if no path is active.",
             "params": {}
           },
           "CurrentWaypointY": {
             "translated-name": "CurrentWaypointY",
-            "description": "Get the Y position of the current waypoint in pixels. Returns -1 if no active path.",
+            "description": "Get the world Y position of the current waypoint. Returns 0 if no path is active.",
+            "params": {}
+          },
+          "DistanceToWaypoint": {
+            "translated-name": "DistanceToWaypoint",
+            "description": "Get the distance in pixels from the character to the current waypoint. Returns 0 if no path is active.",
+            "params": {}
+          },
+          "EstimatedVelocityX": {
+            "translated-name": "EstimatedVelocityX",
+            "description": "Get the estimated horizontal velocity needed to follow the current path. Returns 0 if no path is active.",
+            "params": {}
+          },
+          "JumpTowardTargetX": {
+            "translated-name": "JumpTowardTargetX",
+            "description": "Get the world X position of the jump_toward target. Returns 0 if not in jump_toward mode.",
+            "params": {}
+          },
+          "JumpTowardTargetY": {
+            "translated-name": "JumpTowardTargetY",
+            "description": "Get the world Y position of the jump_toward target. Returns 0 if not in jump_toward mode.",
+            "params": {}
+          },
+          "LedgeLeniency": {
+            "translated-name": "LedgeLeniency",
+            "description": "Get the ledge leniency setting in pixels. This is how far past a ledge edge the AI can walk before stopping.",
+            "params": {}
+          },
+          "LedgeRestriction": {
+            "translated-name": "LedgeRestriction",
+            "description": "Get whether ledge restriction is enabled. Returns 1 if enabled, 0 if disabled.",
             "params": {}
           },
           "NodeCount": {
             "translated-name": "NodeCount",
-            "description": "Total number of navigation nodes",
+            "description": "Get the total number of navigation nodes in the generated graph. Returns 0 if no graph exists.",
             "params": {}
           },
           "NodeWorldX": {
             "translated-name": "NodeWorldX",
-            "description": "Get the pixel X position of a node at grid coordinates. Returns -1 if no node exists at that position.",
+            "description": "Get the world X position of a node at the specified grid coordinates. Returns 0 if node doesn't exist.",
             "params": {
               "gx": {
                 "name": "Grid X",
@@ -640,7 +1316,7 @@
           },
           "NodeWorldY": {
             "translated-name": "NodeWorldY",
-            "description": "Get the pixel Y position of a node at grid coordinates. Returns -1 if no node exists at that position.",
+            "description": "Get the world Y position of a node at the specified grid coordinates. Returns 0 if node doesn't exist.",
             "params": {
               "gx": {
                 "name": "Grid X",
@@ -652,19 +1328,59 @@
               }
             }
           },
-          "PathLength": {
-            "translated-name": "PathLength",
-            "description": "Number of waypoints in current path",
+          "PathCost": {
+            "translated-name": "PathCost",
+            "description": "Get the total calculated cost of the current path. Returns 0 if no path is active.",
             "params": {}
+          },
+          "PathTargetGridX": {
+            "translated-name": "PathTargetGridX",
+            "description": "Get the grid X coordinate of the path target. Returns -1 if no path is active.",
+            "params": {}
+          },
+          "PathTargetGridY": {
+            "translated-name": "PathTargetGridY",
+            "description": "Get the grid Y coordinate of the path target. Returns -1 if no path is active.",
+            "params": {}
+          },
+          "PathTargetX": {
+            "translated-name": "PathTargetX",
+            "description": "Get the world X position of the path target. Pass 'original' for raw input or 'corrected' for ground-snapped position.",
+            "params": {
+              "type": {
+                "name": "Type",
+                "desc": "'original' or 'corrected'"
+              }
+            }
+          },
+          "PathTargetY": {
+            "translated-name": "PathTargetY",
+            "description": "Get the world Y position of the path target. Pass 'original' for raw input or 'corrected' for ground-snapped position.",
+            "params": {
+              "type": {
+                "name": "Type",
+                "desc": "'original' or 'corrected'"
+              }
+            }
           },
           "PortalCount": {
             "translated-name": "PortalCount",
-            "description": "Total number of portals",
+            "description": "Get the total number of portals in the navigation graph. Returns 0 if no portals have been added.",
+            "params": {}
+          },
+          "StoppingDistance": {
+            "translated-name": "StoppingDistance",
+            "description": "Get the calculated stopping distance in pixels based on the Platform behavior's current speed. Used for waypoint arrival detection.",
+            "params": {}
+          },
+          "WaypointCount": {
+            "translated-name": "WaypointCount",
+            "description": "Get the total number of waypoints in the current path. Returns 0 if no path is active.",
             "params": {}
           },
           "WaypointGridX": {
             "translated-name": "WaypointGridX",
-            "description": "Get the grid X coordinate of the waypoint at the specified index. Returns -1 if index is invalid.",
+            "description": "Get the grid X coordinate of a waypoint by index. Returns -1 if index is out of bounds.",
             "params": {
               "index": {
                 "name": "Index",
@@ -674,7 +1390,7 @@
           },
           "WaypointGridY": {
             "translated-name": "WaypointGridY",
-            "description": "Get the grid Y coordinate of the waypoint at the specified index. Returns -1 if index is invalid.",
+            "description": "Get the grid Y coordinate of a waypoint by index. Returns -1 if index is out of bounds.",
             "params": {
               "index": {
                 "name": "Index",
@@ -684,7 +1400,7 @@
           },
           "WaypointX": {
             "translated-name": "WaypointX",
-            "description": "Get the world X position (pixels) of the waypoint at the specified index. Returns -1 if index is invalid.",
+            "description": "Get the world X position of a waypoint by index. Returns 0 if index is out of bounds.",
             "params": {
               "index": {
                 "name": "Index",
@@ -694,7 +1410,7 @@
           },
           "WaypointY": {
             "translated-name": "WaypointY",
-            "description": "Get the world Y position (pixels) of the waypoint at the specified index. Returns -1 if index is invalid.",
+            "description": "Get the world Y position of a waypoint by index. Returns 0 if index is out of bounds.",
             "params": {
               "index": {
                 "name": "Index",

@@ -13,5 +13,10 @@
     "added": "WIP Skeleton of Features.\n- Basic Pathfinding.\n- Obstacle Maps.\n- Hazard System.\n- Debugging & Tuning\n- Advanced Usage Features.",
     "changed": "",
     "fixed": ""
+  },
+  "0.2.0.0": {
+    "added": "improved pathfinding implementation but needs further testing of the featureset.",
+    "changed": "",
+    "fixed": ""
   }
 }

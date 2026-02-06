@@ -1,39 +1,27 @@
 import { action, condition, expression } from "../template/aceDefine.js";
 
-const category = "Aces_In_Single_File";
+// ============================================================================
+// PATHFINDING ACTIONS
+// ============================================================================
 
-
-
-// ════════════════════════════════════════════════════════════
-// PATHFINDING Actions & Conditions
-// ════════════════════════════════════════════════════════════
 action("Pathfinding", "FindPath", {
   listName: "Find path to position",
-  displayText: "Find path to ({0}, {1}) [Ground correction: {2}]",
-  description: "Tell the AI to calculate and follow a path from current position to the target coordinates. Character will automatically move if Auto-Control is enabled. Enable 'Correct to ground' to automatically snap start/end positions to the nearest walkable ground.",
+  displayText: "Find path to ({0}, {1}) [Ground correction: {2}] [Mode: {3}]",
+  description: "Calculate a path from the character's position to the target coordinates. Use this when you want the AI to navigate to a specific point. Requires: Navigation graph must be generated first.",
   params: [
     { id: "x", name: "X", desc: "Target X position in pixels", type: "number", initialValue: "0" },
     { id: "y", name: "Y", desc: "Target Y position in pixels", type: "number", initialValue: "0" },
-    {
-      id: "correctToGround",
-      name: "Correct to ground",
-      desc: "Automatically snap start and target positions to the nearest walkable ground position. Useful when positions may be in mid-air.",
-      type: "combo",
-      initialValue: "no",
-      items: [
-        { no: "No" },
-        { yes: "Yes" }
-      ]
-    }
+    { id: "correctToGround", name: "Correct to ground", desc: "Snap start/target to nearest walkable ground position", type: "combo", initialValue: "no", items: [{ no: "No" }, { yes: "Yes" }] },
+    { id: "mode", name: "Mode", desc: "Path mode: 'reach' finds complete path or fails. 'jump_toward' paths to nearest reachable point then jumps toward target.", type: "combo", initialValue: "reach", items: [{ reach: "Reach (default)" }, { jump_toward: "Jump toward" }] }
   ]
-}, function(x, y, correctToGround) {
-  this.aceFindPath(x, y, correctToGround === "yes");
+}, function(x, y, correctToGround, mode) {
+  this.aceFindPath(x, y, correctToGround === "yes", mode);
 });
 
 action("Pathfinding", "StopPathfinding", {
   listName: "Stop pathfinding",
   displayText: "Stop pathfinding",
-  description: "Stop the character immediately and clear the current path. Character will stand still until given a new path."
+  description: "Stop the character immediately and clear the current path. Use when you want to cancel AI navigation and regain manual control."
 }, function() {
   this.aceStopPathfinding();
 });
@@ -41,16 +29,64 @@ action("Pathfinding", "StopPathfinding", {
 action("Pathfinding", "RegenerateGraph", {
   listName: "Regenerate navigation graph",
   displayText: "Regenerate navigation graph",
-  description: "Rebuild the pathfinding map from scratch. Use this after moving platforms or changing the level layout during gameplay."
+  description: "Rebuild the navigation graph from scratch. Use after modifying the level layout, adding/removing obstacles, or changing platform positions."
 }, function() {
   this.aceRegenerateGraph();
 });
 
+action("Pathfinding", "SetAutoControl", {
+  listName: "Set auto-control",
+  displayText: "Set auto-control: {0}",
+  description: "Toggle auto-movement on/off. When enabled, the behavior automatically controls the Platform behavior to follow paths. When disabled, you control movement yourself using path data expressions.",
+  params: [
+    { id: "enabled", name: "Enabled", desc: "Enable or disable auto-control", type: "combo", initialValue: "yes", items: [{ yes: "Enabled" }, { no: "Disabled" }] }
+  ]
+}, function(enabled) {
+  this.aceSetAutoControl(enabled === "yes");
+});
+
+action("Pathfinding", "SetCoyoteTime", {
+  listName: "Set coyote time",
+  displayText: "Set coyote time to {0} seconds",
+  description: "Set the coyote time window in seconds. The AI can jump within this window after walking off a ledge. Set to 0 to disable coyote time.",
+  params: [
+    { id: "seconds", name: "Seconds", desc: "Coyote time window in seconds", type: "number", initialValue: "0.1" }
+  ]
+}, function(seconds) {
+  this.aceSetCoyoteTime(seconds);
+});
+
+action("Pathfinding", "SetLedgeRestriction", {
+  listName: "Set ledge restriction",
+  displayText: "Set ledge restriction: {0}",
+  description: "Toggle ledge restriction for auto-movement. When enabled, the AI avoids walking off platform edges unless the path requires it. When disabled, the AI can walk freely to edges.",
+  params: [
+    { id: "enabled", name: "Enabled", desc: "Enable or disable ledge restriction", type: "combo", initialValue: "yes", items: [{ yes: "Enabled" }, { no: "Disabled" }] }
+  ]
+}, function(enabled) {
+  this.aceSetLedgeRestriction(enabled === "yes");
+});
+
+action("Pathfinding", "SetLedgeLeniency", {
+  listName: "Set ledge leniency",
+  displayText: "Set ledge leniency to {0} pixels",
+  description: "Set pixels of tolerance past a ledge edge before stopping (0 = strict stop at edge). Only used when ledge restriction is enabled.",
+  params: [
+    { id: "pixels", name: "Pixels", desc: "Pixels past ledge edge before stopping", type: "number", initialValue: "0" }
+  ]
+}, function(pixels) {
+  this.aceSetLedgeLeniency(pixels);
+});
+
+// ============================================================================
+// PATHFINDING CONDITIONS
+// ============================================================================
+
 condition("Pathfinding", "HasPath", {
-  listName: "Has path",
+  listName: "Has active path",
   displayText: "Has active path",
-  description: "Check if the character is currently following a path to a destination. True while moving, false when stopped or path completed.",
-  isInvertible: true,
+  description: "Check if the character currently has an active pathfinding path. Returns true while navigating, false when idle or path is complete.",
+  isInvertible: true
 }, function() {
   return this.aceHasPath();
 });
@@ -58,8 +94,8 @@ condition("Pathfinding", "HasPath", {
 condition("Pathfinding", "OnPathFound", {
   listName: "On path found",
   displayText: "On path found",
-  description: "Triggered when a path is successfully calculated to the target. Use this to react when the AI finds a valid route.",
-  isTrigger: true,
+  description: "Triggered when a path has been successfully calculated. Use this to start custom actions when pathfinding succeeds.",
+  isTrigger: true
 }, function() {
   return true;
 });
@@ -67,8 +103,17 @@ condition("Pathfinding", "OnPathFound", {
 condition("Pathfinding", "OnPathFailed", {
   listName: "On path failed",
   displayText: "On path failed",
-  description: "Triggered when pathfinding fails to find a valid route to the target. Use this to handle unreachable destinations.",
-  isTrigger: true,
+  description: "Triggered when pathfinding fails to find a valid path to the target. Use this to handle unreachable destinations or implement fallback behaviors.",
+  isTrigger: true
+}, function() {
+  return true;
+});
+
+condition("Pathfinding", "OnPathComplete", {
+  listName: "On path complete",
+  displayText: "On path complete",
+  description: "Triggered when the AI arrives at the final destination. Use this to trigger arrival animations, next actions, or goal completion logic.",
+  isTrigger: true
 }, function() {
   return true;
 });
@@ -76,394 +121,141 @@ condition("Pathfinding", "OnPathFailed", {
 condition("Pathfinding", "OnGraphGenerated", {
   listName: "On navigation graph generated",
   displayText: "On navigation graph generated",
-  description: "Triggered when the navigation graph finishes creating all nodes and their connections. Use this to know when pathfinding is ready to use.",
-  isTrigger: true,
+  description: "Triggered when the navigation graph has been successfully generated. Use this to start pathfinding operations after map setup.",
+  isTrigger: true
 }, function() {
   return true;
+});
+
+condition("Pathfinding", "OnWaypointReached", {
+  listName: "On waypoint reached",
+  displayText: "On waypoint reached",
+  description: "Triggered each time the character reaches a waypoint along the path. Use this to play footstep sounds, particle effects, or update animations.",
+  isTrigger: true
+}, function() {
+  return true;
+});
+
+condition("Pathfinding", "OnJumpTowardExecuted", {
+  listName: "On jump toward executed",
+  displayText: "On jump toward executed",
+  description: "Triggered when the 'jump_toward' mode executes the final jump toward an unreachable target. Use this to handle partial path completion.",
+  isTrigger: true
+}, function() {
+  return true;
+});
+
+condition("Pathfinding", "OnRePathTriggered", {
+  listName: "On re-path triggered",
+  displayText: "On re-path triggered",
+  description: "Triggered when automatic re-pathing occurs due to the character drifting too far from the path. Use this to monitor navigation accuracy.",
+  isTrigger: true
+}, function() {
+  return true;
+});
+
+condition("Pathfinding", "IsPlatformEnabled", {
+  listName: "Is platform enabled",
+  displayText: "Platform behavior is enabled",
+  description: "Check if the associated Platform behavior is currently enabled. Returns false if Platform behavior is disabled or not found.",
+  isInvertible: true
+}, function() {
+  return this.aceIsPlatformEnabled();
+});
+
+condition("Pathfinding", "IsAtLedge", {
+  listName: "Is at ledge",
+  displayText: "Is at ledge",
+  description: "Check if the character is currently standing on a ledge node (edge of a platform). Use this to trigger ledge-specific behaviors or animations.",
+  isInvertible: true
+}, function() {
+  return this.aceIsAtLedge();
+});
+
+condition("Pathfinding", "IsAtIsland", {
+  listName: "Is at island",
+  displayText: "Is at island",
+  description: "Check if the character is standing on a single-tile platform (isolated platform). Use this to detect precarious positions or trigger special behaviors.",
+  isInvertible: true
+}, function() {
+  return this.aceIsAtIsland();
 });
 
 condition("Pathfinding", "NodeExistsGrid", {
   listName: "Node exists at grid position",
   displayText: "Node exists at grid ({0}, {1})",
-  description: "Check if a navigation node exists at the specified grid coordinates. A node exists where the character can stand (empty cell above a solid cell).",
+  description: "Check if a navigation node exists at the specified grid coordinates. Use this to validate positions before pathfinding or placing objects.",
   isInvertible: true,
   params: [
-    { id: "gx", name: "Grid X", desc: "Grid X coordinate", type: "number", initialValue: "0" },
-    { id: "gy", name: "Grid Y", desc: "Grid Y coordinate", type: "number", initialValue: "0" }
+    { id: "gx", name: "Grid X", desc: "Grid X coordinate (tile number)", type: "number", initialValue: "0" },
+    { id: "gy", name: "Grid Y", desc: "Grid Y coordinate (tile number)", type: "number", initialValue: "0" }
   ]
 }, function(gx, gy) {
-  return this.getNode(gx, gy) !== null;
+  return this.aceNodeExistsGrid(gx, gy);
 });
 
 condition("Pathfinding", "NodeExistsWorld", {
   listName: "Node exists at world position",
-  displayText: "Node exists at ({0}, {1})",
-  description: "Check if a navigation node exists at the specified world position (pixels). Automatically converts to grid coordinates.",
+  displayText: "Node exists at world ({0}, {1})",
+  description: "Check if a navigation node exists at the specified world coordinates. Use this to validate world positions before pathfinding.",
   isInvertible: true,
   params: [
     { id: "x", name: "X", desc: "World X position in pixels", type: "number", initialValue: "0" },
     { id: "y", name: "Y", desc: "World Y position in pixels", type: "number", initialValue: "0" }
   ]
 }, function(x, y) {
-  const grid = this.worldToGrid(x, y);
-  return this.getNode(grid.gx, grid.gy) !== null;
+  return this.aceNodeExistsWorld(x, y);
 });
 
-// ════════════════════════════════════════════════════════════
-// CUSTOM OBSTACLE MAP Actions & Conditions
-// ════════════════════════════════════════════════════════════
-action("ObstacleMap", "CreateCustomObstacleMap", {
-  listName: "Create custom obstacle map",
-  displayText: "Create custom obstacle map {0} × {1} cells",
-  description: "Create empty obstacle map with specified dimensions (in grid cells)",
-  params: [
-    { id: "width", 
-      name: "Width (cells)", 
-      desc: "Width in grid cells", 
-      type: "number", 
-      initialValue: "30" 
-    },
-    { id: "height", 
-      name: "Height (cells)", 
-      desc: "Height in grid cells", 
-      type: "number", 
-      initialValue: "20" 
-    }
-  ]
-}, function(width, height) {
-  this.aceCreateCustomObstacleMap(width, height);
-});
+// ============================================================================
+// PATHFINDING EXPRESSIONS
+// ============================================================================
 
-action("ObstacleMap", "SetObstacleCell", {
-  listName: "Set obstacle cell",
-  displayText: "Set cell ({0}, {1}) Solid: {2}",
-  description: "Set whether a specific grid cell is Solid/blocked.",
-  params: [
-    { id: "gx", name: "Grid X", desc: "X coordinate in grid cells", type: "number", initialValue: "0" },
-    { id: "gy", name: "Grid Y", desc: "Y coordinate in grid cells", type: "number", initialValue: "0" },
-    { id: "solid", name: "Solid", desc: "Is the cell blocked/solid?", type: "combo", initialValue: "yes",
-      items: [ { yes: "Yes (blocked)" }, { no: "No (clear)" } ]
-    }
-  ]
-}, function(gx, gy, solid) {
-  this.aceSetObstacleCell(gx, gy, solid === "yes");
-});
-
-action("ObstacleMap", "SetObstacleCellXY", {
-  listName: "Set obstacle cell at world position",
-  displayText: "Set cell at ({0}, {1}) Solid: {2}",
-  description: "Set whether cell at world position is solid",
-  params: [
-    { id: "x", name: "X", desc: "X coordinate in world pixels", type: "number", initialValue: "0" },
-    { id: "y", name: "Y", desc: "Y coordinate in world pixels",type: "number", initialValue: "0" },
-    { id: "solid",name: "Solid", desc: "Is the cell blocked/solid?", type: "combo", initialValue: "yes",
-      items: [
-        { yes: "Yes (blocked)" },
-        { no: "No (clear)" }
-      ]
-    }
-  ]
-}, function(x, y, solid) {
-  const grid = this.worldToGrid(x, y);
-  this.aceSetObstacleCell(grid.gx, grid.gy, solid === "yes");
-});
-
-action("ObstacleMap", "ClearObstacleMap", {
-  listName: "Clear obstacle map",
-  displayText: "Clear obstacle map",
-  description: "Remove the obstacle map and navigation graph"
-}, function() {
-  this.aceClearObstacleMap();
-});
-
-action("ObstacleMap", "LoadObstacleMapFromJSON", {
-  listName: "Load obstacle map from JSON",
-  displayText: "Load obstacle map from JSON: {0}",
-  description: "Load obstacle map data from JSON string",
-  params: [
-    { id: "json", 
-      name: "JSON Data", 
-      desc: "JSON string containing obstacle map data",
-      type: "string", 
-      initialValue: "" }
-  ]
-}, function(jsonData) {
-  this.aceLoadObstacleMapFromJSON(jsonData);
-});
-
-action("ObstacleMap", "GenerateNodesFromCustomMap", {
-  listName: "Generate Navigation Graph",
-  displayText: "Generate navigation graph from obstacle map",
-  description: "Build the navigation graph from the current obstacle map. Works with any obstacle map source (custom or from Pathfinding behavior). Call this after modifying the obstacle map manually."
-}, function() {
-  this.aceGenerateNodesFromCustomMap();
-});
-
-action("ObstacleMap", "UsePathfindingObstacleMap", {
-  listName: "Use Pathfinding obstacle map",
-  displayText: "Use Pathfinding obstacle map (auto-regenerate: {0})",
-  description: "Get the obstacle map from the Pathfinding behavior. This is the easiest way to set up platformer pathfinding! Just call this once at 'On start of layout'. If the map is already ready, it copies immediately. If not, it waits automatically. Triggers 'On Pathfinding map ready' when done.",
-  params: [
-    {
-      id: "autoRegen",
-      name: "Auto-Regenerate Navigation Graph",
-      desc: "Automatically build navigation graph after copying (recommended: Yes)",
-      type: "combo",
-      initialValue: "yes",
-      items: [
-        { yes: "Yes (recommended)" },
-        { no: "No (manual)" }
-      ]
-    }
-  ]
-}, function(autoRegen) {
-  this.aceUsePathfindingObstacleMap(autoRegen === "yes");
-});
-
-
-condition("ObstacleMap", "OnObstacleMapCreated", {
-  listName: "On obstacle map created",
-  displayText: "On obstacle map created",
-  description: "Triggered when obstacle map is created or regenerated",
-  isTrigger: true
-}, function() {
-  return true;
-});
-
-condition("ObstacleMap", "OnObstacleMapRemoved", {
-  listName: "On obstacle map removed",
-  displayText: "On obstacle map removed",
-  description: "Triggered when obstacle map is cleared",
-  isTrigger: true
-}, function() {
-  return true;
-});
-
-condition("ObstacleMap", "OnPathfindingMapReady", {
-  listName: "On Pathfinding map ready",
-  displayText: "On Pathfinding map ready",
-  description: "Triggered when 'Wait for Pathfinding obstacle map' succeeds. This means the obstacle map is copied and ready - you can now use 'Find path to position'!",
-  isTrigger: true
-}, function() {
-  return true;
-});
-
-condition("ObstacleMap", "OnPathfindingMapFailed", {
-  listName: "On Pathfinding map failed",
-  displayText: "On Pathfinding map failed",
-  description: "Triggered if getting the Pathfinding map fails. Usually means no Pathfinding behavior exists on this object.",
-  isTrigger: true
-}, function() {
-  return true;
-});
-
-condition("ObstacleMap", "OnPathfindingMapTimeout", {
-  listName: "On Pathfinding map timeout",
-  displayText: "On Pathfinding map timeout",
-  description: "Triggered if waiting for Pathfinding map takes too long (~10 seconds). Make sure Pathfinding behavior exists and has obstacles to detect.",
-  isTrigger: true
-}, function() {
-  return true;
-});
-
-condition("ObstacleMap", "IsSettingUpPathfinding", {
-  listName: "Is setting up Pathfinding map",
-  displayText: "Is setting up Pathfinding map",
-  description: "True if currently waiting for the Pathfinding behavior's obstacle map to become ready.",
-  isInvertible: true
-}, function() {
-  return this.isWaitingForPathfindingMap;
-});
-
-condition("ObstacleMap", "IsCellSolidGrid", {
-  listName: "Is cell solid (grid)",
-  displayText: "Cell at grid ({0}, {1}) is solid",
-  description: "Check if a specific grid cell is blocked/solid. Use grid coordinates (cell numbers, not pixels).",
-  isInvertible: true,
-  params: [
-    { id: "gx", name: "Grid X", desc: "Grid X coordinate (cell number)", type: "number", initialValue: "0" },
-    { id: "gy", name: "Grid Y", desc: "Grid Y coordinate (cell number)", type: "number", initialValue: "0" }
-  ]
-}, function(gx, gy) {
-  return this.isCellBlocked(gx, gy);
-});
-
-condition("ObstacleMap", "IsCellSolidWorld", {
-  listName: "Is cell solid (world)",
-  displayText: "Cell at ({0}, {1}) is solid",
-  description: "Check if a grid cell at a world position (in pixels) is blocked/solid. Automatically converts pixel coordinates to grid cell.",
-  isInvertible: true,
-  params: [
-    { id: "x", name: "X", desc: "World X position in pixels", type: "number", initialValue: "0" },
-    { id: "y", name: "Y", desc: "World Y position in pixels", type: "number", initialValue: "0" }
-  ]
-}, function(x, y) {
-  const grid = this.worldToGrid(x, y);
-  return this.isCellBlocked(grid.gx, grid.gy);
-});
-
-// ════════════════════════════════════════
-// HAZARD AVOIDANCE ACTIONS & CONDITIONS
-// ════════════════════════════════════════
-
-action("Hazards", "AddRectHazard", {
-  listName: "Add rectangle hazard",
-  displayText: "Add rectangle hazard at ({0},{1}) size ({2}×{3}) severity {4}",
-  description: "Mark a rectangular area as dangerous. AI will avoid this region when pathfinding. Use for spikes, fire, enemy zones, etc.",
-  params: [
-    { id: "x", name: "X", desc: "Left edge X coordinate in pixels, preferably use bounding box of hazard object", type: "number", initialValue: "0" },
-    { id: "y", name: "Y", desc: "Top edge Y coordinate in pixels, preferably use bounding box of hazard object", type: "number", initialValue: "0" },
-    { id: "width", name: "Width", desc: "Width of hazardous area in pixels, preferably use bounding box of hazard object", type: "number", initialValue: "128" },
-    { id: "height", name: "Height", desc: "Height of hazardous area in pixels, preferably use bounding box of hazard object", type: "number", initialValue: "128" },
-    { id: "severity", name: "Severity", desc: "How much AI avoids this area (1.0 = slight avoidance, 10.0 = strong avoidance)", type: "number", initialValue: "3.0" }
-  ]
-}, function(x, y, width, height, severity) {
-  this.aceAddRectHazard(x, y, width, height, severity);
-});
-
-action("Hazards", "AddRectHazardGrid", {
-  listName: "Add rectangle hazard (grid)",
-  displayText: "Add rectangle hazard at grid ({0},{1}) size ({2}×{3}) severity {4}",
-  description: "Mark rectangular region as hazardous using grid coordinates",
-  params: [
-    { id: "gx", name: "Grid X" , desc: "Grid X coordinate of the hazard", type: "number", initialValue: "0" },
-    { id: "gy", name: "Grid Y", desc: "Grid Y coordinate of the hazard", type: "number", initialValue: "0" },
-    { id: "gw", name: "Grid Width", desc: "Grid width of the hazard", type: "number", initialValue: "4" },
-    { id: "gh", name: "Grid Height", desc: "Grid height of the hazard", type: "number", initialValue: "4" },
-    { id: "severity", name: "Severity", desc: "Severity of the hazard", type: "number", initialValue: "3.0" }
-  ]
-}, function(gx, gy, gw, gh, severity) {
-  const worldPos = this.gridToWorld(gx, gy);
-  const width = gw * this.cellSize;
-  const height = gh * this.cellSize;
-  this.aceAddRectHazard(worldPos.x, worldPos.y, width, height, severity);
-});
-
-action("Hazards", "AddCircleHazard", {
-  listName: "Add circle hazard",
-  displayText: "Add circle hazard at ({0},{1}) radius {2} severity {3}",
-  description: "Mark a circular area as dangerous. AI will avoid this region when pathfinding. Good for explosions, magic zones, or round enemy patrol areas.",
-  params: [
-    { id: "x", name: "X", desc: "Center X coordinate in pixels", type: "number", initialValue: "0" },
-    { id: "y", name: "Y", desc: "Center Y coordinate in pixels", type: "number", initialValue: "0" },
-    { id: "radius", name: "Radius", desc: "Size of hazardous area in pixels from centre", type: "number", initialValue: "64" },
-    { id: "severity", name: "Severity", desc: "How much AI avoids this area (1.0 = slight avoidance, 10.0 = strong avoidance)", type: "number", initialValue: "3.0" }
-  ]
-}, function(x, y, radius, severity) {
-  this.aceAddCircleHazard(x, y, radius, severity);
-});
-
-action("Hazards", "RemoveHazard", {
-  listName: "Remove hazard",
-  displayText: "Remove hazard ID {0}",
-  description: "Remove a specific hazard by its unique ID number. Get the ID when adding hazards or use expressions to check.",
-  params: [
-    { id: "hazard_id", name: "Hazard ID", desc: "Unique ID number of the hazard to remove", type: "number", initialValue: "1" }
-  ]
-}, function(hazardId) {
-  this.aceRemoveHazard(hazardId);
-});
-
-action("Hazards", "ClearAllHazards", {
-  listName: "Clear all hazards",
-  displayText: "Clear all hazards",
-  description: "Remove all hazardous regions at once. Use this to reset the hazard map when changing levels or game states."
-}, function() {
-  this.aceClearAllHazards();
-});
-
-condition("Hazards", "Is_Position_Hazardous", {
-  listName: "Is position hazardous",
-  displayText: "Is position ({0},{1}) hazardous",
-  description: "Check if a specific coordinate is inside any hazardous area. Returns true if position is dangerous, false if safe.",
-  params: [
-    { id: "x", name: "X", desc: "X coordinate in pixels to check", type: "number", initialValue: "0" },
-    { id: "y", name: "Y", desc: "Y coordinate in pixels to check", type: "number", initialValue: "0" }
-  ]
-}, function(x, y) {
-  return this._isPositionHazardous(x, y);
-});
-
-// ════════════════════════════════════════════════════════════
-// PORTAL Actions & Conditions
-// ════════════════════════════════════════════════════════════
-action("Portals", "AddPortal", {
-  listName: "Add portal",
-  displayText: "Add {0} portal from ({1},{2}) to ({3},{4}) cost {5}",
-  description: "Create a special connection between two points (teleporter, ladder, elevator, door). AI can use this to instantly travel between locations.",
-  params: [
-    {
-      id: "type",
-      name: "Type",
-      desc: "What kind of portal connection this represents",
-      type: "combo",
-      initialValue: "teleport",
-      items: [
-        { teleport: "Teleporter" },
-        { ladder: "Ladder" },
-        { elevator: "Elevator" },
-        { zipline: "Zipline" }
-      ]
-    },
-    { id: "entry_x", name: "Entry X", desc: "Entry X coordinate", type: "number", initialValue: "0" },
-    { id: "entry_y", name: "Entry Y", desc: "Entry Y coordinate", type: "number", initialValue: "0" },
-    { id: "exit_x", name: "Exit X", desc: "Exit X coordinate", type: "number", initialValue: "0" },
-    { id: "exit_y", name: "Exit Y", desc: "Exit Y coordinate", type: "number", initialValue: "0" },
-    { id: "cost", name: "Cost", desc: "Cost to use the portal", type: "number", initialValue: "50" }
-  ]
-}, function(type, entryX, entryY, exitX, exitY, cost) {
-  this.aceAddPortal(entryX, entryY, exitX, exitY, type, cost);
-});
-
-// ════════════════════════════════════════════════════════════
-// EXPRESSIONS - PATHFINDING
-// ════════════════════════════════════════════════════════════
-
-expression("Pathfinding", "PathLength", {
+expression("Pathfinding", "WaypointCount", {
   returnType: "number",
-  description: "Number of waypoints in current path"
+  description: "Get the total number of waypoints in the current path. Returns 0 if no path is active."
 }, function() {
-  return this.aceGetPathLength();
+  return this.aceGetWaypointCount();
 });
 
 expression("Pathfinding", "CurrentWaypoint", {
   returnType: "number",
-  description: "Current waypoint index (0-based)"
+  description: "Get the index of the current waypoint the character is moving toward. Returns -1 if no path is active."
 }, function() {
   return this.aceGetCurrentWaypoint();
 });
 
 expression("Pathfinding", "NodeCount", {
   returnType: "number",
-  description: "Total number of navigation nodes"
+  description: "Get the total number of navigation nodes in the generated graph. Returns 0 if no graph exists."
 }, function() {
   return this.aceGetNodeCount();
 });
 
 expression("Pathfinding", "PortalCount", {
   returnType: "number",
-  description: "Total number of portals"
+  description: "Get the total number of portals in the navigation graph. Returns 0 if no portals have been added."
 }, function() {
   return this.aceGetPortalCount();
 });
 
 expression("Pathfinding", "CurrentWaypointX", {
   returnType: "number",
-  description: "Get the X position of the current waypoint in pixels. Returns -1 if no active path."
+  description: "Get the world X position of the current waypoint. Returns 0 if no path is active."
 }, function() {
   return this.aceGetCurrentWaypointX();
 });
 
 expression("Pathfinding", "CurrentWaypointY", {
   returnType: "number",
-  description: "Get the Y position of the current waypoint in pixels. Returns -1 if no active path."
+  description: "Get the world Y position of the current waypoint. Returns 0 if no path is active."
 }, function() {
   return this.aceGetCurrentWaypointY();
 });
 
 expression("Pathfinding", "WaypointGridX", {
   returnType: "number",
-  description: "Get the grid X coordinate of the waypoint at the specified index. Returns -1 if index is invalid.",
+  description: "Get the grid X coordinate of a waypoint by index. Returns -1 if index is out of bounds.",
   params: [
     { id: "index", name: "Index", desc: "Waypoint index (0-based)", type: "number" }
   ]
@@ -473,7 +265,7 @@ expression("Pathfinding", "WaypointGridX", {
 
 expression("Pathfinding", "WaypointGridY", {
   returnType: "number",
-  description: "Get the grid Y coordinate of the waypoint at the specified index. Returns -1 if index is invalid.",
+  description: "Get the grid Y coordinate of a waypoint by index. Returns -1 if index is out of bounds.",
   params: [
     { id: "index", name: "Index", desc: "Waypoint index (0-based)", type: "number" }
   ]
@@ -483,7 +275,7 @@ expression("Pathfinding", "WaypointGridY", {
 
 expression("Pathfinding", "WaypointX", {
   returnType: "number",
-  description: "Get the world X position (pixels) of the waypoint at the specified index. Returns -1 if index is invalid.",
+  description: "Get the world X position of a waypoint by index. Returns 0 if index is out of bounds.",
   params: [
     { id: "index", name: "Index", desc: "Waypoint index (0-based)", type: "number" }
   ]
@@ -493,7 +285,7 @@ expression("Pathfinding", "WaypointX", {
 
 expression("Pathfinding", "WaypointY", {
   returnType: "number",
-  description: "Get the world Y position (pixels) of the waypoint at the specified index. Returns -1 if index is invalid.",
+  description: "Get the world Y position of a waypoint by index. Returns 0 if index is out of bounds.",
   params: [
     { id: "index", name: "Index", desc: "Waypoint index (0-based)", type: "number" }
   ]
@@ -503,7 +295,7 @@ expression("Pathfinding", "WaypointY", {
 
 expression("Pathfinding", "NodeWorldX", {
   returnType: "number",
-  description: "Get the pixel X position of a node at grid coordinates. Returns -1 if no node exists at that position.",
+  description: "Get the world X position of a node at the specified grid coordinates. Returns 0 if node doesn't exist.",
   params: [
     { id: "gx", name: "Grid X", desc: "Grid X coordinate", type: "number" },
     { id: "gy", name: "Grid Y", desc: "Grid Y coordinate", type: "number" }
@@ -514,7 +306,7 @@ expression("Pathfinding", "NodeWorldX", {
 
 expression("Pathfinding", "NodeWorldY", {
   returnType: "number",
-  description: "Get the pixel Y position of a node at grid coordinates. Returns -1 if no node exists at that position.",
+  description: "Get the world Y position of a node at the specified grid coordinates. Returns 0 if node doesn't exist.",
   params: [
     { id: "gx", name: "Grid X", desc: "Grid X coordinate", type: "number" },
     { id: "gy", name: "Grid Y", desc: "Grid Y coordinate", type: "number" }
@@ -523,150 +315,1037 @@ expression("Pathfinding", "NodeWorldY", {
   return this.aceGetNodeWorldY(gx, gy);
 });
 
+expression("Pathfinding", "PathCost", {
+  returnType: "number",
+  description: "Get the total calculated cost of the current path. Returns 0 if no path is active."
+}, function() {
+  return this.aceGetPathCost();
+});
 
-// ════════════════════════════════════════════════════════════
-// EXPRESSIONS - OBSTACLE MAP
-// ════════════════════════════════════════════════════════════
+expression("Pathfinding", "PathTargetX", {
+  returnType: "number",
+  description: "Get the world X position of the path target. Pass 'original' for raw input or 'corrected' for ground-snapped position.",
+  params: [
+    { id: "type", name: "Type", desc: "'original' or 'corrected'", type: "string" }
+  ]
+}, function(type) {
+  return this.aceGetPathTargetX(type);
+});
+
+expression("Pathfinding", "PathTargetY", {
+  returnType: "number",
+  description: "Get the world Y position of the path target. Pass 'original' for raw input or 'corrected' for ground-snapped position.",
+  params: [
+    { id: "type", name: "Type", desc: "'original' or 'corrected'", type: "string" }
+  ]
+}, function(type) {
+  return this.aceGetPathTargetY(type);
+});
+
+expression("Pathfinding", "PathTargetGridX", {
+  returnType: "number",
+  description: "Get the grid X coordinate of the path target. Returns -1 if no path is active."
+}, function() {
+  return this.aceGetPathTargetGridX();
+});
+
+expression("Pathfinding", "PathTargetGridY", {
+  returnType: "number",
+  description: "Get the grid Y coordinate of the path target. Returns -1 if no path is active."
+}, function() {
+  return this.aceGetPathTargetGridY();
+});
+
+expression("Pathfinding", "AngleToWaypoint", {
+  returnType: "number",
+  description: "Get the angle in degrees from the character to the current waypoint. Returns 0 if no path is active."
+}, function() {
+  return this.aceGetAngleToWaypoint();
+});
+
+expression("Pathfinding", "DistanceToWaypoint", {
+  returnType: "number",
+  description: "Get the distance in pixels from the character to the current waypoint. Returns 0 if no path is active."
+}, function() {
+  return this.aceGetDistanceToWaypoint();
+});
+
+expression("Pathfinding", "CurrentPathAction", {
+  returnType: "string",
+  description: "Get the action name for a waypoint by index (e.g., 'walk', 'jump', 'fall', 'portal'). Returns empty string if index is out of bounds.",
+  params: [
+    { id: "index", name: "Index", desc: "Waypoint index (0-based)", type: "number" }
+  ]
+}, function(index) {
+  return this.aceGetCurrentPathAction(index);
+});
+
+expression("Pathfinding", "EstimatedVelocityX", {
+  returnType: "number",
+  description: "Get the estimated horizontal velocity needed to follow the current path. Returns 0 if no path is active."
+}, function() {
+  return this.aceGetEstimatedVelocityX();
+});
+
+expression("Pathfinding", "StoppingDistance", {
+  returnType: "number",
+  description: "Get the calculated stopping distance in pixels based on the Platform behavior's current speed. Used for waypoint arrival detection."
+}, function() {
+  return this.aceGetStoppingDistance();
+});
+
+expression("Pathfinding", "CoyoteTime", {
+  returnType: "number",
+  description: "Get the current coyote time setting in seconds. This is the window after walking off a ledge where jumps are still allowed."
+}, function() {
+  return this.aceGetCoyoteTime();
+});
+
+expression("Pathfinding", "CoyoteTimer", {
+  returnType: "number",
+  description: "Get the current coyote timer value in seconds. This counts down after leaving the ground. Returns 0 when on ground or timer expired."
+}, function() {
+  return this.aceGetCoyoteTimer();
+});
+
+expression("Pathfinding", "LedgeRestriction", {
+  returnType: "number",
+  description: "Get whether ledge restriction is enabled. Returns 1 if enabled, 0 if disabled."
+}, function() {
+  return this.aceGetLedgeRestriction();
+});
+
+expression("Pathfinding", "LedgeLeniency", {
+  returnType: "number",
+  description: "Get the ledge leniency setting in pixels. This is how far past a ledge edge the AI can walk before stopping."
+}, function() {
+  return this.aceGetLedgeLeniency();
+});
+
+expression("Pathfinding", "JumpTowardTargetX", {
+  returnType: "number",
+  description: "Get the world X position of the jump_toward target. Returns 0 if not in jump_toward mode."
+}, function() {
+  return this.aceGetJumpTowardTargetX();
+});
+
+expression("Pathfinding", "JumpTowardTargetY", {
+  returnType: "number",
+  description: "Get the world Y position of the jump_toward target. Returns 0 if not in jump_toward mode."
+}, function() {
+  return this.aceGetJumpTowardTargetY();
+});
+
+// ============================================================================
+// OBSTACLE MAP ACTIONS
+// ============================================================================
+
+action("ObstacleMap", "CreateCustomObstacleMap", {
+  listName: "Create custom obstacle map",
+  displayText: "Create custom obstacle map [Width: {0} tiles] [Height: {1} tiles]",
+  description: "Create a custom obstacle map with the specified dimensions in tiles. All tiles are initialized to 'clear' state. Use this when not using the Pathfinding behavior's obstacle map.",
+  params: [
+    { id: "width", name: "Width", desc: "Width in tiles", type: "number", initialValue: "32" },
+    { id: "height", name: "Height", desc: "Height in tiles", type: "number", initialValue: "24" }
+  ]
+}, function(width, height) {
+  this.aceCreateCustomObstacleMap(width, height);
+});
+
+action("ObstacleMap", "SetTileState", {
+  listName: "Set tile state",
+  displayText: "Set tile at ({0}, {1}) to {2}",
+  description: "Set the state of a tile at the specified grid coordinates. Use this to mark tiles as solid obstacles, clear space, jump-thru platforms, areas to avoid, or slopes.",
+  params: [
+    { id: "gx", name: "Grid X", desc: "Grid X coordinate (tile number)", type: "number", initialValue: "0" },
+    { id: "gy", name: "Grid Y", desc: "Grid Y coordinate (tile number)", type: "number", initialValue: "0" },
+    { id: "state", name: "State", desc: "Tile state to set", type: "combo", initialValue: "solid",
+      items: [
+        { solid: "Solid" },
+        { clear: "Clear" },
+        { "jump-thru": "Jump-thru" },
+        { avoid: "Avoid" },
+        { "slope-left": "Slope left" },
+        { "slope-right": "Slope right" }
+      ]
+    }
+  ]
+}, function(gx, gy, state) {
+  this.aceSetTileState(gx, gy, state);
+});
+
+action("ObstacleMap", "SetTileStateWorld", {
+  listName: "Set tile state at world position",
+  displayText: "Set tile at world ({0}, {1}) to {2}",
+  description: "Set the state of a tile at the specified world coordinates. The world position is automatically converted to grid coordinates.",
+  params: [
+    { id: "x", name: "X", desc: "World X position in pixels", type: "number", initialValue: "0" },
+    { id: "y", name: "Y", desc: "World Y position in pixels", type: "number", initialValue: "0" },
+    { id: "state", name: "State", desc: "Tile state to set", type: "combo", initialValue: "solid",
+      items: [
+        { solid: "Solid" },
+        { clear: "Clear" },
+        { "jump-thru": "Jump-thru" },
+        { avoid: "Avoid" },
+        { "slope-left": "Slope left" },
+        { "slope-right": "Slope right" }
+      ]
+    }
+  ]
+}, function(x, y, state) {
+  this.aceSetTileStateWorld(x, y, state);
+});
+
+action("ObstacleMap", "SetTileHazard", {
+  listName: "Set tile hazard severity",
+  displayText: "Set tile hazard at ({0}, {1}) to {2}",
+  description: "Set the hazard severity for a specific tile. Higher values make the AI avoid this tile more strongly. 0 = no hazard. Use this to mark dangerous areas like spikes or lava.",
+  params: [
+    { id: "gx", name: "Grid X", desc: "Grid X coordinate (tile number)", type: "number", initialValue: "0" },
+    { id: "gy", name: "Grid Y", desc: "Grid Y coordinate (tile number)", type: "number", initialValue: "0" },
+    { id: "severity", name: "Severity", desc: "Hazard severity (0 = none, higher = more dangerous)", type: "number", initialValue: "0" }
+  ]
+}, function(gx, gy, severity) {
+  this.aceSetTileHazard(gx, gy, severity);
+});
+
+action("ObstacleMap", "ClearObstacleMap", {
+  listName: "Clear obstacle map",
+  displayText: "Clear obstacle map",
+  description: "Remove the obstacle map and all associated data. Use this when switching levels or resetting the navigation system."
+}, function() {
+  this.aceClearObstacleMap();
+});
+
+action("ObstacleMap", "LoadObstacleMapFromJSON", {
+  listName: "Load obstacle map from JSON",
+  displayText: "Load obstacle map from JSON: {0}",
+  description: "Load a previously saved obstacle map from JSON string. Use this to restore saved maps or load pre-built level data.",
+  params: [
+    { id: "json", name: "JSON", desc: "JSON string containing obstacle map data", type: "string", initialValue: "\"\"" }
+  ]
+}, function(json) {
+  this.aceLoadObstacleMapFromJSON(json);
+});
+
+action("ObstacleMap", "GenerateNodesFromCustomMap", {
+  listName: "Generate navigation graph",
+  displayText: "Generate navigation graph from obstacle map",
+  description: "Generate the navigation graph from the current obstacle map. Call this after setting up all tiles and before pathfinding. This is an expensive operation."
+}, function() {
+  this.aceGenerateNodesFromCustomMap();
+});
+
+action("ObstacleMap", "UsePathfindingObstacleMap", {
+  listName: "Use Pathfinding obstacle map",
+  displayText: "Use Pathfinding obstacle map [Auto-regenerate: {0}]",
+  description: "Use the obstacle map from the Pathfinding behavior instead of a custom map. Enable auto-regenerate to automatically rebuild the graph when the Pathfinding map changes.",
+  params: [
+    { id: "autoRegen", name: "Auto-regenerate", desc: "Automatically regenerate graph when Pathfinding map changes", type: "combo", initialValue: "yes",
+      items: [{ yes: "Yes" }, { no: "No" }]
+    }
+  ]
+}, function(autoRegen) {
+  this.aceUsePathfindingObstacleMap(autoRegen === "yes");
+});
+
+action("ObstacleMap", "ClearAllSlopes", {
+  listName: "Clear all slope markings",
+  displayText: "Clear all slope markings",
+  description: "Remove all slope markings from the obstacle map. Slopes will be treated as regular solid tiles. Use this to reset slope data."
+}, function() {
+  this.aceClearAllSlopes();
+});
+
+action("ObstacleMap", "SetRePathThreshold", {
+  listName: "Set re-path threshold",
+  displayText: "Set re-path threshold to {0} tiles",
+  description: "Set how many tiles the character can drift from the path before automatic re-pathing triggers. Higher values = more tolerance for deviation.",
+  params: [
+    { id: "tiles", name: "Tiles", desc: "Threshold in tiles", type: "number", initialValue: "2" }
+  ]
+}, function(tiles) {
+  this.aceSetRePathThreshold(tiles);
+});
+
+action("ObstacleMap", "SetHazardRadius", {
+  listName: "Set hazard radius",
+  displayText: "Set hazard radius to {0} tiles",
+  description: "Set the radius in tiles for circular/rectangular hazard influence. Tiles within this radius of a hazard will have their pathfinding cost increased.",
+  params: [
+    { id: "tiles", name: "Tiles", desc: "Radius in tiles", type: "number", initialValue: "1" }
+  ]
+}, function(tiles) {
+  this.aceSetHazardRadius(tiles);
+});
+
+// ============================================================================
+// OBSTACLE MAP CONDITIONS
+// ============================================================================
+
+condition("ObstacleMap", "OnObstacleMapCreated", {
+  listName: "On obstacle map created",
+  displayText: "On obstacle map created",
+  description: "Triggered when a custom obstacle map is successfully created. Use this to start configuring tiles after map creation.",
+  isTrigger: true
+}, function() {
+  return true;
+});
+
+condition("ObstacleMap", "OnObstacleMapRemoved", {
+  listName: "On obstacle map removed",
+  displayText: "On obstacle map removed",
+  description: "Triggered when the obstacle map is cleared or removed. Use this to clean up related data or reset systems.",
+  isTrigger: true
+}, function() {
+  return true;
+});
+
+condition("ObstacleMap", "OnPathfindingMapReady", {
+  listName: "On Pathfinding map ready",
+  displayText: "On Pathfinding map ready",
+  description: "Triggered when the Pathfinding behavior's obstacle map is ready for use. Use this to start graph generation after Pathfinding initialization.",
+  isTrigger: true
+}, function() {
+  return true;
+});
+
+condition("ObstacleMap", "OnPathfindingMapFailed", {
+  listName: "On Pathfinding map failed",
+  displayText: "On Pathfinding map failed",
+  description: "Triggered when the Pathfinding behavior's obstacle map fails to initialize. Use this to implement fallback error handling.",
+  isTrigger: true
+}, function() {
+  return true;
+});
+
+condition("ObstacleMap", "OnPathfindingMapTimeout", {
+  listName: "On Pathfinding map timeout",
+  displayText: "On Pathfinding map timeout",
+  description: "Triggered when waiting for the Pathfinding obstacle map times out. Use this to handle slow or stuck initialization.",
+  isTrigger: true
+}, function() {
+  return true;
+});
+
+condition("ObstacleMap", "IsSettingUpPathfinding", {
+  listName: "Is setting up Pathfinding",
+  displayText: "Is setting up Pathfinding map",
+  description: "Check if the behavior is currently waiting for the Pathfinding obstacle map to initialize. Returns true during async setup.",
+  isInvertible: true
+}, function() {
+  return this.aceIsSettingUpPathfinding();
+});
+
+condition("ObstacleMap", "TileHasState", {
+  listName: "Tile has state",
+  displayText: "Tile at ({0}, {1}) has state {2}",
+  description: "Check if a tile at the given grid position has the specified state. Use this to query tile properties before actions.",
+  isInvertible: true,
+  params: [
+    { id: "gx", name: "Grid X", desc: "Grid X coordinate (tile number)", type: "number", initialValue: "0" },
+    { id: "gy", name: "Grid Y", desc: "Grid Y coordinate (tile number)", type: "number", initialValue: "0" },
+    { id: "state", name: "State", desc: "Tile state to check for", type: "combo", initialValue: "solid",
+      items: [
+        { solid: "Solid" },
+        { clear: "Clear" },
+        { "jump-thru": "Jump-thru" },
+        { avoid: "Avoid" },
+        { slope: "Slope (any direction)" }
+      ]
+    }
+  ]
+}, function(gx, gy, state) {
+  const tileState = this.aceGetTileState(gx, gy);
+  if (state === "slope") {
+    return tileState === "slope-left" || tileState === "slope-right";
+  }
+  return tileState === state;
+});
+
+condition("ObstacleMap", "TileHasStateWorld", {
+  listName: "Tile has state at world position",
+  displayText: "Tile at world ({0}, {1}) has state {2}",
+  description: "Check if a tile at the given world position has the specified state. World coordinates are automatically converted to grid coordinates.",
+  isInvertible: true,
+  params: [
+    { id: "x", name: "X", desc: "World X position in pixels", type: "number", initialValue: "0" },
+    { id: "y", name: "Y", desc: "World Y position in pixels", type: "number", initialValue: "0" },
+    { id: "state", name: "State", desc: "Tile state to check for", type: "combo", initialValue: "solid",
+      items: [
+        { solid: "Solid" },
+        { clear: "Clear" },
+        { "jump-thru": "Jump-thru" },
+        { avoid: "Avoid" },
+        { slope: "Slope (any direction)" }
+      ]
+    }
+  ]
+}, function(x, y, state) {
+  const tileState = this.aceGetTileStateWorld(x, y);
+  if (state === "slope") {
+    return tileState === "slope-left" || tileState === "slope-right";
+  }
+  return tileState === state;
+});
+
+// ============================================================================
+// OBSTACLE MAP EXPRESSIONS
+// ============================================================================
 
 expression("ObstacleMap", "ObstacleMapJSON", {
   returnType: "string",
-  description: "Get the obstacle map as a JSON text string. Use this to save level layouts to Local Storage or send to server."
+  description: "Get the current obstacle map as a JSON string. Use this to save the map to local storage or export to files."
 }, function() {
-  return this.aceSaveObstacleMapToJSON();
+  return this.aceGetObstacleMapJSON();
 });
 
 expression("ObstacleMap", "ObstacleMapSource", {
   returnType: "string",
-  description: "Get how the obstacle map was created. Returns 'pathfinding' (from Pathfinding behavior), 'custom' (manually set), or 'none' (not generated yet)."
+  description: "Get the source of the current obstacle map. Returns 'custom', 'pathfinding', or 'none'."
 }, function() {
   return this.aceGetObstacleMapSource();
 });
 
 expression("ObstacleMap", "GridWidth", {
   returnType: "number",
-  description: "Get the width of the navigation grid in cells (not pixels). Multiply by cell size to get pixel width."
+  description: "Get the width of the obstacle map in tiles. Returns 0 if no map exists."
 }, function() {
   return this.aceGetGridWidth();
 });
 
-expression("ObstacleMap", "GridCellSize", {
-  returnType: "number",
-  description: "Get the grid cell size in pixels."
-}, function() {
-  return this.cellSize;
-});
-
 expression("ObstacleMap", "GridHeight", {
   returnType: "number",
-  description: "Get the height of the navigation grid in cells (not pixels). Multiply by cell size to get pixel height."
+  description: "Get the height of the obstacle map in tiles. Returns 0 if no map exists."
 }, function() {
   return this.aceGetGridHeight();
 });
 
-expression("ObstacleMap", "IsCellSolid", {
+expression("ObstacleMap", "GridTileSize", {
   returnType: "number",
-  description: "Check if a specific grid cell is blocked by an obstacle. Returns 1 if blocked/solid, 0 if clear/walkable.",
+  description: "Get the tile size in pixels. Returns 0 if no map exists."
+}, function() {
+  return this.aceGetGridTileSize();
+});
+
+expression("ObstacleMap", "TileState", {
+  returnType: "string",
+  description: "Get the state of a tile at the specified grid coordinates. Returns 'solid', 'clear', 'jump-thru', 'avoid', 'slope-left', 'slope-right', or empty string if out of bounds.",
   params: [
-    { id: "gx", desc: "Grid X coordinate (not pixel position)", name: "Grid X", type: "number" },
-    { id: "gy", desc: "Grid Y coordinate (not pixel position)", name: "Grid Y", type: "number" }
+    { id: "gx", name: "Grid X", desc: "Grid X coordinate", type: "number" },
+    { id: "gy", name: "Grid Y", desc: "Grid Y coordinate", type: "number" }
   ]
 }, function(gx, gy) {
-  return this.aceIsCellBlocked(gx, gy);
+  return this.aceGetTileState(gx, gy);
+});
+
+expression("ObstacleMap", "SlopeDirection", {
+  returnType: "string",
+  description: "Get the slope direction of a tile at the specified grid coordinates. Returns 'left', 'right', or empty string if not a slope.",
+  params: [
+    { id: "gx", name: "Grid X", desc: "Grid X coordinate", type: "number" },
+    { id: "gy", name: "Grid Y", desc: "Grid Y coordinate", type: "number" }
+  ]
+}, function(gx, gy) {
+  return this.aceGetSlopeDirection(gx, gy);
 });
 
 expression("ObstacleMap", "WorldToGridX", {
   returnType: "number",
-  description: "Convert a world X coordinate (in pixels) to grid X coordinate. Use this to check which cell a position is in.",
+  description: "Convert a world X position to grid X coordinate. Returns the grid tile number at the given pixel position.",
   params: [
-    { id: "x", desc: "World X position in pixels to convert", name: "X", type: "number" }
+    { id: "x", name: "X", desc: "World X position in pixels", type: "number" }
   ]
 }, function(x) {
-  const y = this.instance.y;
-  const grid = this.worldToGrid(x, y);
-  return grid.gx;
+  return this.aceWorldToGridX(x);
 });
 
 expression("ObstacleMap", "WorldToGridY", {
   returnType: "number",
-  description: "Convert world Y to grid Y",
+  description: "Convert a world Y position to grid Y coordinate. Returns the grid tile number at the given pixel position.",
   params: [
-    { id: "y", desc: "Y Position to convert to grid Y position", name: "Y", type: "number" }
+    { id: "y", name: "Y", desc: "World Y position in pixels", type: "number" }
   ]
 }, function(y) {
-  const x = this.instance.x;
-  const grid = this.worldToGrid(x, y);
-  return grid.gy;
+  return this.aceWorldToGridY(y);
 });
 
 expression("ObstacleMap", "WaitTickCount", {
   returnType: "number",
-  description: "Get how many ticks spent waiting for Pathfinding map. Useful for debugging if it's taking too long."
+  description: "Get the number of ticks spent waiting for the Pathfinding obstacle map to initialize. Used for debugging timeout issues."
 }, function() {
-  return this.waitTickCount || 0;
+  return this.aceGetWaitTickCount();
 });
 
-// ════════════════════════════════════════════════════════════
-// EXPRESSIONS - PLATFORM PROPERTIES (DEBUG)
-// ════════════════════════════════════════════════════════════
+expression("ObstacleMap", "HazardRadius", {
+  returnType: "number",
+  description: "Get the current hazard radius setting in tiles. This affects how far hazard influence spreads."
+}, function() {
+  return this.aceGetHazardRadius();
+});
+
+expression("ObstacleMap", "RePathThreshold", {
+  returnType: "number",
+  description: "Get the current re-path threshold in tiles. This is how far the character can drift before automatic re-pathing triggers."
+}, function() {
+  return this.aceGetRePathThreshold();
+});
+
+// ============================================================================
+// HAZARD ACTIONS
+// ============================================================================
+
+action("Hazards", "AddRectHazard", {
+  listName: "Add rectangle hazard",
+  displayText: "Add rectangle hazard at ({0}, {1}) [Size: {2} x {3}] [Severity: {4}]",
+  description: "Add a rectangular hazard area. The AI will avoid this area based on severity. Returns a hazard ID for later removal. Use for static danger zones like spike pits.",
+  params: [
+    { id: "x", name: "X", desc: "World X position (center)", type: "number", initialValue: "0" },
+    { id: "y", name: "Y", desc: "World Y position (center)", type: "number", initialValue: "0" },
+    { id: "width", name: "Width", desc: "Width in pixels", type: "number", initialValue: "32" },
+    { id: "height", name: "Height", desc: "Height in pixels", type: "number", initialValue: "32" },
+    { id: "severity", name: "Severity", desc: "Hazard severity (higher = more dangerous)", type: "number", initialValue: "10" }
+  ]
+}, function(x, y, width, height, severity) {
+  this.aceAddRectHazard(x, y, width, height, severity);
+});
+
+action("Hazards", "AddCircleHazard", {
+  listName: "Add circle hazard",
+  displayText: "Add circle hazard at ({0}, {1}) [Radius: {2}] [Severity: {3}]",
+  description: "Add a circular hazard area. The AI will avoid this area based on severity. Returns a hazard ID for later removal. Use for dynamic danger zones like explosions or enemy AOE.",
+  params: [
+    { id: "x", name: "X", desc: "World X position (center)", type: "number", initialValue: "0" },
+    { id: "y", name: "Y", desc: "World Y position (center)", type: "number", initialValue: "0" },
+    { id: "radius", name: "Radius", desc: "Radius in pixels", type: "number", initialValue: "32" },
+    { id: "severity", name: "Severity", desc: "Hazard severity (higher = more dangerous)", type: "number", initialValue: "10" }
+  ]
+}, function(x, y, radius, severity) {
+  this.aceAddCircleHazard(x, y, radius, severity);
+});
+
+action("Hazards", "RemoveHazard", {
+  listName: "Remove hazard",
+  displayText: "Remove hazard {0}",
+  description: "Remove a hazard by its ID. Use this when a danger zone is no longer active. The graph will be regenerated if needed.",
+  params: [
+    { id: "id", name: "ID", desc: "Hazard ID to remove", type: "number", initialValue: "0" }
+  ]
+}, function(id) {
+  this.aceRemoveHazard(id);
+});
+
+action("Hazards", "ClearAllHazards", {
+  listName: "Clear all hazards",
+  displayText: "Clear all circle and rectangle hazards",
+  description: "Remove all circular and rectangular hazards. This does NOT clear tile-based hazards. Use when resetting a level or clearing all dynamic dangers."
+}, function() {
+  this.aceClearAllHazards();
+});
+
+action("Hazards", "ClearAllHazardTiles", {
+  listName: "Clear all tile hazards",
+  displayText: "Clear all tile hazards",
+  description: "Reset all tile hazard severities to 0. This does NOT remove circle/rect hazards. Use when you want to clear static tile dangers."
+}, function() {
+  this.aceClearAllHazardTiles();
+});
+
+// ============================================================================
+// HAZARD CONDITIONS
+// ============================================================================
+
+condition("Hazards", "IsPositionHazardous", {
+  listName: "Is position hazardous",
+  displayText: "Is position ({0}, {1}) hazardous",
+  description: "Check if a specific world position is within any hazard area (circle, rect, or tile). Returns true if any hazard affects this position.",
+  isInvertible: true,
+  params: [
+    { id: "x", name: "X", desc: "World X position in pixels", type: "number", initialValue: "0" },
+    { id: "y", name: "Y", desc: "World Y position in pixels", type: "number", initialValue: "0" }
+  ]
+}, function(x, y) {
+  return this.aceIsPositionHazardous(x, y);
+});
+
+// ============================================================================
+// HAZARD EXPRESSIONS
+// ============================================================================
+
+expression("Hazards", "HazardCount", {
+  returnType: "number",
+  description: "Get the total number of active hazards (circles and rectangles). Does not include tile hazards."
+}, function() {
+  return this.aceGetHazardCount();
+});
+
+expression("Hazards", "PositionIsHazardous", {
+  returnType: "number",
+  description: "Check if a world position is hazardous. Returns 1 if hazardous, 0 if safe.",
+  params: [
+    { id: "x", name: "X", desc: "World X position in pixels", type: "number" },
+    { id: "y", name: "Y", desc: "World Y position in pixels", type: "number" }
+  ]
+}, function(x, y) {
+  return this.aceIsPositionHazardous(x, y) ? 1 : 0;
+});
+
+expression("Hazards", "HazardSeverity", {
+  returnType: "number",
+  description: "Get the total hazard severity at a world position from all sources (circles, rects, tiles). Higher values = more dangerous.",
+  params: [
+    { id: "x", name: "X", desc: "World X position in pixels", type: "number" },
+    { id: "y", name: "Y", desc: "World Y position in pixels", type: "number" }
+  ]
+}, function(x, y) {
+  return this.aceGetHazardSeverity(x, y);
+});
+
+expression("Hazards", "TileHazardSeverity", {
+  returnType: "number",
+  description: "Get the hazard severity of a specific tile. Returns 0 if no hazard. Only checks tile-based hazards, not circles/rects.",
+  params: [
+    { id: "gx", name: "Grid X", desc: "Grid X coordinate", type: "number" },
+    { id: "gy", name: "Grid Y", desc: "Grid Y coordinate", type: "number" }
+  ]
+}, function(gx, gy) {
+  return this.aceGetTileHazardSeverity(gx, gy);
+});
+
+// ============================================================================
+// PORTAL ACTIONS
+// ============================================================================
+
+action("Portals", "AddPortal", {
+  listName: "Add portal",
+  displayText: "Add {0} portal from ({1}, {2}) to ({3}, {4}) [Cost: {5}] [Ignore hazards: {6}]",
+  description: "Add a portal (teleport) connection between two points. The AI can use this as part of paths. Use for teleporters, ladders, or special traversal. Returns portal ID.",
+  params: [
+    { id: "type", name: "Type", desc: "Portal type name (for identification)", type: "string", initialValue: "\"teleport\"" },
+    { id: "entryX", name: "Entry X", desc: "Entry world X position", type: "number", initialValue: "0" },
+    { id: "entryY", name: "Entry Y", desc: "Entry world Y position", type: "number", initialValue: "0" },
+    { id: "exitX", name: "Exit X", desc: "Exit world X position", type: "number", initialValue: "0" },
+    { id: "exitY", name: "Exit Y", desc: "Exit world Y position", type: "number", initialValue: "0" },
+    { id: "cost", name: "Cost", desc: "Movement cost (lower = preferred)", type: "number", initialValue: "1" },
+    { id: "ignoreHazards", name: "Ignore hazards", desc: "Should this portal ignore hazards when calculating cost", type: "combo", initialValue: "no",
+      items: [{ yes: "Yes" }, { no: "No" }]
+    }
+  ]
+}, function(type, entryX, entryY, exitX, exitY, cost, ignoreHazards) {
+  this.aceAddPortal(type, entryX, entryY, exitX, exitY, cost, ignoreHazards === "yes");
+});
+
+// ============================================================================
+// GRAPH DATA ACTIONS
+// ============================================================================
+
+action("GraphData", "LogGraphStats", {
+  listName: "Log graph stats to console",
+  displayText: "Log navigation graph statistics to console",
+  description: "Output detailed navigation graph statistics to the browser console. Use for debugging graph generation and connectivity issues."
+}, function() {
+  this.aceLogGraphStats();
+});
+
+// ============================================================================
+// GRAPH DATA CONDITIONS
+// ============================================================================
+
+condition("GraphData", "IsNodeLedge", {
+  listName: "Is node at ledge",
+  displayText: "Is node at ({0}, {1}) a ledge",
+  description: "Check if a specific node is marked as a ledge (platform edge). Returns true if the node is a left or right ledge.",
+  isInvertible: true,
+  params: [
+    { id: "gx", name: "Grid X", desc: "Grid X coordinate (tile number)", type: "number", initialValue: "0" },
+    { id: "gy", name: "Grid Y", desc: "Grid Y coordinate (tile number)", type: "number", initialValue: "0" }
+  ]
+}, function(gx, gy) {
+  return this.aceIsNodeLedge(gx, gy);
+});
+
+// ============================================================================
+// GRAPH DATA EXPRESSIONS
+// ============================================================================
+
+expression("GraphData", "NodeAtIndexX", {
+  returnType: "number",
+  description: "Get the world X position of a node by its index in the node array. Returns 0 if index is out of bounds.",
+  params: [
+    { id: "index", name: "Index", desc: "Node index (0-based)", type: "number" }
+  ]
+}, function(index) {
+  return this.aceGetNodeAtIndexX(index);
+});
+
+expression("GraphData", "NodeAtIndexY", {
+  returnType: "number",
+  description: "Get the world Y position of a node by its index in the node array. Returns 0 if index is out of bounds.",
+  params: [
+    { id: "index", name: "Index", desc: "Node index (0-based)", type: "number" }
+  ]
+}, function(index) {
+  return this.aceGetNodeAtIndexY(index);
+});
+
+expression("GraphData", "NodeAtIndexGridX", {
+  returnType: "number",
+  description: "Get the grid X coordinate of a node by its index in the node array. Returns -1 if index is out of bounds.",
+  params: [
+    { id: "index", name: "Index", desc: "Node index (0-based)", type: "number" }
+  ]
+}, function(index) {
+  return this.aceGetNodeAtIndexGridX(index);
+});
+
+expression("GraphData", "NodeAtIndexGridY", {
+  returnType: "number",
+  description: "Get the grid Y coordinate of a node by its index in the node array. Returns -1 if index is out of bounds.",
+  params: [
+    { id: "index", name: "Index", desc: "Node index (0-based)", type: "number" }
+  ]
+}, function(index) {
+  return this.aceGetNodeAtIndexGridY(index);
+});
+
+expression("GraphData", "NodeAtIndexIsLeftLedge", {
+  returnType: "number",
+  description: "Check if a node is a left ledge by its index. Returns 1 if true, 0 if false or index is out of bounds.",
+  params: [
+    { id: "index", name: "Index", desc: "Node index (0-based)", type: "number" }
+  ]
+}, function(index) {
+  return this.aceGetNodeAtIndexIsLeftLedge(index);
+});
+
+expression("GraphData", "NodeAtIndexIsRightLedge", {
+  returnType: "number",
+  description: "Check if a node is a right ledge by its index. Returns 1 if true, 0 if false or index is out of bounds.",
+  params: [
+    { id: "index", name: "Index", desc: "Node index (0-based)", type: "number" }
+  ]
+}, function(index) {
+  return this.aceGetNodeAtIndexIsRightLedge(index);
+});
+
+expression("GraphData", "NodeAtIndexIsSlope", {
+  returnType: "number",
+  description: "Check if a node is on a slope by its index. Returns 1 if true, 0 if false or index is out of bounds.",
+  params: [
+    { id: "index", name: "Index", desc: "Node index (0-based)", type: "number" }
+  ]
+}, function(index) {
+  return this.aceGetNodeAtIndexIsSlope(index);
+});
+
+expression("GraphData", "NodeAtIndexConnectionCount", {
+  returnType: "number",
+  description: "Get the number of connections (edges) from a node by its index. Returns 0 if index is out of bounds.",
+  params: [
+    { id: "index", name: "Index", desc: "Node index (0-based)", type: "number" }
+  ]
+}, function(index) {
+  return this.aceGetNodeAtIndexConnectionCount(index);
+});
+
+expression("GraphData", "NodeConnectionCount", {
+  returnType: "number",
+  description: "Get the number of connections (edges) from a node at grid coordinates. Returns 0 if node doesn't exist.",
+  params: [
+    { id: "gx", name: "Grid X", desc: "Grid X coordinate", type: "number" },
+    { id: "gy", name: "Grid Y", desc: "Grid Y coordinate", type: "number" }
+  ]
+}, function(gx, gy) {
+  return this.aceGetNodeConnectionCount(gx, gy);
+});
+
+expression("GraphData", "NodeConnectionTargetX", {
+  returnType: "number",
+  description: "Get the world X position of a connection's target node. Returns 0 if node/connection doesn't exist.",
+  params: [
+    { id: "gx", name: "Grid X", desc: "Source node grid X", type: "number" },
+    { id: "gy", name: "Grid Y", desc: "Source node grid Y", type: "number" },
+    { id: "index", name: "Connection index", desc: "Connection index (0-based)", type: "number" }
+  ]
+}, function(gx, gy, index) {
+  return this.aceGetNodeConnectionTargetX(gx, gy, index);
+});
+
+expression("GraphData", "NodeConnectionTargetY", {
+  returnType: "number",
+  description: "Get the world Y position of a connection's target node. Returns 0 if node/connection doesn't exist.",
+  params: [
+    { id: "gx", name: "Grid X", desc: "Source node grid X", type: "number" },
+    { id: "gy", name: "Grid Y", desc: "Source node grid Y", type: "number" },
+    { id: "index", name: "Connection index", desc: "Connection index (0-based)", type: "number" }
+  ]
+}, function(gx, gy, index) {
+  return this.aceGetNodeConnectionTargetY(gx, gy, index);
+});
+
+expression("GraphData", "NodeConnectionAction", {
+  returnType: "string",
+  description: "Get the action name for a connection (e.g., 'walk', 'jump', 'fall'). Returns empty string if node/connection doesn't exist.",
+  params: [
+    { id: "gx", name: "Grid X", desc: "Source node grid X", type: "number" },
+    { id: "gy", name: "Grid Y", desc: "Source node grid Y", type: "number" },
+    { id: "index", name: "Connection index", desc: "Connection index (0-based)", type: "number" }
+  ]
+}, function(gx, gy, index) {
+  return this.aceGetNodeConnectionAction(gx, gy, index);
+});
+
+expression("GraphData", "NodeConnectionCost", {
+  returnType: "number",
+  description: "Get the movement cost for a connection. Returns 0 if node/connection doesn't exist.",
+  params: [
+    { id: "gx", name: "Grid X", desc: "Source node grid X", type: "number" },
+    { id: "gy", name: "Grid Y", desc: "Source node grid Y", type: "number" },
+    { id: "index", name: "Connection index", desc: "Connection index (0-based)", type: "number" }
+  ]
+}, function(gx, gy, index) {
+  return this.aceGetNodeConnectionCost(gx, gy, index);
+});
+
+expression("GraphData", "NearestNodeX", {
+  returnType: "number",
+  description: "Get the world X position of the nearest navigation node to a world position. Returns 0 if no nodes exist.",
+  params: [
+    { id: "x", name: "X", desc: "World X position in pixels", type: "number" },
+    { id: "y", name: "Y", desc: "World Y position in pixels", type: "number" }
+  ]
+}, function(x, y) {
+  return this.aceGetNearestNodeX(x, y);
+});
+
+expression("GraphData", "NearestNodeY", {
+  returnType: "number",
+  description: "Get the world Y position of the nearest navigation node to a world position. Returns 0 if no nodes exist.",
+  params: [
+    { id: "x", name: "X", desc: "World X position in pixels", type: "number" },
+    { id: "y", name: "Y", desc: "World Y position in pixels", type: "number" }
+  ]
+}, function(x, y) {
+  return this.aceGetNearestNodeY(x, y);
+});
+
+expression("GraphData", "NearestNodeGridX", {
+  returnType: "number",
+  description: "Get the grid X coordinate of the nearest navigation node to a world position. Returns -1 if no nodes exist.",
+  params: [
+    { id: "x", name: "X", desc: "World X position in pixels", type: "number" },
+    { id: "y", name: "Y", desc: "World Y position in pixels", type: "number" }
+  ]
+}, function(x, y) {
+  return this.aceGetNearestNodeGridX(x, y);
+});
+
+expression("GraphData", "NearestNodeGridY", {
+  returnType: "number",
+  description: "Get the grid Y coordinate of the nearest navigation node to a world position. Returns -1 if no nodes exist.",
+  params: [
+    { id: "x", name: "X", desc: "World X position in pixels", type: "number" },
+    { id: "y", name: "Y", desc: "World Y position in pixels", type: "number" }
+  ]
+}, function(x, y) {
+  return this.aceGetNearestNodeGridY(x, y);
+});
+
+expression("GraphData", "IsNodeLeftLedge", {
+  returnType: "number",
+  description: "Check if a node at grid coordinates is a left ledge. Returns 1 if true, 0 if false or node doesn't exist.",
+  params: [
+    { id: "gx", name: "Grid X", desc: "Grid X coordinate", type: "number" },
+    { id: "gy", name: "Grid Y", desc: "Grid Y coordinate", type: "number" }
+  ]
+}, function(gx, gy) {
+  return this.aceIsNodeLeftLedge(gx, gy);
+});
+
+expression("GraphData", "IsNodeRightLedge", {
+  returnType: "number",
+  description: "Check if a node at grid coordinates is a right ledge. Returns 1 if true, 0 if false or node doesn't exist.",
+  params: [
+    { id: "gx", name: "Grid X", desc: "Grid X coordinate", type: "number" },
+    { id: "gy", name: "Grid Y", desc: "Grid Y coordinate", type: "number" }
+  ]
+}, function(gx, gy) {
+  return this.aceIsNodeRightLedge(gx, gy);
+});
+
+expression("GraphData", "IsNodeIsland", {
+  returnType: "number",
+  description: "Check if a node at grid coordinates is an island (single-tile platform). Returns 1 if true, 0 if false or node doesn't exist.",
+  params: [
+    { id: "gx", name: "Grid X", desc: "Grid X coordinate", type: "number" },
+    { id: "gy", name: "Grid Y", desc: "Grid Y coordinate", type: "number" }
+  ]
+}, function(gx, gy) {
+  return this.aceIsNodeIsland(gx, gy);
+});
+
+expression("GraphData", "IsTileJumpThru", {
+  returnType: "number",
+  description: "Check if a tile at grid coordinates is a jump-thru platform. Returns 1 if true, 0 if false or tile doesn't exist.",
+  params: [
+    { id: "gx", name: "Grid X", desc: "Grid X coordinate", type: "number" },
+    { id: "gy", name: "Grid Y", desc: "Grid Y coordinate", type: "number" }
+  ]
+}, function(gx, gy) {
+  return this.aceIsTileJumpThru(gx, gy);
+});
+
+// ============================================================================
+// MULTI-AGENT ACTIONS
+// ============================================================================
+
+action("MultiAgent", "SetMultiAgentAvoidance", {
+  listName: "Set multi-agent avoidance",
+  displayText: "Set multi-agent avoidance: {0}",
+  description: "Enable or disable multi-agent collision avoidance. When enabled, AI agents will attempt to avoid colliding with each other during pathfinding. Note: This feature may not be fully implemented yet.",
+  params: [
+    { id: "enabled", name: "Enabled", desc: "Enable or disable multi-agent avoidance", type: "combo", initialValue: "yes",
+      items: [{ yes: "Enabled" }, { no: "Disabled" }]
+    }
+  ]
+}, function(enabled) {
+  this.aceSetMultiAgentAvoidance(enabled === "yes");
+});
+
+// ============================================================================
+// MULTI-AGENT CONDITIONS
+// ============================================================================
+
+condition("MultiAgent", "IsMultiAgentAvoidanceEnabled", {
+  listName: "Is multi-agent avoidance enabled",
+  displayText: "Multi-agent avoidance is enabled",
+  description: "Check if multi-agent collision avoidance is currently enabled. Returns true if enabled, false otherwise.",
+  isInvertible: true
+}, function() {
+  return this.aceIsMultiAgentAvoidanceEnabled();
+});
+
+// ============================================================================
+// MULTI-AGENT EXPRESSIONS
+// ============================================================================
+
+expression("MultiAgent", "NearbyAgentCount", {
+  returnType: "number",
+  description: "Get the number of nearby AI agents within detection range. Used for multi-agent avoidance calculations. Returns 0 if multi-agent avoidance is disabled."
+}, function() {
+  return this.aceGetNearbyAgentCount();
+});
+
+// ============================================================================
+// ADVANCED TUNING ACTIONS
+// ============================================================================
+
+action("AdvancedTuning", "AddLadder", {
+  listName: "Add ladder",
+  displayText: "Add ladder from ({0}, {1}) to ({2}, {3}) [Climb speed: {4}]",
+  description: "Add a ladder connection between two points. The AI can use this to climb vertically. Returns ladder ID for later reference. Note: This feature may not be fully implemented yet.",
+  params: [
+    { id: "bottomX", name: "Bottom X", desc: "Bottom world X position", type: "number", initialValue: "0" },
+    { id: "bottomY", name: "Bottom Y", desc: "Bottom world Y position", type: "number", initialValue: "0" },
+    { id: "topX", name: "Top X", desc: "Top world X position", type: "number", initialValue: "0" },
+    { id: "topY", name: "Top Y", desc: "Top world Y position", type: "number", initialValue: "0" },
+    { id: "climbSpeed", name: "Climb speed", desc: "Climbing speed in pixels per second", type: "number", initialValue: "100" }
+  ]
+}, function(bottomX, bottomY, topX, topY, climbSpeed) {
+  this.aceAddLadder(bottomX, bottomY, topX, topY, climbSpeed);
+});
+
+action("AdvancedTuning", "RemoveLadder", {
+  listName: "Remove ladder",
+  displayText: "Remove ladder {0}",
+  description: "Remove a ladder by its ID. Use when a ladder is no longer accessible or has been destroyed.",
+  params: [
+    { id: "id", name: "ID", desc: "Ladder ID to remove", type: "number", initialValue: "0" }
+  ]
+}, function(id) {
+  this.aceRemoveLadder(id);
+});
+
+action("AdvancedTuning", "SetLadderClimbSpeed", {
+  listName: "Set ladder climb speed",
+  displayText: "Set ladder {0} climb speed to {1}",
+  description: "Change the climbing speed for a specific ladder. Use to adjust ladder traversal speed dynamically.",
+  params: [
+    { id: "id", name: "ID", desc: "Ladder ID", type: "number", initialValue: "0" },
+    { id: "speed", name: "Speed", desc: "New climb speed in pixels per second", type: "number", initialValue: "100" }
+  ]
+}, function(id, speed) {
+  this.aceSetLadderClimbSpeed(id, speed);
+});
+
+// ============================================================================
+// ADVANCED TUNING CONDITIONS
+// ============================================================================
+
+condition("AdvancedTuning", "IsClimbingLadder", {
+  listName: "Is climbing ladder",
+  displayText: "Is climbing ladder",
+  description: "Check if the character is currently climbing a ladder. Returns true during ladder traversal, false otherwise.",
+  isInvertible: true
+}, function() {
+  return this.aceIsClimbingLadder();
+});
+
+condition("AdvancedTuning", "OnLadderClimbComplete", {
+  listName: "On ladder climb complete",
+  displayText: "On ladder climb complete",
+  description: "Triggered when the character finishes climbing a ladder. Use to trigger animations or next actions after ladder traversal.",
+  isTrigger: true
+}, function() {
+  return true;
+});
+
+// ============================================================================
+// ADVANCED TUNING EXPRESSIONS
+// ============================================================================
+
+expression("AdvancedTuning", "ClimbingLadder", {
+  returnType: "number",
+  description: "Check if currently climbing a ladder. Returns 1 if climbing, 0 if not."
+}, function() {
+  return this.aceIsClimbingLadder() ? 1 : 0;
+});
+
+expression("AdvancedTuning", "LadderProgress", {
+  returnType: "number",
+  description: "Get the current ladder climbing progress as a value from 0 to 1. Returns 0 if not climbing a ladder."
+}, function() {
+  return this.aceGetLadderProgress();
+});
+
+// ============================================================================
+// DEBUG EXPRESSIONS
+// ============================================================================
 
 expression("Debug", "PlatformMaxSpeed", {
   returnType: "number",
-  description: "Platform behavior max speed"
+  description: "Get the max speed from the Platform behavior. Used for internal pathfinding calculations. Returns 0 if Platform behavior not found."
 }, function() {
   return this.aceGetPlatformMaxSpeed();
 });
 
 expression("Debug", "PlatformJumpStrength", {
   returnType: "number",
-  description: "Get the jump strength value from the Platform behavior. Used for debugging jump height calculations."
+  description: "Get the jump strength from the Platform behavior. Used for internal pathfinding calculations. Returns 0 if Platform behavior not found."
 }, function() {
   return this.aceGetPlatformJumpStrength();
 });
 
 expression("Debug", "CalculatedJumpHeight", {
   returnType: "number",
-  description: "Get the maximum jump height the AI thinks your character can reach (in pixels). Compare with your actual jump height for tuning."
+  description: "Get the calculated maximum jump height in pixels based on Platform behavior settings. Used for determining reachable positions."
 }, function() {
   return this.aceGetCalculatedJumpHeight();
 });
 
 expression("Debug", "CalculatedJumpDistance", {
   returnType: "number",
-  description: "Get the maximum horizontal distance the AI thinks your character can jump (in pixels). Compare with actual performance for tuning."
+  description: "Get the calculated maximum horizontal jump distance in pixels based on Platform behavior settings. Used for determining reachable positions."
 }, function() {
   return this.aceGetCalculatedJumpDistance();
 });
-
-// ════════════════════════════════════════
-// HAZARD EXPRESSIONS
-// ════════════════════════════════════════
-
-expression("Hazards", "HazardCount", {
-  returnType: "number",
-  description: "Get the total number of hazardous regions currently active. Useful for debugging or UI display."
-}, function() {
-  return this.aceGetHazardCount();
-});
-
-expression("Hazards", "IsPositionHazardous", {
-  returnType: "number",
-  description: "Check if a position is inside any hazardous area. Returns 1 if dangerous, 0 if safe.",
-  params: [
-    { id: "x", name: "X", desc: "X position in pixels to check", type: "number" },
-    { id: "y", name: "Y", desc: "Y position in pixels to check", type: "number" }
-  ]
-}, function(x, y) {
-  return this.aceIsPositionHazardous(x, y);
-});
-
-expression("Hazards", "HazardSeverity", {
-  returnType: "number",
-  description: "Get the hazard severity at a position. Returns 1.0 for safe areas, higher values for more dangerous areas.",
-  params: [
-    { id: "x", name: "X", desc: "X position in pixels to check", type: "number" },
-    { id: "y", name: "Y", desc: "Y position in pixels to check", type: "number" }
-  ]
-}, function(x, y) {
-  return this._getHazardSeverity(x, y);
-});
-
