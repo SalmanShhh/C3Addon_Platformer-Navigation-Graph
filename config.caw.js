@@ -93,8 +93,8 @@ export const properties = [
   {
     type: PROPERTY_TYPE.INTEGER,
     id: "cell_size",
-    name: "Cell Size",
-    desc: "Size of each grid square in pixels. MUST match the Cell Size in your Pathfinding behavior! Smaller = more precise paths but slower performance.",
+    name: "Tile Size",
+    desc: "Size of each grid tile in pixels. MUST match the Cell Size in your Pathfinding behavior! Smaller = more precise paths but slower performance.",
     options: {
       initialValue: 32,
       minValue: 8,
@@ -150,7 +150,7 @@ export const properties = [
     type: PROPERTY_TYPE.INTEGER,
     id: "max_jump_height",
     name: "Max Jump Height",
-    desc: "Highest platform your character can jump to reach (in pixels). Should match your Platform behavior's jump strength. AI will only attempt jumps within this limit.",
+    desc: "Highest platform your character can jump to reach (in pixels). Automatically calculated from Platform behavior's jump strength and gravity when Setup Preset is 'Auto'. Only used as a manual override with other presets.",
     options: {
       initialValue: 128,
       minValue: 16,
@@ -163,7 +163,7 @@ export const properties = [
     type: PROPERTY_TYPE.INTEGER,
     id: "max_jump_distance",
     name: "Max Jump Distance",
-    desc: "Farthest gap your character can jump across (in pixels). Should match your character's movement speed and jump duration. AI won't attempt longer jumps.",
+    desc: "Farthest gap your character can jump across (in pixels). Automatically calculated from Platform behavior's max speed and jump duration when Setup Preset is 'Auto'. Only used as a manual override with other presets.",
     options: {
       initialValue: 192,
       minValue: 32,
@@ -176,7 +176,7 @@ export const properties = [
     type: PROPERTY_TYPE.INTEGER,
     id: "max_fall_distance",
     name: "Max Fall Distance",
-    desc: "Maximum height your character can safely fall from (in pixels). AI will avoid longer drops that might cause damage or death in your game.",
+    desc: "Maximum height your character can safely fall from (in pixels). Automatically calculated from Platform behavior's gravity and max fall speed when Setup Preset is 'Auto'. Only used as a manual override with other presets.",
     options: {
       initialValue: 256,
       minValue: 32,
@@ -247,6 +247,67 @@ export const properties = [
     desc: "AI will try to avoid dangerous areas like spikes, fire, or enemy patrol zones. Makes pathfinding slower but smarter.",
     options: {
       initialValue: false
+    }
+  },
+
+  // Property [14]
+  {
+    type: PROPERTY_TYPE.FLOAT,
+    id: "coyote_time",
+    name: "Coyote Time",
+    desc: "Seconds after walking off a ledge where a jump can still be executed. Allows AI to walk off edges and jump mid-air for greater reach. 0 = disabled.",
+    options: {
+      initialValue: 0,
+      minValue: 0,
+      maxValue: 1.0
+    }
+  },
+
+  // Property [15]
+  {
+    type: PROPERTY_TYPE.CHECK,
+    id: "ledge_restriction",
+    name: "Ledge Restriction",
+    desc: "When enabled, auto-movement prevents the AI from walking off platform edges. Only affects auto-control movement, not the navigation graph itself.",
+    options: { initialValue: false }
+  },
+
+  // Property [16]
+  {
+    type: PROPERTY_TYPE.FLOAT,
+    id: "ledge_leniency",
+    name: "Ledge Leniency",
+    desc: "Pixels of tolerance past a ledge edge before stopping (0 = strict, stays on platform). Only used when Ledge Restriction is enabled.",
+    options: {
+      initialValue: 0,
+      minValue: 0,
+      maxValue: 64
+    }
+  },
+
+  // Property [17]
+  {
+    type: PROPERTY_TYPE.FLOAT,
+    id: "repath_threshold",
+    name: "Re-Path Threshold",
+    desc: "How many tiles the character can deviate from its path before automatically recalculating. Useful when the character gets knocked off course. 0 = disabled.",
+    options: {
+      initialValue: 3.0,
+      minValue: 0,
+      maxValue: 20.0
+    }
+  },
+
+  // Property [18]
+  {
+    type: PROPERTY_TYPE.INTEGER,
+    id: "hazard_radius",
+    name: "Hazard Radius",
+    desc: "Tile radius for hazard cost falloff buffer zone. Nearby tiles within this radius of a hazard get cost penalties. 0 = no buffer, only exact hazard tiles affected.",
+    options: {
+      initialValue: 2,
+      minValue: 0,
+      maxValue: 10
     }
   }
 ];
