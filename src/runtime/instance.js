@@ -100,23 +100,18 @@ export default function (parentClass) {
       this.hazardRadius = properties[18];
 
       this.useSharedGraph = this.graphMode === "shared";
-      this.layoutUID = this.instance.layout.uid;
 
       this._initializeState();
 
-      this.platformBehavior = this._getPlatformBehavior();
-      this.pathfindingBehavior = this._getPathfindingBehavior();
+      // Instance properties and behaviors are acquired on the first tick,
+      // not in the constructor, because the instance is not fully initialized yet
+      this.layoutUID = null;
+      this.platformBehavior = null;
+      this.pathfindingBehavior = null;
+      this._initialized = false;
 
-      if (this.platformBehavior) {
-        this._readPlatformProperties();
-        if (this.setupPreset !== "custom") {
-          this._applyPreset();
-        }
-      }
-
-      this._initializeGraphMode();
-
-      this.instance.runtime.addEventListener("tick", () => this._tick());
+      // Use C3 SDK's built-in ticking mechanism (available on base class without this.instance)
+      this._setTicking(true);
     }
 
     _initializeState() {
@@ -208,6 +203,19 @@ export default function (parentClass) {
     _tick() {
       const dt = this.instance.dt;
 
+      // First-tick initialization: acquire layout UID, behaviors, and graph mode
+      if (!this._initialized) {
+        this._initialized = true;
+        this.layoutUID = this.instance.layout.uid;
+        this._initializeGraphMode();
+        this.platformBehavior = this._getPlatformBehavior();
+        this.pathfindingBehavior = this._getPathfindingBehavior();
+        if (this.platformBehavior) {
+          this._readPlatformProperties();
+          if (this.setupPreset !== "custom") this._applyPreset();
+        }
+      }
+
       if (!this.platformBehavior) {
         this.platformBehavior = this._getPlatformBehavior();
         if (this.platformBehavior) {
@@ -254,7 +262,7 @@ export default function (parentClass) {
 
     _release() {
       super._release();
-      if (this.useSharedGraph) {
+      if (this.useSharedGraph && this.layoutUID !== null) {
         globalNavManager.unsubscribe(this.layoutUID, this);
       }
       this.navGraph.clear();
@@ -435,12 +443,9 @@ export default function (parentClass) {
     _getPlatformBehavior() {
       try {
         const behaviors = this.instance.behaviors;
-        for (const behavior of behaviors) {
-          const behaviorType = behavior.behavior?.constructor?.name || "";
-          if (
-            behaviorType.toLowerCase().includes("platform") ||
-            behavior.name?.toLowerCase().includes("platform")
-          ) {
+        for (const key of Object.keys(behaviors)) {
+          const behavior = behaviors[key];
+          if (key.toLowerCase().includes("platform")) {
             return behavior;
           }
         }
@@ -453,12 +458,9 @@ export default function (parentClass) {
     _getPathfindingBehavior() {
       try {
         const behaviors = this.instance.behaviors;
-        for (const behavior of behaviors) {
-          const behaviorType = behavior.behavior?.constructor?.name || "";
-          if (
-            behaviorType.toLowerCase().includes("pathfinding") ||
-            behavior.name?.toLowerCase().includes("pathfinding")
-          ) {
+        for (const key of Object.keys(behaviors)) {
+          const behavior = behaviors[key];
+          if (key.toLowerCase().includes("pathfinding")) {
             return behavior;
           }
         }
@@ -3128,34 +3130,41 @@ export default function (parentClass) {
       console.log("Hazards:", this._getHazardsMap().size);
     }
 
-    on(eventName, callback) {
-      if (!this.events[eventName]) {
-        this.events[eventName] = [];
-      }
-      this.events[eventName].push(callback);
-    }
-
-    off(eventName, callback) {
-      if (!this.events[eventName]) return;
-      this.events[eventName] = this.events[eventName].filter(
-        (cb) => cb !== callback
-      );
-    }
-
-    dispatch(eventName, data) {
-      if (!this.events[eventName]) return;
-      for (const callback of this.events[eventName]) {
-        callback(data);
-      }
-    }
-
     _trigger(method) {
       this.dispatch(method);
       super._trigger(self.C3[AddonTypeMap[addonType]][id].Cnds[method]);
     }
 
-    _triggerGraphGenerated() {
-      this._trigger("OnGraphGenerated");
+    on(tag, callback, options) {
+      if (!this.events[tag]) {
+        this.events[tag] = [];
+      }
+      this.events[tag].push({ callback, options });
+    }
+
+    off(tag, callback) {
+      if (this.events[tag]) {
+        this.events[tag] = this.events[tag].filter(
+          (event) => event.callback !== callback
+        );
+      }
+    }
+
+    dispatch(tag) {
+      if (this.events[tag]) {
+        this.events[tag].forEach((event) => {
+          if (event.options && event.options.params) {
+            const fn = self.C3[AddonTypeMap[addonType]][id].Cnds[tag];
+            if (fn && !fn.call(this, ...event.options.params)) {
+              return;
+            }
+          }
+          event.callback();
+          if (event.options && event.options.once) {
+            this.off(tag, event.callback);
+          }
+        });
+      }
     }
   };
 }
