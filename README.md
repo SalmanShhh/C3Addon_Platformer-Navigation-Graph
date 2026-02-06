@@ -1,6 +1,6 @@
 <img src="./src/icon.svg" width="100" /><br>
 # Platformer Navigation Graph
-<i>AI pathfinding for platformer games with jumping and falling</i> <br>
+<i>AI pathfinding for platformers: lets characters jump, fall, and navigate complex levels. Easy presets for beginners, deep customization for advanced users. Supports auto or manual control, hazards, portals, and integrates with Platform behavior.</i> <br>
 ### Version 0.2.0.0
 
 [<img src="https://placehold.co/200x50/4493f8/FFF?text=Download&font=montserrat" width="200"/>](https://github.com/SalmanShhh/Platformer-Navigation-Graph-V2/releases/download/salmanshh_platformer_navigationgraph-0.2.0.0.c3addon/salmanshh_platformer_navigationgraph-0.2.0.0.c3addon)

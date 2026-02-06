@@ -5,7 +5,7 @@
     "behaviors": {
       "salmanshh_platformer_navigationgraph": {
         "name": "Platformer Navigation Graph",
-        "description": "AI pathfinding for platformer games with jumping and falling",
+        "description": "AI pathfinding for platformers: lets characters jump, fall, and navigate complex levels. Easy presets for beginners, deep customization for advanced users. Supports auto or manual control, hazards, portals, and integrates with Platform behavior.",
         "help-url": "https://www.construct.net",
         "aceCategories": {
           "AdvancedTuning": "AdvancedTuning",

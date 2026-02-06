@@ -14,7 +14,7 @@ export const minConstructVersion = undefined;
 export const author = "SalmanShh";
 export const website = "https://www.construct.net";
 export const documentation = "https://www.construct.net";
-export const description = "AI pathfinding for platformer games with jumping and falling";
+export const description = "AI pathfinding for platformers: lets characters jump, fall, and navigate complex levels. Easy presets for beginners, deep customization for advanced users. Supports auto or manual control, hazards, portals, and integrates with Platform behavior.";
 export const category = ADDON_CATEGORY.MOVEMENTS;
 
 export const hasDomside = false;
