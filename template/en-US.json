@@ -448,10 +448,11 @@
               },
               "mode": {
                 "name": "Mode",
-                "desc": "Path mode: 'reach' finds complete path or fails. 'jump_toward' paths to nearest reachable point then jumps toward target.",
+                "desc": "Path mode: 'reach' finds complete path or fails. 'jump_toward' paths to nearest reachable point then jumps toward target (fallback). 'jump_at_target' always paths near target then jumps at it (for attacks/stomps).",
                 "items": {
                   "reach": "Reach (default)",
-                  "jump_toward": "Jump toward"
+                  "jump_toward": "Jump toward (fallback)",
+                  "jump_at_target": "Jump at target (always)"
                 }
               }
             }

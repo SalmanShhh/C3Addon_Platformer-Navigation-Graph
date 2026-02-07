@@ -12,7 +12,7 @@ action("Pathfinding", "FindPath", {
     { id: "x", name: "X", desc: "Target X position in pixels", type: "number", initialValue: "0" },
     { id: "y", name: "Y", desc: "Target Y position in pixels", type: "number", initialValue: "0" },
     { id: "correctToGround", name: "Correct to ground", desc: "Snap start/target to nearest walkable ground position", type: "combo", initialValue: "no", items: [{ no: "No" }, { yes: "Yes" }] },
-    { id: "mode", name: "Mode", desc: "Path mode: 'reach' finds complete path or fails. 'jump_toward' paths to nearest reachable point then jumps toward target.", type: "combo", initialValue: "reach", items: [{ reach: "Reach (default)" }, { jump_toward: "Jump toward" }] }
+    { id: "mode", name: "Mode", desc: "Path mode: 'reach' finds complete path or fails. 'jump_toward' paths to nearest reachable point then jumps toward target (fallback). 'jump_at_target' always paths near target then jumps at it (for attacks/stomps).", type: "combo", initialValue: "reach", items: [{ reach: "Reach (default)" }, { jump_toward: "Jump toward (fallback)" }, { jump_at_target: "Jump at target (always)" }] }
   ]
 }, function(x, y, correctToGround, mode) {
   this.aceFindPath(x, y, correctToGround === "yes", mode);

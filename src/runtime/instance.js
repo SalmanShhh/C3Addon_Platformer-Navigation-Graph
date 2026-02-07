@@ -2948,6 +2948,43 @@ export default function (parentClass) {
         }
       }
 
+      // "jump_at_target" mode: always path to nearest ground near target, then jump at it.
+      // Useful for jump attacks, stomps, or hitting targets that aren't on walkable ground.
+      if (this.lastPathMode === "jump_at_target") {
+        // Find nearest walkable node to the target
+        const correctedTarget = this._correctToGround(this.pathTargetX, this.pathTargetY);
+        const nearPath = this.findPath(startX, startY, correctedTarget.x, correctedTarget.y);
+        if (nearPath) {
+          path = nearPath;
+          const lastWp = path[path.length - 1];
+          path.push({
+            node: lastWp.node,
+            action: "jump_toward",
+            x: this.pathTargetX,
+            y: this.pathTargetY,
+          });
+        } else if (!path) {
+          // Fallback: try nearest reachable node like jump_toward mode
+          const nearest = this._findNearestReachableNode(
+            startX,
+            startY,
+            this.pathTargetX,
+            this.pathTargetY
+          );
+          if (nearest) {
+            path = this.findPath(startX, startY, nearest.x, nearest.y);
+            if (path) {
+              path.push({
+                node: nearest,
+                action: "jump_toward",
+                x: this.pathTargetX,
+                y: this.pathTargetY,
+              });
+            }
+          }
+        }
+      }
+
       if (path) {
         this.currentPath = path;
         // Skip waypoint 0 (the start node) — the character is already there
