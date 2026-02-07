@@ -54,6 +54,20 @@ export default function (parentClass) {
       return false;
     }
 
+    getFlowFields(layoutUID) {
+      if (!this._flowFields) this._flowFields = new Map();
+      if (!this._flowFields.has(layoutUID)) {
+        this._flowFields.set(layoutUID, new Map());
+      }
+      return this._flowFields.get(layoutUID);
+    }
+
+    clearFlowFields(layoutUID) {
+      if (this._flowFields && this._flowFields.has(layoutUID)) {
+        this._flowFields.get(layoutUID).clear();
+      }
+    }
+
     getOtherInstancePositions(layoutUID, excludeInstance) {
       const positions = [];
       const subs = this.subscribers.get(layoutUID);
@@ -65,6 +79,58 @@ export default function (parentClass) {
         }
       }
       return positions;
+    }
+  }
+
+  // ===========================
+  // MinHeap for Dijkstra
+  // ===========================
+  class MinHeap {
+    constructor() {
+      this.data = [];
+    }
+
+    insert(node, priority) {
+      this.data.push({ node, priority });
+      this._bubbleUp(this.data.length - 1);
+    }
+
+    extractMin() {
+      if (this.data.length === 0) return null;
+      const min = this.data[0];
+      const last = this.data.pop();
+      if (this.data.length > 0) {
+        this.data[0] = last;
+        this._sinkDown(0);
+      }
+      return min;
+    }
+
+    get size() {
+      return this.data.length;
+    }
+
+    _bubbleUp(i) {
+      while (i > 0) {
+        const parent = (i - 1) >> 1;
+        if (this.data[i].priority >= this.data[parent].priority) break;
+        [this.data[i], this.data[parent]] = [this.data[parent], this.data[i]];
+        i = parent;
+      }
+    }
+
+    _sinkDown(i) {
+      const n = this.data.length;
+      while (true) {
+        let smallest = i;
+        const left = 2 * i + 1;
+        const right = 2 * i + 2;
+        if (left < n && this.data[left].priority < this.data[smallest].priority) smallest = left;
+        if (right < n && this.data[right].priority < this.data[smallest].priority) smallest = right;
+        if (smallest === i) break;
+        [this.data[i], this.data[smallest]] = [this.data[smallest], this.data[i]];
+        i = smallest;
+      }
     }
   }
 
@@ -185,6 +251,8 @@ export default function (parentClass) {
       this.jumpHoldTimer = 0;
 
       this.rePathCooldown = 0;
+      this.rePathCount = 0;
+      this.rePathBestDist = Infinity;
       this.justUsedPortal = false;
 
       this.multiAgentAvoidance = false;
@@ -203,6 +271,14 @@ export default function (parentClass) {
       this.FALL_COST = 0.5;
       this.COYOTE_JUMP_COST = 1.6;
       this.SLOPE_COST = 1.2;
+
+      // Flow field state
+      this.localFlowFields = new Map();
+      this.activeFlowFieldId = null;
+      this.flowFieldMode = false;
+      this.flowFieldTargetX = 0;
+      this.flowFieldTargetY = 0;
+      this.flowFieldTimeAtNode = 0;
     }
 
     _tick() {
@@ -268,6 +344,10 @@ export default function (parentClass) {
         this._followPath(dt);
       }
 
+      if (this.flowFieldMode) {
+        this._followFlowField(dt);
+      }
+
       if (this.justUsedPortal) {
         this.justUsedPortal = false;
       }
@@ -286,6 +366,7 @@ export default function (parentClass) {
       this.portals.clear();
       this.hazards.clear();
       if (this.ladders) this.ladders.clear();
+      this.localFlowFields.clear();
     }
 
     _saveToJson() {
@@ -1144,7 +1225,7 @@ export default function (parentClass) {
     _connectWalk() {
       let count = 0;
       const graph = this._getNavigationGraph();
-      const headCells = Math.ceil(this.characterHeight / this.cellSize);
+      const headCells = Math.max(0, Math.ceil(this.characterHeight / this.cellSize) - 1);
       const widthCells = this._getWidthCells();
 
       for (const [key, node] of graph) {
@@ -1205,8 +1286,14 @@ export default function (parentClass) {
 
       for (const [key, node] of graph) {
         for (const dir of [-1, 1]) {
-          for (let dist = 1; dist <= maxDistCells; dist++) {
+          for (let dist = 0; dist <= maxDistCells; dist++) {
+            // When dist=0 (vertical jump), only check once (dir=1) to avoid duplicates
+            if (dist === 0 && dir === -1) continue;
+
             for (let height = -2; height <= maxHeightCells; height++) {
+              // dist=0 with height<=0 is not a valid jump (same position or falling)
+              if (dist === 0 && height <= 0) continue;
+
               const targetGx = node.gx + dir * dist;
               const targetGy = node.gy - height;
               const target = this.getNode(targetGx, targetGy);
@@ -1235,8 +1322,10 @@ export default function (parentClass) {
 
         for (const [key, node] of graph) {
           for (const dir of [-1, 1]) {
-            for (let dist = 1; dist <= doubleMaxDistCells; dist++) {
+            for (let dist = 0; dist <= doubleMaxDistCells; dist++) {
+              if (dist === 0 && dir === -1) continue;
               for (let height = -2; height <= doubleMaxHeightCells; height++) {
+                if (dist === 0 && height <= 0) continue;
                 const targetGx = node.gx + dir * dist;
                 const targetGy = node.gy - height;
                 const target = this.getNode(targetGx, targetGy);
@@ -1278,9 +1367,12 @@ export default function (parentClass) {
       if (Math.abs(dx) > this.maxJumpDistance) return false;
       if (-dy > this.maxJumpHeight) return false;
 
-      const headCells = Math.ceil(this.characterHeight / this.cellSize);
+      const headCells = Math.max(0, Math.ceil(this.characterHeight / this.cellSize) - 1);
       const widthCells = this._getWidthCells();
-      const peakY = Math.min(from.y, to.y) - this.cellSize;
+      // Adaptive arc: peak just high enough for the jump, capped at maxJumpHeight
+      const neededPeakHeight = Math.max(-dy, 0) + this.cellSize;
+      const actualPeakHeight = Math.min(this.maxJumpHeight, neededPeakHeight);
+      const peakY = from.y - actualPeakHeight;
       const controlY = 2 * peakY - (from.y + to.y) / 2;
 
       for (let i = 0; i <= 8; i++) {
@@ -1300,7 +1392,7 @@ export default function (parentClass) {
           return false;
         }
 
-        for (let h = 0; h < headCells; h++) {
+        for (let h = 0; h <= headCells; h++) {
           for (let w = -widthCells; w <= widthCells; w++) {
             const checkGx = grid.gx + w;
             const checkGy = grid.gy - h;
@@ -1877,6 +1969,12 @@ export default function (parentClass) {
 
       this._markGraphAsGenerated();
 
+      // Invalidate all flow fields since node references are stale
+      this._getFlowFields().clear();
+      if (this.flowFieldMode) {
+        this._stopFlowField();
+      }
+
       const endTime = performance.now();
       this._log(`Graph generated in ${(endTime - startTime).toFixed(2)}ms`);
 
@@ -1884,26 +1982,333 @@ export default function (parentClass) {
       this._trigger("OnGraphGenerated");
     }
 
+    // ===========================
+    // Flow Field Pathfinding
+    // ===========================
+
+    _getFlowFields() {
+      if (this.useSharedGraph) {
+        return globalNavManager.getFlowFields(this.layoutUID);
+      }
+      return this.localFlowFields;
+    }
+
+    _buildReverseAdjacency() {
+      const graph = this._getNavigationGraph();
+      const reverse = new Map();
+
+      for (const [sourceKey, node] of graph) {
+        const allConnections = [
+          ...node.connections,
+          ...node.portalConnections,
+          ...(node.ladderConnections || []),
+        ];
+
+        for (const conn of allConnections) {
+          const targetKey = this.gridKey(conn.target.gx, conn.target.gy);
+          if (!reverse.has(targetKey)) {
+            reverse.set(targetKey, []);
+          }
+          reverse.get(targetKey).push({
+            sourceKey,
+            sourceNode: node,
+            connection: conn,
+          });
+        }
+      }
+
+      return reverse;
+    }
+
+    _computeFlowField(id, targetX, targetY, correctToGround) {
+      const startTime = performance.now();
+
+      if (correctToGround) {
+        const corrected = this._correctToGround(targetX, targetY);
+        targetX = corrected.x;
+        targetY = corrected.y;
+      }
+
+      const targetGrid = this.worldToGrid(targetX, targetY);
+      const targetKey = this.gridKey(targetGrid.gx, targetGrid.gy);
+      const targetNode = this.getNode(targetGrid.gx, targetGrid.gy);
+
+      if (!targetNode) {
+        this._warn(`Flow field target node not found at grid (${targetGrid.gx},${targetGrid.gy})`);
+        this._trigger("OnFlowFieldUnreachable");
+        return null;
+      }
+
+      const reverse = this._buildReverseAdjacency();
+      const heap = new MinHeap();
+      const field = new Map();
+
+      // Seed with target node at cost 0
+      field.set(targetKey, {
+        connection: null,
+        totalCost: 0,
+        action: "arrived",
+        targetNodeKey: null,
+      });
+      heap.insert(targetKey, 0);
+
+      while (heap.size > 0) {
+        const { node: currentKey, priority: currentCost } = heap.extractMin();
+
+        // Skip if we already found a better path
+        if (currentCost > field.get(currentKey).totalCost) continue;
+
+        const edges = reverse.get(currentKey);
+        if (!edges) continue;
+
+        for (const edge of edges) {
+          const newCost = currentCost + edge.connection.cost;
+
+          const existing = field.get(edge.sourceKey);
+          if (!existing || newCost < existing.totalCost) {
+            field.set(edge.sourceKey, {
+              connection: edge.connection,
+              totalCost: newCost,
+              action: edge.connection.action,
+              targetNodeKey: currentKey,
+            });
+            heap.insert(edge.sourceKey, newCost);
+          }
+        }
+      }
+
+      const targetWorld = this.gridToWorld(targetGrid.gx, targetGrid.gy);
+      const container = {
+        id,
+        targetGridKey: targetKey,
+        targetX: targetWorld.x,
+        targetY: targetWorld.y,
+        field,
+        nodeCount: field.size,
+        computeTimeMs: performance.now() - startTime,
+      };
+
+      this._getFlowFields().set(id, container);
+
+      this._log(`Flow field "${id}" computed: ${field.size} nodes in ${container.computeTimeMs.toFixed(2)}ms`);
+      this._trigger("OnFlowFieldComputed");
+
+      return container;
+    }
+
+    _stopFlowField() {
+      this.flowFieldMode = false;
+      this.activeFlowFieldId = null;
+      this.flowFieldTimeAtNode = 0;
+    }
+
+    _followFlowField(dt) {
+      // If we have an active A* segment path, follow it via _followPath (called from _tick)
+      if (this.hasPath) return;
+
+      const flowFields = this._getFlowFields();
+      const container = flowFields.get(this.activeFlowFieldId);
+
+      if (!container) {
+        this._stopFlowField();
+        this._trigger("OnFlowFieldUnreachable");
+        return;
+      }
+
+      // Find the nearest node to the agent's current position
+      let grid = this.worldToGrid(this.instance.x, this.instance.y);
+      let currentKey = this.gridKey(grid.gx, grid.gy);
+      let entry = container.field.get(currentKey);
+
+      // If exact grid cell has no flow field entry, correct to nearest ground node
+      if (!entry) {
+        const corrected = this._correctToGround(this.instance.x, this.instance.y);
+        grid = this.worldToGrid(corrected.x, corrected.y);
+        currentKey = this.gridKey(grid.gx, grid.gy);
+        entry = container.field.get(currentKey);
+      }
+
+      if (!entry) {
+        // Agent's position is not in the flow field even after correction — unreachable
+        this._stopFlowField();
+        this._trigger("OnFlowFieldUnreachable");
+        return;
+      }
+
+      // Check if arrived at target
+      if (entry.action === "arrived") {
+        const distToTarget = this.distance(
+          this.instance.x, this.instance.y,
+          container.targetX, container.targetY
+        );
+
+        if (distToTarget < this.cellSize * 0.5) {
+          this._stopFlowField();
+          this._trigger("OnFlowFieldArrived");
+          return;
+        }
+
+        // Walk toward exact target position
+        if (this.autoControl) {
+          const walkAction = container.targetX < this.instance.x ? "walk_left" : "walk_right";
+          this._executeAction(walkAction, container.targetX, container.targetY, null);
+        }
+        return;
+      }
+
+      // Check stuck timeout
+      this.flowFieldTimeAtNode += dt;
+      if (this.flowFieldTimeAtNode > this.maxWaypointTime) {
+        this.flowFieldTimeAtNode = 0;
+        this._stopFlowField();
+        this._trigger("OnFlowFieldStuck");
+        return;
+      }
+
+      // Compute a short A* segment using flow field look-ahead
+      const lookAheadCount = this._getFlowFieldLookAheadCount(container, currentKey);
+      const lookAhead = this._getFlowFieldLookAhead(container, currentKey, lookAheadCount);
+
+      if (lookAhead.length === 0) {
+        // Flow field chain is broken
+        this._stopFlowField();
+        this._trigger("OnFlowFieldUnreachable");
+        return;
+      }
+
+      const segmentTarget = lookAhead[lookAhead.length - 1];
+      const segmentWorld = this.gridToWorld(segmentTarget.gx, segmentTarget.gy);
+
+      // Run A* for this short segment
+      const path = this.findPath(this.instance.x, this.instance.y, segmentWorld.x, segmentWorld.y);
+      if (path && path.length > 0) {
+        this.currentPath = path;
+        this.currentWaypoint = 0;
+        this.hasPath = true;
+        this.timeAtWaypoint = 0;
+        this.flowFieldTimeAtNode = 0;
+      } else {
+        // A* failed — try just the immediate next hop
+        const nextNode = entry.connection.target;
+        const nextWorld = this.gridToWorld(nextNode.gx, nextNode.gy);
+        const fallbackPath = this.findPath(this.instance.x, this.instance.y, nextWorld.x, nextWorld.y);
+        if (fallbackPath && fallbackPath.length > 0) {
+          this.currentPath = fallbackPath;
+          this.currentWaypoint = 0;
+          this.hasPath = true;
+          this.timeAtWaypoint = 0;
+          this.flowFieldTimeAtNode = 0;
+        }
+        // If even single-hop fails, wait for next tick (stuck timeout will catch it)
+      }
+    }
+
+    _getFlowFieldLookAhead(container, startKey, maxHops) {
+      const nodes = [];
+      let currentKey = startKey;
+
+      for (let i = 0; i < maxHops; i++) {
+        const entry = container.field.get(currentKey);
+        if (!entry || entry.action === "arrived") break;
+
+        const nextNode = entry.connection.target;
+        const nextKey = this.gridKey(nextNode.gx, nextNode.gy);
+
+        // Prevent infinite loops
+        if (nextKey === currentKey) break;
+
+        nodes.push(nextNode);
+        currentKey = nextKey;
+      }
+
+      return nodes;
+    }
+
+    _getFlowFieldLookAheadCount(container, startKey) {
+      // Check the first 3 entries — if any involve jumps/falls, use longer look-ahead
+      let currentKey = startKey;
+      for (let i = 0; i < 3; i++) {
+        const entry = container.field.get(currentKey);
+        if (!entry || entry.action === "arrived") break;
+
+        if (!entry.action.includes("walk")) {
+          return 8; // Jump/fall/portal — longer segment for full action sequence
+        }
+
+        const nextNode = entry.connection.target;
+        currentKey = this.gridKey(nextNode.gx, nextNode.gy);
+      }
+      return 3; // All walks — short segment, frequent re-checks
+    }
+
     findPath(startX, startY, goalX, goalY) {
-      const startGrid = this.worldToGrid(startX, startY);
-      const goalGrid = this.worldToGrid(goalX, goalY);
+      let startGrid = this.worldToGrid(startX, startY);
+      let goalGrid = this.worldToGrid(goalX, goalY);
 
       this._log(`Finding path from (${startGrid.gx},${startGrid.gy}) to (${goalGrid.gx},${goalGrid.gy})`);
 
-      const startNode = this.getNode(startGrid.gx, startGrid.gy);
-      const goalNode = this.getNode(goalGrid.gx, goalGrid.gy);
+      let startNode = this.getNode(startGrid.gx, startGrid.gy);
+      let goalNode = this.getNode(goalGrid.gx, goalGrid.gy);
+
+      // Auto-correct to nearest ground node if exact position isn't on a node
+      if (!startNode) {
+        const corrected = this._correctToGround(startX, startY);
+        startGrid = this.worldToGrid(corrected.x, corrected.y);
+        startNode = this.getNode(startGrid.gx, startGrid.gy);
+      }
+      if (!goalNode) {
+        const corrected = this._correctToGround(goalX, goalY);
+        goalGrid = this.worldToGrid(corrected.x, corrected.y);
+        goalNode = this.getNode(goalGrid.gx, goalGrid.gy);
+      }
 
       if (!startNode || !goalNode) {
         if (!startNode) {
           this.lastPathFailReason = "no_start_node";
-          this._warn(`Start node not found at grid (${startGrid.gx},${startGrid.gy})`);
+          this._warn(`Start node not found at grid (${startGrid.gx},${startGrid.gy}) even after ground correction`);
         } else {
           this.lastPathFailReason = "no_goal_node";
-          this._warn(`Goal node not found at grid (${goalGrid.gx},${goalGrid.gy})`);
+          this._warn(`Goal node not found at grid (${goalGrid.gx},${goalGrid.gy}) even after ground correction`);
         }
         return null;
       }
 
+      // Try forward path (start → goal)
+      const forwardPath = this._runAStar(startNode, goalNode);
+
+      // Try reverse path (goal → start), then reverse it for a start → goal path
+      const reversePath = this._runAStar(goalNode, startNode);
+      let reversedPath = null;
+      if (reversePath) {
+        reversedPath = this._reversePathDirection(reversePath);
+      }
+
+      // Pick the better path
+      let bestPath = null;
+      if (forwardPath && reversedPath) {
+        const forwardCost = this._pathCost(forwardPath);
+        const reverseCost = this._pathCost(reversedPath);
+        this._log(`Bidirectional: forward cost=${Math.round(forwardCost)}, reverse cost=${Math.round(reverseCost)}`);
+        bestPath = forwardCost <= reverseCost ? forwardPath : reversedPath;
+      } else if (forwardPath) {
+        bestPath = forwardPath;
+      } else if (reversedPath) {
+        bestPath = reversedPath;
+      }
+
+      if (bestPath) {
+        if (this.smoothPaths && bestPath.length > 2) {
+          return this._smoothPath(bestPath);
+        }
+        return bestPath;
+      }
+
+      this.lastPathFailReason = "no_path";
+      this._warn("No path found in either direction");
+      return null;
+    }
+
+    _runAStar(startNode, goalNode) {
       const graph = this._getNavigationGraph();
       for (const [key, node] of graph) {
         node.gScore = Infinity;
@@ -1933,8 +2338,6 @@ export default function (parentClass) {
 
       while (openSet.length > 0) {
         if (nodesExplored >= this.maxSearchNodes) {
-          this.lastPathFailReason = "max_nodes_reached";
-          this._warn(`Max search nodes reached (${this.maxSearchNodes})`);
           return null;
         }
 
@@ -2003,9 +2406,56 @@ export default function (parentClass) {
         }
       }
 
-      this.lastPathFailReason = "no_path";
-      this._warn("No path found — all reachable nodes explored");
       return null;
+    }
+
+    _reversePathDirection(path) {
+      // The path was found goal→start, so waypoints are [goal, ..., start].
+      // Reverse order to get [start, ..., goal].
+      const reversed = [];
+      for (let i = path.length - 1; i >= 0; i--) {
+        reversed.push({
+          node: path[i].node,
+          x: path[i].x,
+          y: path[i].y,
+          action: "start",
+        });
+      }
+      // Fix actions: each waypoint needs the action to reach the NEXT waypoint
+      // Look up actual connections between consecutive nodes in the forward direction
+      for (let i = 0; i < reversed.length - 1; i++) {
+        const fromNode = reversed[i].node;
+        const toNode = reversed[i + 1].node;
+        const conn = this._findConnectionBetween(fromNode, toNode);
+        if (!conn) {
+          // No forward connection exists between these nodes — reversed path is invalid
+          this._log("Reverse path invalid: no forward connection between nodes");
+          return null;
+        }
+        reversed[i + 1].action = conn.action;
+      }
+      reversed[0].action = "start";
+      return reversed;
+    }
+
+    _findConnectionBetween(fromNode, toNode) {
+      const allConnections = [
+        ...fromNode.connections,
+        ...fromNode.portalConnections,
+        ...(fromNode.ladderConnections || []),
+      ];
+      for (const conn of allConnections) {
+        if (conn.target === toNode) return conn;
+      }
+      return null;
+    }
+
+    _pathCost(path) {
+      let cost = 0;
+      for (let i = 1; i < path.length; i++) {
+        cost += this.distance(path[i - 1].x, path[i - 1].y, path[i].x, path[i].y);
+      }
+      return cost;
     }
 
     _reconstructPath(goalNode) {
@@ -2020,10 +2470,6 @@ export default function (parentClass) {
           y: current.y,
         });
         current = current.parent;
-      }
-
-      if (this.smoothPaths && path.length > 2) {
-        return this._smoothPath(path);
       }
 
       return path;
@@ -2074,7 +2520,7 @@ export default function (parentClass) {
           return false;
       }
 
-      const headCells = Math.ceil(this.characterHeight / this.cellSize);
+      const headCells = Math.max(0, Math.ceil(this.characterHeight / this.cellSize) - 1);
       const widthCells = this._getWidthCells();
       for (let gx = startGx; gx <= endGx; gx++) {
         for (let w = -widthCells; w <= widthCells; w++) {
@@ -2118,7 +2564,7 @@ export default function (parentClass) {
 
     _correctToGround(x, y) {
       const grid = this.worldToGrid(x, y);
-      const searchRadius = 5;
+      const searchRadius = 10;
 
       for (let r = 0; r <= searchRadius; r++) {
         for (let dy = -r; dy <= r; dy++) {
@@ -2132,13 +2578,17 @@ export default function (parentClass) {
         }
       }
 
+      this._warn(`No ground node found within ${searchRadius} tiles of (${Math.round(x)}, ${Math.round(y)})`);
       return { x, y };
     }
 
     _followPath(dt) {
       if (this.currentWaypoint >= this.currentPath.length) {
         this.hasPath = false;
-        this._trigger("OnPathComplete");
+        // If following a flow field, don't trigger OnPathComplete — let the flow field loop handle next segment
+        if (!this.flowFieldMode) {
+          this._trigger("OnPathComplete");
+        }
         return;
       }
 
@@ -2149,7 +2599,12 @@ export default function (parentClass) {
         this.hasPath = false;
         this.timeAtWaypoint = 0;
         this._log(`Stuck at waypoint ${this.currentWaypoint} (exceeded ${this.maxWaypointTime}s)`);
-        this._trigger("OnWaypointStuck");
+        if (this.flowFieldMode) {
+          this._stopFlowField();
+          this._trigger("OnFlowFieldStuck");
+        } else {
+          this._trigger("OnWaypointStuck");
+        }
         return;
       }
 
@@ -2162,7 +2617,14 @@ export default function (parentClass) {
 
       let arrivalThreshold;
       if (waypoint.node && waypoint.node.isIsland) {
-        arrivalThreshold = this.cellSize * 0.15;
+        // If walls on both sides, character can't overshoot — use a relaxed threshold
+        let walledBothSides = false;
+        try {
+          if (this.platformBehavior) {
+            walledBothSides = this.platformBehavior.isByWall("left") && this.platformBehavior.isByWall("right");
+          }
+        } catch (e) {}
+        arrivalThreshold = walledBothSides ? this.cellSize * 0.45 : this.cellSize * 0.15;
       } else if (waypoint.action.includes("walk")) {
         arrivalThreshold = this.cellSize * 0.3;
       } else if (
@@ -2214,7 +2676,29 @@ export default function (parentClass) {
         ) {
           const yDist = Math.abs(this.instance.y - waypoint.y);
           if (yDist < this.cellSize * 0.75) {
-            effectiveAction = waypoint.x < this.instance.x ? "walk_left" : "walk_right";
+            const walkDir = waypoint.x < this.instance.x ? "left" : "right";
+            // Don't convert to walk if blocked by a wall or if there's a gap between here and the waypoint
+            let canWalkDirectly = true;
+            try {
+              if (this.platformBehavior.isByWall(walkDir)) {
+                canWalkDirectly = false;
+              } else {
+                // Check for continuous ground between character and waypoint
+                const charGrid = this.worldToGrid(this.instance.x, this.instance.y);
+                const wpGrid = this.worldToGrid(waypoint.x, waypoint.y);
+                const minGx = Math.min(charGrid.gx, wpGrid.gx);
+                const maxGx = Math.max(charGrid.gx, wpGrid.gx);
+                for (let gx = minGx; gx <= maxGx; gx++) {
+                  if (!this._isGroundAt(gx, charGrid.gy + 1) && !this._isSlopeWalkable(gx, charGrid.gy)) {
+                    canWalkDirectly = false;
+                    break;
+                  }
+                }
+              }
+            } catch (e) {}
+            if (canWalkDirectly) {
+              effectiveAction = walkDir === "left" ? "walk_left" : "walk_right";
+            }
           }
         }
 
@@ -2224,6 +2708,31 @@ export default function (parentClass) {
 
     _rePath() {
       this.rePathCooldown = 0.5;
+
+      // Track distance to goal to detect re-path loops
+      const distToGoal = this.distance(
+        this.instance.x, this.instance.y,
+        this.pathTargetX, this.pathTargetY
+      );
+
+      if (distToGoal < this.rePathBestDist - this.cellSize) {
+        // Making progress — reset counter
+        this.rePathBestDist = distToGoal;
+        this.rePathCount = 0;
+      }
+
+      this.rePathCount++;
+
+      if (this.rePathCount >= 5) {
+        // Re-pathed 5 times without getting closer — stuck in a loop
+        this._warn(`Re-path loop detected (${this.rePathCount} re-paths without progress)`);
+        this.hasPath = false;
+        this.rePathCount = 0;
+        this.rePathBestDist = Infinity;
+        this._trigger("OnWaypointStuck");
+        return;
+      }
+
       this.aceFindPath(
         this.pathTargetX,
         this.pathTargetY,
@@ -2313,6 +2822,20 @@ export default function (parentClass) {
             this.platformBehavior.isByWall(wallSide) &&
             this.platformBehavior.isOnFloor
           ) {
+            // Check if character still has room to move within this tile toward the target
+            const halfCell = this.cellSize / 2;
+            const stillHasRoom = movingLeft
+              ? this.instance.x - targetX > halfCell * 0.1
+              : targetX - this.instance.x > halfCell * 0.1;
+
+            if (stillHasRoom) {
+              // Character hit the wall but hasn't reached the waypoint yet —
+              // don't try to jump, just let the walk handler move within the tile
+              this._handleWalkAction(targetX, movingLeft ? "left" : "right", waypoint);
+              return;
+            }
+
+            // Truly blocked by wall — try to jump over it
             this.platformBehavior.simulateControl("jump");
             this.platformBehavior.simulateControl(
               movingLeft ? "left" : "right"
@@ -2386,8 +2909,16 @@ export default function (parentClass) {
       }
 
       if (waypoint && waypoint.node && waypoint.node.isIsland) {
-        const maxSafeSpeed = Math.sqrt(2 * decel * (this.cellSize * 0.4));
-        if (speed > maxSafeSpeed) return;
+        // Check if walls on both sides — if so, character can't overshoot, no speed cap needed
+        let walledBothSides = false;
+        try {
+          walledBothSides = this.platformBehavior.isByWall("left") && this.platformBehavior.isByWall("right");
+        } catch (e) {}
+
+        if (!walledBothSides) {
+          const maxSafeSpeed = Math.sqrt(2 * decel * (this.cellSize * 0.4));
+          if (speed > maxSafeSpeed) return;
+        }
       }
 
       if (distToTarget > stoppingDist + this.cellSize * 0.1) {
@@ -2443,8 +2974,45 @@ export default function (parentClass) {
         return;
       }
 
-      const dir = targetX < this.instance.x ? "left" : "right";
-      this.platformBehavior.simulateControl(dir);
+      const xDist = Math.abs(targetX - this.instance.x);
+      const isVerticalJump = xDist < this.cellSize * 0.5;
+
+      // Only push horizontally if the target has meaningful horizontal offset
+      // and we're not blocked by a wall in that direction
+      if (!isVerticalJump) {
+        const dir = targetX < this.instance.x ? "left" : "right";
+        try {
+          if (!this.platformBehavior.isByWall(dir)) {
+            this.platformBehavior.simulateControl(dir);
+          }
+        } catch (e) {
+          this.platformBehavior.simulateControl(dir);
+        }
+
+        // Walk closer to the platform edge before jumping so the character
+        // doesn't jump too early and fall short into the gap.
+        // Only delay the jump while on the floor and the previous waypoint node
+        // is a ledge in the jump direction (meaning there's an edge to walk to).
+        if (this.platformBehavior.isOnFloor) {
+          const prevIdx = this.currentWaypoint - 1;
+          const prevWp = prevIdx >= 0 ? this.currentPath[prevIdx] : null;
+          if (prevWp && prevWp.node) {
+            const jumpDir = targetX > this.instance.x ? "right" : "left";
+            const isLedge = jumpDir === "right" ? prevWp.node.isRightLedge : prevWp.node.isLeftLedge;
+            if (isLedge) {
+              // Edge of the take-off platform
+              const edgeX = prevWp.node.x + (jumpDir === "right" ? 1 : -1) * (this.cellSize * 0.4);
+              const pastEdge = jumpDir === "right"
+                ? this.instance.x >= edgeX
+                : this.instance.x <= edgeX;
+              if (!pastEdge) {
+                // Still haven't reached the edge — keep walking, don't jump yet
+                return;
+              }
+            }
+          }
+        }
+      }
 
       try {
         if (this.platformBehavior.isOnFloor) {
@@ -2468,23 +3036,45 @@ export default function (parentClass) {
     }
 
     _handleCoyoteJumpAction(targetX, targetY, waypoint) {
-      const dir = targetX < this.instance.x ? "left" : "right";
-      this.platformBehavior.simulateControl(dir);
+      const xDist = Math.abs(targetX - this.instance.x);
+      const isVerticalJump = xDist < this.cellSize * 0.5;
+
+      if (!isVerticalJump) {
+        const dir = targetX < this.instance.x ? "left" : "right";
+        try {
+          if (!this.platformBehavior.isByWall(dir)) {
+            this.platformBehavior.simulateControl(dir);
+          }
+        } catch (e) {
+          this.platformBehavior.simulateControl(dir);
+        }
+      }
 
       try {
         if (!this.platformBehavior.isOnFloor && this.coyoteTimer > 0) {
           this.coyoteJumpPending = true;
         } else if (this.platformBehavior.isOnFloor) {
-          this.platformBehavior.simulateControl(dir);
+          const dir = targetX < this.instance.x ? "left" : "right";
+          if (!isVerticalJump) {
+            this.platformBehavior.simulateControl(dir);
+          }
         }
-      } catch (e) {
-        this.platformBehavior.simulateControl(dir);
-      }
+      } catch (e) {}
     }
 
     _handleJumpTowardAction(targetX, targetY) {
+      const xDist = Math.abs(targetX - this.instance.x);
       const dir = targetX < this.instance.x ? "left" : "right";
-      this.platformBehavior.simulateControl(dir);
+
+      if (xDist >= this.cellSize * 0.5) {
+        try {
+          if (!this.platformBehavior.isByWall(dir)) {
+            this.platformBehavior.simulateControl(dir);
+          }
+        } catch (e) {
+          this.platformBehavior.simulateControl(dir);
+        }
+      }
       this.platformBehavior.simulateControl("jump");
 
       if (this.platformProps.isDoubleJumpEnabled) {
@@ -2560,11 +3150,20 @@ export default function (parentClass) {
 
     /** Calculates a path from the character's current position to the target coordinates. Supports ground correction and jump-toward mode. */
     aceFindPath(targetX, targetY, correctToGround, mode) {
+      // Mutual exclusion: stop any active flow field
+      if (this.flowFieldMode) this._stopFlowField();
+
       this._log(`FindPath to (${Math.round(targetX)},${Math.round(targetY)}) mode=${mode || "reach"} groundCorrect=${correctToGround}`);
       this.lastPathFailReason = "";
 
       let startX = this.instance.x;
       let startY = this.instance.y;
+
+      // Reset re-path loop detection when target changes
+      if (targetX !== this.pathTargetX || targetY !== this.pathTargetY) {
+        this.rePathCount = 0;
+        this.rePathBestDist = Infinity;
+      }
 
       this.pathTargetX = targetX;
       this.pathTargetY = targetY;
@@ -3330,6 +3929,126 @@ export default function (parentClass) {
     /** Returns the calculated maximum jump distance in pixels based on physics properties. */
     aceGetCalculatedJumpDistance() {
       return this.maxJumpDistance || 0;
+    }
+
+    // ============================================================================
+    // FLOW FIELD - Actions
+    // ============================================================================
+
+    aceComputeFlowField(id, targetX, targetY, correctToGround) {
+      return this._computeFlowField(id, targetX, targetY, correctToGround);
+    }
+
+    aceFollowFlowField(id) {
+      const flowFields = this._getFlowFields();
+      if (!flowFields.has(id)) {
+        this._warn(`Flow field "${id}" does not exist`);
+        return;
+      }
+
+      // Mutual exclusion: stop any active A* path
+      if (this.hasPath) this.aceClearPath();
+
+      this.activeFlowFieldId = id;
+      this.flowFieldMode = true;
+      this.flowFieldTimeAtNode = 0;
+
+      const container = flowFields.get(id);
+      this.flowFieldTargetX = container.targetX;
+      this.flowFieldTargetY = container.targetY;
+    }
+
+    aceStopFlowField() {
+      this._stopFlowField();
+    }
+
+    aceRemoveFlowField(id) {
+      const flowFields = this._getFlowFields();
+      flowFields.delete(id);
+      if (this.activeFlowFieldId === id) {
+        this._stopFlowField();
+      }
+    }
+
+    aceClearAllFlowFields() {
+      this._getFlowFields().clear();
+      if (this.flowFieldMode) {
+        this._stopFlowField();
+      }
+    }
+
+    // ============================================================================
+    // FLOW FIELD - Conditions
+    // ============================================================================
+
+    aceIsFollowingFlowField() {
+      return this.flowFieldMode;
+    }
+
+    aceFlowFieldExists(id) {
+      return this._getFlowFields().has(id);
+    }
+
+    // ============================================================================
+    // FLOW FIELD - Expressions
+    // ============================================================================
+
+    aceGetFlowFieldCount() {
+      return this._getFlowFields().size;
+    }
+
+    aceGetFlowFieldNodeCount(id) {
+      const container = this._getFlowFields().get(id);
+      return container ? container.nodeCount : 0;
+    }
+
+    aceGetFlowFieldCostAt(id, gx, gy) {
+      const container = this._getFlowFields().get(id);
+      if (!container) return -1;
+      const entry = container.field.get(this.gridKey(gx, gy));
+      return entry ? entry.totalCost : -1;
+    }
+
+    aceGetFlowFieldActionAt(id, gx, gy) {
+      const container = this._getFlowFields().get(id);
+      if (!container) return "";
+      const entry = container.field.get(this.gridKey(gx, gy));
+      return entry ? entry.action : "";
+    }
+
+    aceGetFlowFieldNextNodeX(id, gx, gy) {
+      const container = this._getFlowFields().get(id);
+      if (!container) return 0;
+      const entry = container.field.get(this.gridKey(gx, gy));
+      if (!entry || !entry.connection) return 0;
+      return this.gridToWorld(entry.connection.target.gx, entry.connection.target.gy).x;
+    }
+
+    aceGetFlowFieldNextNodeY(id, gx, gy) {
+      const container = this._getFlowFields().get(id);
+      if (!container) return 0;
+      const entry = container.field.get(this.gridKey(gx, gy));
+      if (!entry || !entry.connection) return 0;
+      return this.gridToWorld(entry.connection.target.gx, entry.connection.target.gy).y;
+    }
+
+    aceGetFlowFieldTargetX(id) {
+      const container = this._getFlowFields().get(id);
+      return container ? container.targetX : 0;
+    }
+
+    aceGetFlowFieldTargetY(id) {
+      const container = this._getFlowFields().get(id);
+      return container ? container.targetY : 0;
+    }
+
+    aceGetActiveFlowFieldId() {
+      return this.activeFlowFieldId || "";
+    }
+
+    aceGetFlowFieldComputeTime(id) {
+      const container = this._getFlowFields().get(id);
+      return container ? container.computeTimeMs : 0;
     }
 
     // ============================================================================

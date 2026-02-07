@@ -1423,3 +1423,226 @@ action("Configuration", "SetMaxFallDistance", {
 }, function(value) {
   this.maxFallDistance = value;
 });
+
+// ============================================================================
+// FLOW FIELD ACTIONS
+// ============================================================================
+
+action("FlowField", "ComputeFlowField", {
+  listName: "Compute flow field",
+  displayText: "Compute flow field {0} targeting ({1}, {2}) [Ground correction: {3}]",
+  description: "Pre-compute a flow field from all reachable nodes toward a target position. Multiple agents can then follow the same field without individual A* searches. Triggers 'On flow field computed' when done.",
+  params: [
+    { id: "id", name: "Flow Field ID", desc: "Unique identifier for this flow field (e.g. \"player\" or \"exit\")", type: "string", initialValue: "\"default\"" },
+    { id: "x", name: "Target X", desc: "Target X position in pixels", type: "number", initialValue: "0" },
+    { id: "y", name: "Target Y", desc: "Target Y position in pixels", type: "number", initialValue: "0" },
+    { id: "correctToGround", name: "Correct to ground", desc: "Snap target to nearest ground node", type: "combo", initialValue: "enabled", items: [{ enabled: "Enabled" }, { disabled: "Disabled" }] }
+  ]
+}, function(id, x, y, correctToGround) {
+  this.aceComputeFlowField(id, x, y, correctToGround === "enabled");
+});
+
+action("FlowField", "FollowFlowField", {
+  listName: "Follow flow field",
+  displayText: "Follow flow field {0}",
+  description: "Start following a pre-computed flow field. The character will move toward the flow field's target using the optimal next-hop at each node. Stops any active A* path.",
+  params: [
+    { id: "id", name: "Flow Field ID", desc: "ID of the flow field to follow", type: "string", initialValue: "\"default\"" }
+  ]
+}, function(id) {
+  this.aceFollowFlowField(id);
+});
+
+action("FlowField", "StopFlowField", {
+  listName: "Stop following flow field",
+  displayText: "Stop following flow field",
+  description: "Stop the character from following its current flow field. The character will stop moving but the flow field data is preserved for later use."
+}, function() {
+  this.aceStopFlowField();
+});
+
+action("FlowField", "RemoveFlowField", {
+  listName: "Remove flow field",
+  displayText: "Remove flow field {0}",
+  description: "Delete a specific flow field by ID. If the character is currently following this field, it will stop.",
+  params: [
+    { id: "id", name: "Flow Field ID", desc: "ID of the flow field to remove", type: "string", initialValue: "\"default\"" }
+  ]
+}, function(id) {
+  this.aceRemoveFlowField(id);
+});
+
+action("FlowField", "ClearAllFlowFields", {
+  listName: "Clear all flow fields",
+  displayText: "Clear all flow fields",
+  description: "Delete all flow fields. If the character is following one, it will stop."
+}, function() {
+  this.aceClearAllFlowFields();
+});
+
+// ============================================================================
+// FLOW FIELD CONDITIONS
+// ============================================================================
+
+condition("FlowField", "OnFlowFieldComputed", {
+  listName: "On flow field computed",
+  displayText: "On flow field computed",
+  description: "Triggered after a flow field has been successfully computed.",
+  isTrigger: true
+}, function() {
+  return true;
+});
+
+condition("FlowField", "OnFlowFieldArrived", {
+  listName: "On flow field arrived",
+  displayText: "On flow field arrived",
+  description: "Triggered when the character reaches the flow field's target position.",
+  isTrigger: true
+}, function() {
+  return true;
+});
+
+condition("FlowField", "OnFlowFieldUnreachable", {
+  listName: "On flow field unreachable",
+  displayText: "On flow field unreachable",
+  description: "Triggered when the character's current position is not covered by the flow field, or the target node doesn't exist.",
+  isTrigger: true
+}, function() {
+  return true;
+});
+
+condition("FlowField", "OnFlowFieldStuck", {
+  listName: "On flow field stuck",
+  displayText: "On flow field stuck",
+  description: "Triggered when the character has been stuck at a node longer than the Max Waypoint Time.",
+  isTrigger: true
+}, function() {
+  return true;
+});
+
+condition("FlowField", "IsFollowingFlowField", {
+  listName: "Is following flow field",
+  displayText: "Is following flow field",
+  description: "True if the character is currently following a flow field.",
+  isInvertible: true
+}, function() {
+  return this.aceIsFollowingFlowField();
+});
+
+condition("FlowField", "FlowFieldExists", {
+  listName: "Flow field exists",
+  displayText: "Flow field {0} exists",
+  description: "True if a flow field with the given ID has been computed and is available.",
+  isInvertible: true,
+  params: [
+    { id: "id", name: "Flow Field ID", desc: "ID to check", type: "string", initialValue: "\"default\"" }
+  ]
+}, function(id) {
+  return this.aceFlowFieldExists(id);
+});
+
+// ============================================================================
+// FLOW FIELD EXPRESSIONS
+// ============================================================================
+
+expression("FlowField", "FlowFieldCount", {
+  returnType: "number",
+  description: "Number of flow fields currently stored."
+}, function() {
+  return this.aceGetFlowFieldCount();
+});
+
+expression("FlowField", "FlowFieldNodeCount", {
+  returnType: "number",
+  description: "Number of reachable nodes in a flow field.",
+  params: [
+    { id: "id", name: "Flow Field ID", desc: "ID of the flow field", type: "string" }
+  ]
+}, function(id) {
+  return this.aceGetFlowFieldNodeCount(id);
+});
+
+expression("FlowField", "FlowFieldCostAt", {
+  returnType: "number",
+  description: "Total cost from a grid position to the flow field target. Returns -1 if unreachable.",
+  params: [
+    { id: "id", name: "Flow Field ID", desc: "ID of the flow field", type: "string" },
+    { id: "gx", name: "Grid X", desc: "Grid X coordinate", type: "number" },
+    { id: "gy", name: "Grid Y", desc: "Grid Y coordinate", type: "number" }
+  ]
+}, function(id, gx, gy) {
+  return this.aceGetFlowFieldCostAt(id, gx, gy);
+});
+
+expression("FlowField", "FlowFieldActionAt", {
+  returnType: "string",
+  description: "Action to take at a grid position (e.g. 'walk_left', 'jump', 'fall'). Empty string if unreachable.",
+  params: [
+    { id: "id", name: "Flow Field ID", desc: "ID of the flow field", type: "string" },
+    { id: "gx", name: "Grid X", desc: "Grid X coordinate", type: "number" },
+    { id: "gy", name: "Grid Y", desc: "Grid Y coordinate", type: "number" }
+  ]
+}, function(id, gx, gy) {
+  return this.aceGetFlowFieldActionAt(id, gx, gy);
+});
+
+expression("FlowField", "FlowFieldNextNodeX", {
+  returnType: "number",
+  description: "World X of the next node to move toward from a grid position.",
+  params: [
+    { id: "id", name: "Flow Field ID", desc: "ID of the flow field", type: "string" },
+    { id: "gx", name: "Grid X", desc: "Grid X coordinate", type: "number" },
+    { id: "gy", name: "Grid Y", desc: "Grid Y coordinate", type: "number" }
+  ]
+}, function(id, gx, gy) {
+  return this.aceGetFlowFieldNextNodeX(id, gx, gy);
+});
+
+expression("FlowField", "FlowFieldNextNodeY", {
+  returnType: "number",
+  description: "World Y of the next node to move toward from a grid position.",
+  params: [
+    { id: "id", name: "Flow Field ID", desc: "ID of the flow field", type: "string" },
+    { id: "gx", name: "Grid X", desc: "Grid X coordinate", type: "number" },
+    { id: "gy", name: "Grid Y", desc: "Grid Y coordinate", type: "number" }
+  ]
+}, function(id, gx, gy) {
+  return this.aceGetFlowFieldNextNodeY(id, gx, gy);
+});
+
+expression("FlowField", "FlowFieldTargetX", {
+  returnType: "number",
+  description: "World X of the flow field's target position.",
+  params: [
+    { id: "id", name: "Flow Field ID", desc: "ID of the flow field", type: "string" }
+  ]
+}, function(id) {
+  return this.aceGetFlowFieldTargetX(id);
+});
+
+expression("FlowField", "FlowFieldTargetY", {
+  returnType: "number",
+  description: "World Y of the flow field's target position.",
+  params: [
+    { id: "id", name: "Flow Field ID", desc: "ID of the flow field", type: "string" }
+  ]
+}, function(id) {
+  return this.aceGetFlowFieldTargetY(id);
+});
+
+expression("FlowField", "ActiveFlowFieldId", {
+  returnType: "string",
+  description: "ID of the flow field currently being followed. Empty string if none."
+}, function() {
+  return this.aceGetActiveFlowFieldId();
+});
+
+expression("FlowField", "FlowFieldComputeTime", {
+  returnType: "number",
+  description: "Time in milliseconds it took to compute a flow field.",
+  params: [
+    { id: "id", name: "Flow Field ID", desc: "ID of the flow field", type: "string" }
+  ]
+}, function(id) {
+  return this.aceGetFlowFieldComputeTime(id);
+});

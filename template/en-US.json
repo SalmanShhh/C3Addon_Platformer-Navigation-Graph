@@ -10,6 +10,7 @@
         "aceCategories": {
           "AdvancedTuning": "AdvancedTuning",
           "Configuration": "Configuration",
+          "FlowField": "FlowField",
           "GraphData": "GraphData",
           "Hazards": "Hazards",
           "MultiAgent": "MultiAgent",
@@ -176,6 +177,67 @@
                 "desc": "Maximum jump height in pixels"
               }
             }
+          },
+          "ClearAllFlowFields": {
+            "list-name": "Clear all flow fields",
+            "display-text": "Clear all flow fields",
+            "description": "Delete all flow fields. If the character is following one, it will stop.",
+            "params": {}
+          },
+          "ComputeFlowField": {
+            "list-name": "Compute flow field",
+            "display-text": "Compute flow field {0} targeting ({1}, {2}) [Ground correction: {3}]",
+            "description": "Pre-compute a flow field from all reachable nodes toward a target position. Multiple agents can then follow the same field without individual A* searches. Triggers 'On flow field computed' when done.",
+            "params": {
+              "id": {
+                "name": "Flow Field ID",
+                "desc": "Unique identifier for this flow field (e.g. \"player\" or \"exit\")"
+              },
+              "x": {
+                "name": "Target X",
+                "desc": "Target X position in pixels"
+              },
+              "y": {
+                "name": "Target Y",
+                "desc": "Target Y position in pixels"
+              },
+              "correctToGround": {
+                "name": "Correct to ground",
+                "desc": "Snap target to nearest ground node",
+                "items": {
+                  "enabled": "Enabled",
+                  "disabled": "Disabled"
+                }
+              }
+            }
+          },
+          "FollowFlowField": {
+            "list-name": "Follow flow field",
+            "display-text": "Follow flow field {0}",
+            "description": "Start following a pre-computed flow field. The character will move toward the flow field's target using the optimal next-hop at each node. Stops any active A* path.",
+            "params": {
+              "id": {
+                "name": "Flow Field ID",
+                "desc": "ID of the flow field to follow"
+              }
+            }
+          },
+          "RemoveFlowField": {
+            "list-name": "Remove flow field",
+            "display-text": "Remove flow field {0}",
+            "description": "Delete a specific flow field by ID. If the character is currently following this field, it will stop.",
+            "params": {
+              "id": {
+                "name": "Flow Field ID",
+                "desc": "ID of the flow field to remove"
+              }
+            }
+          },
+          "StopFlowField": {
+            "list-name": "Stop following flow field",
+            "display-text": "Stop following flow field",
+            "description": "Stop the character from following its current flow field. The character will stop moving but the flow field data is preserved for later use.",
+            "params": {}
           },
           "LogGraphStats": {
             "list-name": "Log graph stats to console",
@@ -594,6 +656,47 @@
             "description": "Triggered when the character finishes climbing a ladder. Use to trigger animations or next actions after ladder traversal.",
             "params": {}
           },
+          "FlowFieldExists": {
+            "list-name": "Flow field exists",
+            "display-text": "Flow field {0} exists",
+            "description": "True if a flow field with the given ID has been computed and is available.",
+            "params": {
+              "id": {
+                "name": "Flow Field ID",
+                "desc": "ID to check"
+              }
+            }
+          },
+          "IsFollowingFlowField": {
+            "list-name": "Is following flow field",
+            "display-text": "Is following flow field",
+            "description": "True if the character is currently following a flow field.",
+            "params": {}
+          },
+          "OnFlowFieldArrived": {
+            "list-name": "On flow field arrived",
+            "display-text": "On flow field arrived",
+            "description": "Triggered when the character reaches the flow field's target position.",
+            "params": {}
+          },
+          "OnFlowFieldComputed": {
+            "list-name": "On flow field computed",
+            "display-text": "On flow field computed",
+            "description": "Triggered after a flow field has been successfully computed.",
+            "params": {}
+          },
+          "OnFlowFieldStuck": {
+            "list-name": "On flow field stuck",
+            "display-text": "On flow field stuck",
+            "description": "Triggered when the character has been stuck at a node longer than the Max Waypoint Time.",
+            "params": {}
+          },
+          "OnFlowFieldUnreachable": {
+            "list-name": "On flow field unreachable",
+            "display-text": "On flow field unreachable",
+            "description": "Triggered when the character's current position is not covered by the flow field, or the target node doesn't exist.",
+            "params": {}
+          },
           "IsNodeLedge": {
             "list-name": "Is node at ledge",
             "display-text": "Is node at ({0}, {1}) a ledge",
@@ -851,6 +954,128 @@
             "translated-name": "PlatformMaxSpeed",
             "description": "Get the max speed from the Platform behavior. Used for internal pathfinding calculations. Returns 0 if Platform behavior not found.",
             "params": {}
+          },
+          "ActiveFlowFieldId": {
+            "translated-name": "ActiveFlowFieldId",
+            "description": "ID of the flow field currently being followed. Empty string if none.",
+            "params": {}
+          },
+          "FlowFieldActionAt": {
+            "translated-name": "FlowFieldActionAt",
+            "description": "Action to take at a grid position (e.g. 'walk_left', 'jump', 'fall'). Empty string if unreachable.",
+            "params": {
+              "id": {
+                "name": "Flow Field ID",
+                "desc": "ID of the flow field"
+              },
+              "gx": {
+                "name": "Grid X",
+                "desc": "Grid X coordinate"
+              },
+              "gy": {
+                "name": "Grid Y",
+                "desc": "Grid Y coordinate"
+              }
+            }
+          },
+          "FlowFieldComputeTime": {
+            "translated-name": "FlowFieldComputeTime",
+            "description": "Time in milliseconds it took to compute a flow field.",
+            "params": {
+              "id": {
+                "name": "Flow Field ID",
+                "desc": "ID of the flow field"
+              }
+            }
+          },
+          "FlowFieldCostAt": {
+            "translated-name": "FlowFieldCostAt",
+            "description": "Total cost from a grid position to the flow field target. Returns -1 if unreachable.",
+            "params": {
+              "id": {
+                "name": "Flow Field ID",
+                "desc": "ID of the flow field"
+              },
+              "gx": {
+                "name": "Grid X",
+                "desc": "Grid X coordinate"
+              },
+              "gy": {
+                "name": "Grid Y",
+                "desc": "Grid Y coordinate"
+              }
+            }
+          },
+          "FlowFieldCount": {
+            "translated-name": "FlowFieldCount",
+            "description": "Number of flow fields currently stored.",
+            "params": {}
+          },
+          "FlowFieldNextNodeX": {
+            "translated-name": "FlowFieldNextNodeX",
+            "description": "World X of the next node to move toward from a grid position.",
+            "params": {
+              "id": {
+                "name": "Flow Field ID",
+                "desc": "ID of the flow field"
+              },
+              "gx": {
+                "name": "Grid X",
+                "desc": "Grid X coordinate"
+              },
+              "gy": {
+                "name": "Grid Y",
+                "desc": "Grid Y coordinate"
+              }
+            }
+          },
+          "FlowFieldNextNodeY": {
+            "translated-name": "FlowFieldNextNodeY",
+            "description": "World Y of the next node to move toward from a grid position.",
+            "params": {
+              "id": {
+                "name": "Flow Field ID",
+                "desc": "ID of the flow field"
+              },
+              "gx": {
+                "name": "Grid X",
+                "desc": "Grid X coordinate"
+              },
+              "gy": {
+                "name": "Grid Y",
+                "desc": "Grid Y coordinate"
+              }
+            }
+          },
+          "FlowFieldNodeCount": {
+            "translated-name": "FlowFieldNodeCount",
+            "description": "Number of reachable nodes in a flow field.",
+            "params": {
+              "id": {
+                "name": "Flow Field ID",
+                "desc": "ID of the flow field"
+              }
+            }
+          },
+          "FlowFieldTargetX": {
+            "translated-name": "FlowFieldTargetX",
+            "description": "World X of the flow field's target position.",
+            "params": {
+              "id": {
+                "name": "Flow Field ID",
+                "desc": "ID of the flow field"
+              }
+            }
+          },
+          "FlowFieldTargetY": {
+            "translated-name": "FlowFieldTargetY",
+            "description": "World Y of the flow field's target position.",
+            "params": {
+              "id": {
+                "name": "Flow Field ID",
+                "desc": "ID of the flow field"
+              }
+            }
           },
           "IsNodeIsland": {
             "translated-name": "IsNodeIsland",
