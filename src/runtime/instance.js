@@ -54,20 +54,6 @@ export default function (parentClass) {
       return false;
     }
 
-    getFlowFields(layoutUID) {
-      if (!this._flowFields) this._flowFields = new Map();
-      if (!this._flowFields.has(layoutUID)) {
-        this._flowFields.set(layoutUID, new Map());
-      }
-      return this._flowFields.get(layoutUID);
-    }
-
-    clearFlowFields(layoutUID) {
-      if (this._flowFields && this._flowFields.has(layoutUID)) {
-        this._flowFields.get(layoutUID).clear();
-      }
-    }
-
     getOtherInstancePositions(layoutUID, excludeInstance) {
       const positions = [];
       const subs = this.subscribers.get(layoutUID);
@@ -79,58 +65,6 @@ export default function (parentClass) {
         }
       }
       return positions;
-    }
-  }
-
-  // ===========================
-  // MinHeap for Dijkstra
-  // ===========================
-  class MinHeap {
-    constructor() {
-      this.data = [];
-    }
-
-    insert(node, priority) {
-      this.data.push({ node, priority });
-      this._bubbleUp(this.data.length - 1);
-    }
-
-    extractMin() {
-      if (this.data.length === 0) return null;
-      const min = this.data[0];
-      const last = this.data.pop();
-      if (this.data.length > 0) {
-        this.data[0] = last;
-        this._sinkDown(0);
-      }
-      return min;
-    }
-
-    get size() {
-      return this.data.length;
-    }
-
-    _bubbleUp(i) {
-      while (i > 0) {
-        const parent = (i - 1) >> 1;
-        if (this.data[i].priority >= this.data[parent].priority) break;
-        [this.data[i], this.data[parent]] = [this.data[parent], this.data[i]];
-        i = parent;
-      }
-    }
-
-    _sinkDown(i) {
-      const n = this.data.length;
-      while (true) {
-        let smallest = i;
-        const left = 2 * i + 1;
-        const right = 2 * i + 2;
-        if (left < n && this.data[left].priority < this.data[smallest].priority) smallest = left;
-        if (right < n && this.data[right].priority < this.data[smallest].priority) smallest = right;
-        if (smallest === i) break;
-        [this.data[i], this.data[smallest]] = [this.data[smallest], this.data[i]];
-        i = smallest;
-      }
     }
   }
 
@@ -272,13 +206,6 @@ export default function (parentClass) {
       this.COYOTE_JUMP_COST = 1.6;
       this.SLOPE_COST = 1.2;
 
-      // Flow field state
-      this.localFlowFields = new Map();
-      this.activeFlowFieldId = null;
-      this.flowFieldMode = false;
-      this.flowFieldTargetX = 0;
-      this.flowFieldTargetY = 0;
-      this.flowFieldTimeAtNode = 0;
     }
 
     _tick() {
@@ -344,10 +271,6 @@ export default function (parentClass) {
         this._followPath(dt);
       }
 
-      if (this.flowFieldMode) {
-        this._followFlowField(dt);
-      }
-
       if (this.justUsedPortal) {
         this.justUsedPortal = false;
       }
@@ -366,7 +289,6 @@ export default function (parentClass) {
       this.portals.clear();
       this.hazards.clear();
       if (this.ladders) this.ladders.clear();
-      this.localFlowFields.clear();
     }
 
     _saveToJson() {
@@ -1969,276 +1891,11 @@ export default function (parentClass) {
 
       this._markGraphAsGenerated();
 
-      // Invalidate all flow fields since node references are stale
-      this._getFlowFields().clear();
-      if (this.flowFieldMode) {
-        this._stopFlowField();
-      }
-
       const endTime = performance.now();
       this._log(`Graph generated in ${(endTime - startTime).toFixed(2)}ms`);
 
       // this makes sure the trigger condition is called once the graph is generated.
       this._trigger("OnGraphGenerated");
-    }
-
-    // ===========================
-    // Flow Field Pathfinding
-    // ===========================
-
-    _getFlowFields() {
-      if (this.useSharedGraph) {
-        return globalNavManager.getFlowFields(this.layoutUID);
-      }
-      return this.localFlowFields;
-    }
-
-    _buildReverseAdjacency() {
-      const graph = this._getNavigationGraph();
-      const reverse = new Map();
-
-      for (const [sourceKey, node] of graph) {
-        const allConnections = [
-          ...node.connections,
-          ...node.portalConnections,
-          ...(node.ladderConnections || []),
-        ];
-
-        for (const conn of allConnections) {
-          const targetKey = this.gridKey(conn.target.gx, conn.target.gy);
-          if (!reverse.has(targetKey)) {
-            reverse.set(targetKey, []);
-          }
-          reverse.get(targetKey).push({
-            sourceKey,
-            sourceNode: node,
-            connection: conn,
-          });
-        }
-      }
-
-      return reverse;
-    }
-
-    _computeFlowField(id, targetX, targetY, correctToGround) {
-      const startTime = performance.now();
-
-      if (correctToGround) {
-        const corrected = this._correctToGround(targetX, targetY);
-        targetX = corrected.x;
-        targetY = corrected.y;
-      }
-
-      const targetGrid = this.worldToGrid(targetX, targetY);
-      const targetKey = this.gridKey(targetGrid.gx, targetGrid.gy);
-      const targetNode = this.getNode(targetGrid.gx, targetGrid.gy);
-
-      if (!targetNode) {
-        this._warn(`Flow field target node not found at grid (${targetGrid.gx},${targetGrid.gy})`);
-        this._trigger("OnFlowFieldUnreachable");
-        return null;
-      }
-
-      const reverse = this._buildReverseAdjacency();
-      const heap = new MinHeap();
-      const field = new Map();
-
-      // Seed with target node at cost 0
-      field.set(targetKey, {
-        connection: null,
-        totalCost: 0,
-        action: "arrived",
-        targetNodeKey: null,
-      });
-      heap.insert(targetKey, 0);
-
-      while (heap.size > 0) {
-        const { node: currentKey, priority: currentCost } = heap.extractMin();
-
-        // Skip if we already found a better path
-        if (currentCost > field.get(currentKey).totalCost) continue;
-
-        const edges = reverse.get(currentKey);
-        if (!edges) continue;
-
-        for (const edge of edges) {
-          const newCost = currentCost + edge.connection.cost;
-
-          const existing = field.get(edge.sourceKey);
-          if (!existing || newCost < existing.totalCost) {
-            field.set(edge.sourceKey, {
-              connection: edge.connection,
-              totalCost: newCost,
-              action: edge.connection.action,
-              targetNodeKey: currentKey,
-            });
-            heap.insert(edge.sourceKey, newCost);
-          }
-        }
-      }
-
-      const targetWorld = this.gridToWorld(targetGrid.gx, targetGrid.gy);
-      const container = {
-        id,
-        targetGridKey: targetKey,
-        targetX: targetWorld.x,
-        targetY: targetWorld.y,
-        field,
-        nodeCount: field.size,
-        computeTimeMs: performance.now() - startTime,
-      };
-
-      this._getFlowFields().set(id, container);
-
-      this._log(`Flow field "${id}" computed: ${field.size} nodes in ${container.computeTimeMs.toFixed(2)}ms`);
-      this._trigger("OnFlowFieldComputed");
-
-      return container;
-    }
-
-    _stopFlowField() {
-      this.flowFieldMode = false;
-      this.activeFlowFieldId = null;
-      this.flowFieldTimeAtNode = 0;
-    }
-
-    _followFlowField(dt) {
-      // If we have an active A* segment path, follow it via _followPath (called from _tick)
-      if (this.hasPath) return;
-
-      const flowFields = this._getFlowFields();
-      const container = flowFields.get(this.activeFlowFieldId);
-
-      if (!container) {
-        this._stopFlowField();
-        this._trigger("OnFlowFieldUnreachable");
-        return;
-      }
-
-      // Find the nearest node to the agent's current position
-      let grid = this.worldToGrid(this.instance.x, this.instance.y);
-      let currentKey = this.gridKey(grid.gx, grid.gy);
-      let entry = container.field.get(currentKey);
-
-      // If exact grid cell has no flow field entry, correct to nearest ground node
-      if (!entry) {
-        const corrected = this._correctToGround(this.instance.x, this.instance.y);
-        grid = this.worldToGrid(corrected.x, corrected.y);
-        currentKey = this.gridKey(grid.gx, grid.gy);
-        entry = container.field.get(currentKey);
-      }
-
-      if (!entry) {
-        // Agent's position is not in the flow field even after correction — unreachable
-        this._stopFlowField();
-        this._trigger("OnFlowFieldUnreachable");
-        return;
-      }
-
-      // Check if arrived at target
-      if (entry.action === "arrived") {
-        const distToTarget = this.distance(
-          this.instance.x, this.instance.y,
-          container.targetX, container.targetY
-        );
-
-        if (distToTarget < this.cellSize * 0.5) {
-          this._stopFlowField();
-          this._trigger("OnFlowFieldArrived");
-          return;
-        }
-
-        // Walk toward exact target position
-        if (this.autoControl) {
-          const walkAction = container.targetX < this.instance.x ? "walk_left" : "walk_right";
-          this._executeAction(walkAction, container.targetX, container.targetY, null);
-        }
-        return;
-      }
-
-      // Check stuck timeout
-      this.flowFieldTimeAtNode += dt;
-      if (this.flowFieldTimeAtNode > this.maxWaypointTime) {
-        this.flowFieldTimeAtNode = 0;
-        this._stopFlowField();
-        this._trigger("OnFlowFieldStuck");
-        return;
-      }
-
-      // Compute a short A* segment using flow field look-ahead
-      const lookAheadCount = this._getFlowFieldLookAheadCount(container, currentKey);
-      const lookAhead = this._getFlowFieldLookAhead(container, currentKey, lookAheadCount);
-
-      if (lookAhead.length === 0) {
-        // Flow field chain is broken
-        this._stopFlowField();
-        this._trigger("OnFlowFieldUnreachable");
-        return;
-      }
-
-      const segmentTarget = lookAhead[lookAhead.length - 1];
-      const segmentWorld = this.gridToWorld(segmentTarget.gx, segmentTarget.gy);
-
-      // Run A* for this short segment
-      const path = this.findPath(this.instance.x, this.instance.y, segmentWorld.x, segmentWorld.y);
-      if (path && path.length > 0) {
-        this.currentPath = path;
-        this.currentWaypoint = 0;
-        this.hasPath = true;
-        this.timeAtWaypoint = 0;
-        this.flowFieldTimeAtNode = 0;
-      } else {
-        // A* failed — try just the immediate next hop
-        const nextNode = entry.connection.target;
-        const nextWorld = this.gridToWorld(nextNode.gx, nextNode.gy);
-        const fallbackPath = this.findPath(this.instance.x, this.instance.y, nextWorld.x, nextWorld.y);
-        if (fallbackPath && fallbackPath.length > 0) {
-          this.currentPath = fallbackPath;
-          this.currentWaypoint = 0;
-          this.hasPath = true;
-          this.timeAtWaypoint = 0;
-          this.flowFieldTimeAtNode = 0;
-        }
-        // If even single-hop fails, wait for next tick (stuck timeout will catch it)
-      }
-    }
-
-    _getFlowFieldLookAhead(container, startKey, maxHops) {
-      const nodes = [];
-      let currentKey = startKey;
-
-      for (let i = 0; i < maxHops; i++) {
-        const entry = container.field.get(currentKey);
-        if (!entry || entry.action === "arrived") break;
-
-        const nextNode = entry.connection.target;
-        const nextKey = this.gridKey(nextNode.gx, nextNode.gy);
-
-        // Prevent infinite loops
-        if (nextKey === currentKey) break;
-
-        nodes.push(nextNode);
-        currentKey = nextKey;
-      }
-
-      return nodes;
-    }
-
-    _getFlowFieldLookAheadCount(container, startKey) {
-      // Check the first 3 entries — if any involve jumps/falls, use longer look-ahead
-      let currentKey = startKey;
-      for (let i = 0; i < 3; i++) {
-        const entry = container.field.get(currentKey);
-        if (!entry || entry.action === "arrived") break;
-
-        if (!entry.action.includes("walk")) {
-          return 8; // Jump/fall/portal — longer segment for full action sequence
-        }
-
-        const nextNode = entry.connection.target;
-        currentKey = this.gridKey(nextNode.gx, nextNode.gy);
-      }
-      return 3; // All walks — short segment, frequent re-checks
     }
 
     findPath(startX, startY, goalX, goalY) {
@@ -2585,10 +2242,7 @@ export default function (parentClass) {
     _followPath(dt) {
       if (this.currentWaypoint >= this.currentPath.length) {
         this.hasPath = false;
-        // If following a flow field, don't trigger OnPathComplete — let the flow field loop handle next segment
-        if (!this.flowFieldMode) {
-          this._trigger("OnPathComplete");
-        }
+        this._trigger("OnPathComplete");
         return;
       }
 
@@ -2599,12 +2253,7 @@ export default function (parentClass) {
         this.hasPath = false;
         this.timeAtWaypoint = 0;
         this._log(`Stuck at waypoint ${this.currentWaypoint} (exceeded ${this.maxWaypointTime}s)`);
-        if (this.flowFieldMode) {
-          this._stopFlowField();
-          this._trigger("OnFlowFieldStuck");
-        } else {
-          this._trigger("OnWaypointStuck");
-        }
+        this._trigger("OnWaypointStuck");
         return;
       }
 
@@ -3150,9 +2799,6 @@ export default function (parentClass) {
 
     /** Calculates a path from the character's current position to the target coordinates. Supports ground correction and jump-toward mode. */
     aceFindPath(targetX, targetY, correctToGround, mode) {
-      // Mutual exclusion: stop any active flow field
-      if (this.flowFieldMode) this._stopFlowField();
-
       this._log(`FindPath to (${Math.round(targetX)},${Math.round(targetY)}) mode=${mode || "reach"} groundCorrect=${correctToGround}`);
       this.lastPathFailReason = "";
 
@@ -3929,126 +3575,6 @@ export default function (parentClass) {
     /** Returns the calculated maximum jump distance in pixels based on physics properties. */
     aceGetCalculatedJumpDistance() {
       return this.maxJumpDistance || 0;
-    }
-
-    // ============================================================================
-    // FLOW FIELD - Actions
-    // ============================================================================
-
-    aceComputeFlowField(id, targetX, targetY, correctToGround) {
-      return this._computeFlowField(id, targetX, targetY, correctToGround);
-    }
-
-    aceFollowFlowField(id) {
-      const flowFields = this._getFlowFields();
-      if (!flowFields.has(id)) {
-        this._warn(`Flow field "${id}" does not exist`);
-        return;
-      }
-
-      // Mutual exclusion: stop any active A* path
-      if (this.hasPath) this.aceClearPath();
-
-      this.activeFlowFieldId = id;
-      this.flowFieldMode = true;
-      this.flowFieldTimeAtNode = 0;
-
-      const container = flowFields.get(id);
-      this.flowFieldTargetX = container.targetX;
-      this.flowFieldTargetY = container.targetY;
-    }
-
-    aceStopFlowField() {
-      this._stopFlowField();
-    }
-
-    aceRemoveFlowField(id) {
-      const flowFields = this._getFlowFields();
-      flowFields.delete(id);
-      if (this.activeFlowFieldId === id) {
-        this._stopFlowField();
-      }
-    }
-
-    aceClearAllFlowFields() {
-      this._getFlowFields().clear();
-      if (this.flowFieldMode) {
-        this._stopFlowField();
-      }
-    }
-
-    // ============================================================================
-    // FLOW FIELD - Conditions
-    // ============================================================================
-
-    aceIsFollowingFlowField() {
-      return this.flowFieldMode;
-    }
-
-    aceFlowFieldExists(id) {
-      return this._getFlowFields().has(id);
-    }
-
-    // ============================================================================
-    // FLOW FIELD - Expressions
-    // ============================================================================
-
-    aceGetFlowFieldCount() {
-      return this._getFlowFields().size;
-    }
-
-    aceGetFlowFieldNodeCount(id) {
-      const container = this._getFlowFields().get(id);
-      return container ? container.nodeCount : 0;
-    }
-
-    aceGetFlowFieldCostAt(id, gx, gy) {
-      const container = this._getFlowFields().get(id);
-      if (!container) return -1;
-      const entry = container.field.get(this.gridKey(gx, gy));
-      return entry ? entry.totalCost : -1;
-    }
-
-    aceGetFlowFieldActionAt(id, gx, gy) {
-      const container = this._getFlowFields().get(id);
-      if (!container) return "";
-      const entry = container.field.get(this.gridKey(gx, gy));
-      return entry ? entry.action : "";
-    }
-
-    aceGetFlowFieldNextNodeX(id, gx, gy) {
-      const container = this._getFlowFields().get(id);
-      if (!container) return 0;
-      const entry = container.field.get(this.gridKey(gx, gy));
-      if (!entry || !entry.connection) return 0;
-      return this.gridToWorld(entry.connection.target.gx, entry.connection.target.gy).x;
-    }
-
-    aceGetFlowFieldNextNodeY(id, gx, gy) {
-      const container = this._getFlowFields().get(id);
-      if (!container) return 0;
-      const entry = container.field.get(this.gridKey(gx, gy));
-      if (!entry || !entry.connection) return 0;
-      return this.gridToWorld(entry.connection.target.gx, entry.connection.target.gy).y;
-    }
-
-    aceGetFlowFieldTargetX(id) {
-      const container = this._getFlowFields().get(id);
-      return container ? container.targetX : 0;
-    }
-
-    aceGetFlowFieldTargetY(id) {
-      const container = this._getFlowFields().get(id);
-      return container ? container.targetY : 0;
-    }
-
-    aceGetActiveFlowFieldId() {
-      return this.activeFlowFieldId || "";
-    }
-
-    aceGetFlowFieldComputeTime(id) {
-      const container = this._getFlowFields().get(id);
-      return container ? container.computeTimeMs : 0;
     }
 
     // ============================================================================

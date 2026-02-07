@@ -74,11 +74,6 @@ npm run dev
 | Set max fall distance | Override the auto-calculated maximum fall distance. The navigation graph must be regenerated after changing this for the new value to take effect. | Distance (px)             *(number)* <br> |
 | Set max jump distance | Override the auto-calculated maximum horizontal jump distance. The navigation graph must be regenerated after changing this for the new value to take effect. | Distance (px)             *(number)* <br> |
 | Set max jump height | Override the auto-calculated maximum jump height. The navigation graph must be regenerated after changing this for the new value to take effect. | Height (px)             *(number)* <br> |
-| Clear all flow fields | Delete all flow fields. If the character is following one, it will stop. |  |
-| Compute flow field | Pre-compute a flow field from all reachable nodes toward a target position. Multiple agents can then follow the same field without individual A* searches. Triggers 'On flow field computed' when done. | Flow Field ID             *(string)* <br>Target X             *(number)* <br>Target Y             *(number)* <br>Correct to ground             *(combo)* <br> |
-| Follow flow field | Start following a pre-computed flow field. The character will move toward the flow field's target using the optimal next-hop at each node. Stops any active A* path. | Flow Field ID             *(string)* <br> |
-| Remove flow field | Delete a specific flow field by ID. If the character is currently following this field, it will stop. | Flow Field ID             *(string)* <br> |
-| Stop following flow field | Stop the character from following its current flow field. The character will stop moving but the flow field data is preserved for later use. |  |
 | Log graph stats to console | Output detailed navigation graph statistics to the browser console. Use for debugging graph generation and connectivity issues. |  |
 | Add circle hazard | Add a circular hazard area. The AI will avoid this area based on severity. Returns a hazard ID for later removal. Use for dynamic danger zones like explosions or enemy AOE. | X             *(number)* <br>Y             *(number)* <br>Radius             *(number)* <br>Severity             *(number)* <br> |
 | Add rectangle hazard | Add a rectangular hazard area. The AI will avoid this area based on severity. Returns a hazard ID for later removal. Use for static danger zones like spike pits. | X             *(number)* <br>Y             *(number)* <br>Width             *(number)* <br>Height             *(number)* <br>Severity             *(number)* <br> |
@@ -115,12 +110,6 @@ npm run dev
 | --- | --- | --- |
 | Is climbing ladder | Check if the character is currently climbing a ladder. Returns true during ladder traversal, false otherwise. |  |
 | On ladder climb complete | Triggered when the character finishes climbing a ladder. Use to trigger animations or next actions after ladder traversal. |  |
-| Flow field exists | True if a flow field with the given ID has been computed and is available. | Flow Field ID *(string)* <br> |
-| Is following flow field | True if the character is currently following a flow field. |  |
-| On flow field arrived | Triggered when the character reaches the flow field's target position. |  |
-| On flow field computed | Triggered after a flow field has been successfully computed. |  |
-| On flow field stuck | Triggered when the character has been stuck at a node longer than the Max Waypoint Time. |  |
-| On flow field unreachable | Triggered when the character's current position is not covered by the flow field, or the target node doesn't exist. |  |
 | Is node at ledge | Check if a specific node is marked as a ledge (platform edge). Returns true if the node is a left or right ledge. | Grid X *(number)* <br>Grid Y *(number)* <br> |
 | Is position hazardous | Check if a specific world position is within any hazard area (circle, rect, or tile). Returns true if any hazard affects this position. | X *(number)* <br>Y *(number)* <br> |
 | Is multi-agent avoidance enabled | Check if multi-agent collision avoidance is currently enabled. Returns true if enabled, false otherwise. |  |
@@ -158,16 +147,6 @@ npm run dev
 | CalculatedJumpHeight | Get the calculated maximum jump height in pixels based on Platform behavior settings. Used for determining reachable positions. | number |  | 
 | PlatformJumpStrength | Get the jump strength from the Platform behavior. Used for internal pathfinding calculations. Returns 0 if Platform behavior not found. | number |  | 
 | PlatformMaxSpeed | Get the max speed from the Platform behavior. Used for internal pathfinding calculations. Returns 0 if Platform behavior not found. | number |  | 
-| ActiveFlowFieldId | ID of the flow field currently being followed. Empty string if none. | string |  | 
-| FlowFieldActionAt | Action to take at a grid position (e.g. 'walk_left', 'jump', 'fall'). Empty string if unreachable. | string | Flow Field ID *(string)* <br>Grid X *(number)* <br>Grid Y *(number)* <br> | 
-| FlowFieldComputeTime | Time in milliseconds it took to compute a flow field. | number | Flow Field ID *(string)* <br> | 
-| FlowFieldCostAt | Total cost from a grid position to the flow field target. Returns -1 if unreachable. | number | Flow Field ID *(string)* <br>Grid X *(number)* <br>Grid Y *(number)* <br> | 
-| FlowFieldCount | Number of flow fields currently stored. | number |  | 
-| FlowFieldNextNodeX | World X of the next node to move toward from a grid position. | number | Flow Field ID *(string)* <br>Grid X *(number)* <br>Grid Y *(number)* <br> | 
-| FlowFieldNextNodeY | World Y of the next node to move toward from a grid position. | number | Flow Field ID *(string)* <br>Grid X *(number)* <br>Grid Y *(number)* <br> | 
-| FlowFieldNodeCount | Number of reachable nodes in a flow field. | number | Flow Field ID *(string)* <br> | 
-| FlowFieldTargetX | World X of the flow field's target position. | number | Flow Field ID *(string)* <br> | 
-| FlowFieldTargetY | World Y of the flow field's target position. | number | Flow Field ID *(string)* <br> | 
 | IsNodeIsland | Check if a node at grid coordinates is an island (single-tile platform). Returns 1 if true, 0 if false or node doesn't exist. | number | Grid X *(number)* <br>Grid Y *(number)* <br> | 
 | IsNodeLeftLedge | Check if a node at grid coordinates is a left ledge. Returns 1 if true, 0 if false or node doesn't exist. | number | Grid X *(number)* <br>Grid Y *(number)* <br> | 
 | IsNodeRightLedge | Check if a node at grid coordinates is a right ledge. Returns 1 if true, 0 if false or node doesn't exist. | number | Grid X *(number)* <br>Grid Y *(number)* <br> | 
