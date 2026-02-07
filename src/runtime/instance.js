@@ -85,15 +85,18 @@ export default function (parentClass) {
       this.setupPreset = properties[3];
       this.autoControl = properties[4];
       this.graphMode = properties[5];
-      this.enablePortals = properties[6];
+      const strategyMap = ["balanced", "shortest", "safest", "simplest"];
+      this.pathStrategy = strategyMap[properties[6]] || "balanced";
       this.smoothPaths = properties[7];
       this.maxWaypointTime = properties[8];
-      this.enableHazards = properties[9];
-      this.coyoteTime = properties[10];
-      this.ledgeRestriction = properties[11];
-      this.ledgeLeniency = properties[12];
-      this.rePathThreshold = properties[13];
-      this.hazardRadius = properties[14];
+      this.coyoteTime = properties[9];
+      this.ledgeRestriction = properties[10];
+      this.ledgeLeniency = properties[11];
+      this.rePathThreshold = properties[12];
+      this.hazardRadius = properties[13];
+      // Auto-enabled when portals/hazards are added via ACEs
+      this.enablePortals = true;
+      this.enableHazards = false;
 
       // Auto-detected from sprite bounding box on first tick
       this.characterHeight = 32;
@@ -207,6 +210,8 @@ export default function (parentClass) {
       this.COYOTE_JUMP_COST = 1.6;
       this.SLOPE_COST = 1.2;
 
+      this.pathStrategy = "balanced";
+
     }
 
     _tick() {
@@ -316,6 +321,7 @@ export default function (parentClass) {
         rePathThreshold: this.rePathThreshold,
         rePathCooldownDuration: this.rePathCooldownDuration,
         hazardRadius: this.hazardRadius,
+        pathStrategy: this.pathStrategy,
         multiAgentAvoidance: this.multiAgentAvoidance,
         currentPath: this.currentPath.map((wp) => ({
           x: wp.x,
@@ -387,6 +393,7 @@ export default function (parentClass) {
       this.rePathThreshold = o.rePathThreshold;
       this.rePathCooldownDuration = o.rePathCooldownDuration || 0.5;
       this.hazardRadius = o.hazardRadius;
+      this.pathStrategy = o.pathStrategy || "balanced";
       this.multiAgentAvoidance = o.multiAgentAvoidance;
       this.currentWaypoint = o.currentWaypoint;
       this.hasPath = o.hasPath;
@@ -1151,23 +1158,20 @@ export default function (parentClass) {
       let count = 0;
       const graph = this._getNavigationGraph();
       const headCells = Math.max(0, Math.ceil(this.characterHeight / this.cellSize) - 1);
-      const widthCells = this._getWidthCells();
 
       for (const [key, node] of graph) {
         const leftNode = this.getNode(node.gx - 1, node.gy);
         const rightNode = this.getNode(node.gx + 1, node.gy);
 
         if (leftNode) {
+          // Only check center column headroom for walk connections.
+          // The Platform behavior handles horizontal wall collisions at runtime —
+          // if the character can't physically fit, movement will detect the wall and repath.
           let canWalk = true;
-          for (let w = -widthCells; w <= widthCells && canWalk; w++) {
-            const checkGx = leftNode.gx + w;
-            // Only check headroom (h >= 1) for all cells.
-            // Feet-level (h=0) wall overlap is handled by Platform behavior at runtime.
-            for (let h = 1; h <= headCells; h++) {
-              if (this.isCellBlocked(checkGx, leftNode.gy - h)) {
-                canWalk = false;
-                break;
-              }
+          for (let h = 1; h <= headCells; h++) {
+            if (this.isCellBlocked(leftNode.gx, leftNode.gy - h)) {
+              canWalk = false;
+              break;
             }
           }
           if (canWalk) {
@@ -1182,15 +1186,10 @@ export default function (parentClass) {
 
         if (rightNode) {
           let canWalk = true;
-          for (let w = -widthCells; w <= widthCells && canWalk; w++) {
-            const checkGx = rightNode.gx + w;
-            // Only check headroom (h >= 1) for all cells.
-            // Feet-level (h=0) wall overlap is handled by Platform behavior at runtime.
-            for (let h = 1; h <= headCells; h++) {
-              if (this.isCellBlocked(checkGx, rightNode.gy - h)) {
-                canWalk = false;
-                break;
-              }
+          for (let h = 1; h <= headCells; h++) {
+            if (this.isCellBlocked(rightNode.gx, rightNode.gy - h)) {
+              canWalk = false;
+              break;
             }
           }
           if (canWalk) {
@@ -1297,7 +1296,31 @@ export default function (parentClass) {
       if (-dy > this.maxJumpHeight) return false;
 
       const headCells = Math.max(0, Math.ceil(this.characterHeight / this.cellSize) - 1);
-      const widthCells = this._getWidthCells();
+
+      // Vertical or near-vertical jump: use straight column check instead of Bezier arc.
+      // This matches how falls work (straight drop) and avoids the arc overshooting into ceilings.
+      if (Math.abs(dx) < this.cellSize * 0.5) {
+        const minGy = Math.min(from.gy, to.gy);
+        const maxGy = Math.max(from.gy, to.gy);
+        for (let gy = minGy; gy <= maxGy; gy++) {
+          for (let h = 0; h <= headCells; h++) {
+            const checkGy = gy - h;
+            if (checkGy < 0) return false;
+            const index = checkGy * this.gridWidth + from.gx;
+            if (from.gx < 0 || from.gx >= this.gridWidth) return false;
+            const cellVal = this.obstacleMap ? this.obstacleMap[index] : 0;
+            if (h === 0) {
+              if (cellVal === 1 || cellVal === 3) return false;
+            } else {
+              if (cellVal === 1 && this.platformProps.ceilingCollisionMode === "stop") return false;
+              if (cellVal === 3) return false;
+            }
+          }
+        }
+        return true;
+      }
+
+      // Horizontal jump: use Bezier arc check
       // Adaptive arc: peak just high enough for the jump, capped at maxJumpHeight
       const neededPeakHeight = Math.max(-dy, 0) + this.cellSize;
       const actualPeakHeight = Math.min(this.maxJumpHeight, neededPeakHeight);
@@ -1321,37 +1344,28 @@ export default function (parentClass) {
           return false;
         }
 
-        // At start (i=0) and end (i=8), skip feet-level width checks — the character
-        // is on a valid node and the Platform behavior handles wall collisions at runtime.
-        // During the arc (0 < i < 8), check full width to ensure the body clears obstacles.
-        const isEndpoint = (i === 0 || i === 8);
-
+        // Only check center column — Platform behavior handles wall collisions at runtime.
+        // This allows jumps through 1-tile-wide gaps and past adjacent walls.
         for (let h = 0; h <= headCells; h++) {
-          for (let w = -widthCells; w <= widthCells; w++) {
-            const checkGx = grid.gx + w;
-            const checkGy = grid.gy - h;
-            if (checkGy < 0 || checkGx < 0 || checkGx >= this.gridWidth) return false;
-            const index = checkGy * this.gridWidth + checkGx;
-            const cellVal = this.obstacleMap ? this.obstacleMap[index] : 0;
+          const checkGy = grid.gy - h;
+          if (checkGy < 0) return false;
+          const index = checkGy * this.gridWidth + grid.gx;
+          const cellVal = this.obstacleMap ? this.obstacleMap[index] : 0;
 
-            if (h === 0 && w === 0) {
-              if (cellVal === 1) return false;
-              if (cellVal === 3) return false;
-              if (cellVal === 2) {
-                const prevT = Math.max(0, (i - 1) / 8);
-                const prevOneMinusT = 1 - prevT;
-                const prevArcY = from.y * prevOneMinusT * prevOneMinusT + 2 * controlY * prevT * prevOneMinusT + to.y * prevT * prevT;
-                if (arcY > prevArcY) return false;
-              }
-            } else if (h === 0) {
-              // Skip feet-level width check at start/end (wall overlap handled by Platform behavior)
-              if (!isEndpoint && (cellVal === 1 || cellVal === 3)) return false;
-            } else {
-              if (cellVal === 1 && this.platformProps.ceilingCollisionMode === "stop") {
-                return false;
-              }
-              if (cellVal === 3) return false;
+          if (h === 0) {
+            if (cellVal === 1) return false;
+            if (cellVal === 3) return false;
+            if (cellVal === 2) {
+              const prevT = Math.max(0, (i - 1) / 8);
+              const prevOneMinusT = 1 - prevT;
+              const prevArcY = from.y * prevOneMinusT * prevOneMinusT + 2 * controlY * prevT * prevOneMinusT + to.y * prevT * prevT;
+              if (arcY > prevArcY) return false;
             }
+          } else {
+            if (cellVal === 1 && this.platformProps.ceilingCollisionMode === "stop") {
+              return false;
+            }
+            if (cellVal === 3) return false;
           }
         }
       }
@@ -1711,6 +1725,7 @@ export default function (parentClass) {
     }
 
     aceSetPortal(portalId, type, entryX, entryY, exitX, exitY, cost, ignoreHazards) {
+      this.enablePortals = true;
       const portalsMap = this._getPortalsMap();
       const existing = portalsMap.get(portalId);
 
@@ -1957,13 +1972,10 @@ export default function (parentClass) {
         reversedPath = this._reversePathDirection(reversePath);
       }
 
-      // Pick the better path
+      // Combine forward and reverse paths for the best result
       let bestPath = null;
       if (forwardPath && reversedPath) {
-        const forwardCost = this._pathCost(forwardPath);
-        const reverseCost = this._pathCost(reversedPath);
-        this._log(`Bidirectional: forward cost=${Math.round(forwardCost)}, reverse cost=${Math.round(reverseCost)}`);
-        bestPath = forwardCost <= reverseCost ? forwardPath : reversedPath;
+        bestPath = this._combinePaths(forwardPath, reversedPath);
       } else if (forwardPath) {
         bestPath = forwardPath;
       } else if (reversedPath) {
@@ -2154,6 +2166,103 @@ export default function (parentClass) {
       return cost;
     }
 
+    _strategyCost(path) {
+      switch (this.pathStrategy) {
+        case "shortest":
+          return this._pathCost(path);
+
+        case "safest": {
+          let cost = 0;
+          for (let i = 1; i < path.length; i++) {
+            const dist = this.distance(path[i - 1].x, path[i - 1].y, path[i].x, path[i].y);
+            const action = path[i].action;
+            if (action === "jump" || action === "coyote_jump" || action === "jump_toward")
+              cost += dist * 2.5;
+            else if (action.includes("fall"))
+              cost += dist * 1.5;
+            else
+              cost += dist * 1.0;
+          }
+          return cost;
+        }
+
+        case "simplest":
+          return path.length * 10000 + this._pathCost(path);
+
+        case "balanced":
+        default: {
+          let cost = 0;
+          for (let i = 1; i < path.length; i++) {
+            const dist = this.distance(path[i - 1].x, path[i - 1].y, path[i].x, path[i].y);
+            const action = path[i].action;
+            if (action === "jump" || action === "coyote_jump" || action === "jump_toward")
+              cost += dist * 1.5;
+            else if (action.includes("fall"))
+              cost += dist * 1.2;
+            else
+              cost += dist * 1.0;
+          }
+          return cost;
+        }
+      }
+    }
+
+    _combinePaths(forwardPath, reversedPath) {
+      const forwardCost = this._strategyCost(forwardPath);
+      const reverseCost = this._strategyCost(reversedPath);
+
+      // Build node→index maps for each path
+      const forwardNodeIdx = new Map();
+      for (let i = 0; i < forwardPath.length; i++) {
+        const key = forwardPath[i].node;
+        if (!forwardNodeIdx.has(key)) forwardNodeIdx.set(key, i);
+      }
+      const reverseNodeIdx = new Map();
+      for (let i = 0; i < reversedPath.length; i++) {
+        const key = reversedPath[i].node;
+        if (!reverseNodeIdx.has(key)) reverseNodeIdx.set(key, i);
+      }
+
+      // Start with the pure paths as candidates
+      let bestPath = forwardCost <= reverseCost ? forwardPath : reversedPath;
+      let bestCost = Math.min(forwardCost, reverseCost);
+
+      // Try hybrid paths through common intermediate nodes
+      for (const [node, fwdIdx] of forwardNodeIdx) {
+        if (!reverseNodeIdx.has(node)) continue;
+        const revIdx = reverseNodeIdx.get(node);
+
+        // Skip start/end nodes — no hybrid benefit
+        if (fwdIdx === 0 || revIdx === 0) continue;
+        if (fwdIdx === forwardPath.length - 1 || revIdx === reversedPath.length - 1) continue;
+
+        // Hybrid 1: forward first half + reverse second half
+        const hybrid1 = [
+          ...forwardPath.slice(0, fwdIdx),
+          ...reversedPath.slice(revIdx),
+        ];
+        const cost1 = this._strategyCost(hybrid1);
+        if (cost1 < bestCost) {
+          bestCost = cost1;
+          bestPath = hybrid1;
+        }
+
+        // Hybrid 2: reverse first half + forward second half
+        const hybrid2 = [
+          ...reversedPath.slice(0, revIdx),
+          ...forwardPath.slice(fwdIdx),
+        ];
+        const cost2 = this._strategyCost(hybrid2);
+        if (cost2 < bestCost) {
+          bestCost = cost2;
+          bestPath = hybrid2;
+        }
+      }
+
+      this._log(`Combined path: cost=${Math.round(bestCost)} (fwd=${Math.round(forwardCost)}, rev=${Math.round(reverseCost)}, strategy=${this.pathStrategy})`);
+      return bestPath;
+    }
+
     _reconstructPath(goalNode) {
       const path = [];
       let current = goalNode;
@@ -2280,6 +2389,24 @@ export default function (parentClass) {
 
     _followPath(dt) {
       if (this.currentWaypoint >= this.currentPath.length) {
+        // Centre within the final tile before completing the path
+        const lastWp = this.currentPath[this.currentPath.length - 1];
+        if (lastWp && this.autoControl && this.platformBehavior) {
+          try {
+            // Wait for landing before centering or completing
+            if (!this.platformBehavior.isOnFloor) {
+              return;
+            }
+            const distToCenter = Math.abs(this.instance.x - lastWp.x);
+            if (distToCenter > this.cellSize * 0.15) {
+              const dir = lastWp.x < this.instance.x ? "left" : "right";
+              if (!this.platformBehavior.isByWall(dir)) {
+                this.platformBehavior.simulateControl(dir);
+                return; // Wait until centered
+              }
+            }
+          } catch (e) {}
+        }
         this.hasPath = false;
         this._trigger("OnPathComplete");
         return;
@@ -2550,11 +2677,9 @@ export default function (parentClass) {
               return;
             }
 
-            // Truly blocked by wall — try to jump over it
-            this.platformBehavior.simulateControl("jump");
-            this.platformBehavior.simulateControl(
-              movingLeft ? "left" : "right"
-            );
+            // Truly blocked by wall while grounded — path is invalid, repath
+            this._warn(`Walk blocked by wall (${wallSide}) while grounded — repathing`);
+            this._rePath();
             return;
           }
         } catch (e) {}
@@ -2692,70 +2817,32 @@ export default function (parentClass) {
       const xDist = Math.abs(targetX - this.instance.x);
       const isVerticalJump = xDist < this.cellSize * 0.5;
 
-      // Detect if character is on a confined tile (island or walled on jump side)
-      // When confined, skip edge-approach delay — there's no reachable edge to walk to
-      let isConfined = false;
-      try {
+      // Centre within the current tile before jumping.
+      // This ensures the jump arc starts from an optimal position and prevents
+      // walking off confined tiles (islands, walled tiles) before the jump fires.
+      if (this.platformBehavior.isOnFloor) {
         const prevIdx = this.currentWaypoint - 1;
         const prevWp = prevIdx >= 0 ? this.currentPath[prevIdx] : null;
-        if (prevWp && prevWp.node && prevWp.node.isIsland) {
-          isConfined = true;
-        } else {
-          const jumpDir = targetX > this.instance.x ? "right" : "left";
-          if (this.platformBehavior.isByWall(jumpDir)) {
-            isConfined = true;
-          }
-        }
-      } catch (e) {}
-
-      // For confined tiles with small horizontal offset, nudge toward target
-      // but don't require edge approach — jump as soon as possible
-      if (isConfined && !isVerticalJump && xDist < this.cellSize * 1.0) {
-        if (xDist >= this.cellSize * 0.3) {
-          const dir = targetX < this.instance.x ? "left" : "right";
-          try {
-            if (!this.platformBehavior.isByWall(dir)) {
-              this.platformBehavior.simulateControl(dir);
-            }
-          } catch (e) {}
-        }
-        // Skip edge-approach, fall through to jump execution below
-      } else if (!isVerticalJump) {
-        // Only push horizontally if the target has meaningful horizontal offset
-        // and we're not blocked by a wall in that direction
-        const dir = targetX < this.instance.x ? "left" : "right";
-        try {
-          if (!this.platformBehavior.isByWall(dir)) {
-            this.platformBehavior.simulateControl(dir);
-          }
-        } catch (e) {
-          this.platformBehavior.simulateControl(dir);
-        }
-
-        // Walk closer to the platform edge before jumping so the character
-        // doesn't jump too early and fall short into the gap.
-        // Only delay the jump while on the floor and the previous waypoint node
-        // is a ledge in the jump direction (meaning there's an edge to walk to).
-        // SKIP when confined — no reachable edge to approach.
-        if (!isConfined && this.platformBehavior.isOnFloor) {
-          const prevIdx = this.currentWaypoint - 1;
-          const prevWp = prevIdx >= 0 ? this.currentPath[prevIdx] : null;
-          if (prevWp && prevWp.node) {
-            const jumpDir = targetX > this.instance.x ? "right" : "left";
-            const isLedge = jumpDir === "right" ? prevWp.node.isRightLedge : prevWp.node.isLeftLedge;
-            if (isLedge) {
-              // Edge of the take-off platform
-              const edgeX = prevWp.node.x + (jumpDir === "right" ? 1 : -1) * (this.cellSize * 0.4);
-              const pastEdge = jumpDir === "right"
-                ? this.instance.x >= edgeX
-                : this.instance.x <= edgeX;
-              if (!pastEdge) {
-                // Still haven't reached the edge — keep walking, don't jump yet
-                return;
+        if (prevWp && prevWp.node) {
+          const tileCenterX = prevWp.node.x;
+          const distToCenter = Math.abs(this.instance.x - tileCenterX);
+          if (distToCenter > this.cellSize * 0.15) {
+            // Walk toward tile center before jumping
+            const centerDir = tileCenterX < this.instance.x ? "left" : "right";
+            try {
+              if (!this.platformBehavior.isByWall(centerDir)) {
+                this.platformBehavior.simulateControl(centerDir);
               }
-            }
+            } catch (e) {}
+            return; // Wait until centered
           }
         }
+      }
+
+      // Apply horizontal input toward target during jump
+      if (!isVerticalJump) {
+        const dir = targetX < this.instance.x ? "left" : "right";
+        this.platformBehavior.simulateControl(dir);
       }
 
       try {
@@ -3084,6 +3171,10 @@ export default function (parentClass) {
       this.rePathCooldownDuration = Math.max(0, seconds);
     }
 
+    aceSetPathStrategy(strategy) {
+      this.pathStrategy = strategy;
+    }
+
     /** Sets the hazard avoidance radius in tiles (how far to steer around hazardous areas). */
     aceSetHazardRadius(tiles) {
       this.hazardRadius = tiles;
@@ -3337,6 +3428,10 @@ export default function (parentClass) {
     /** Returns the re-path cooldown duration in seconds. */
     aceGetRePathCooldown() {
       return this.rePathCooldownDuration;
+    }
+
+    aceGetPathStrategy() {
+      return this.pathStrategy;
     }
 
     // ============================================================================

@@ -158,11 +158,19 @@ export const properties = [
 
   // Property [6]
   {
-    type: PROPERTY_TYPE.CHECK,
-    id: "enable_portals",
-    name: "Enable Portals",
-    desc: "Allow AI to use special connections like teleporters, ladders, elevators, or doors. Disable if your game doesn't have these features.",
-    options: { initialValue: true }
+    type: PROPERTY_TYPE.COMBO,
+    id: "path_strategy",
+    name: "Path Strategy",
+    desc: "How the AI picks the best route when multiple paths exist. Balanced: weighs distance and difficulty equally, good for most platformers and adventure games. Shortest Distance: always takes the fastest route even with risky jumps, ideal for speedrunner games and time trials. Safest Route: avoids jumps and falls when possible, great for stealth games, escort missions, or fragile NPCs. Simplest Path: fewest waypoints for predictable movement, best for simple enemies and tower defense creeps.",
+    options: {
+      initialValue: "balanced",
+      items: [
+        { balanced: "Balanced (recommended for most games)" },
+        { shortest: "Shortest Distance (speedrunners, time trials)" },
+        { safest: "Safest Route (stealth, escort missions)" },
+        { simplest: "Simplest Path (simple enemies, predictable AI)" }
+      ]
+    }
   },
 
   // Property [7]
@@ -189,17 +197,6 @@ export const properties = [
 
   // Property [9]
   {
-    type: PROPERTY_TYPE.CHECK,
-    id: "enable_hazards",
-    name: "Enable Hazard Avoidance",
-    desc: "AI will try to avoid dangerous areas like spikes, fire, or enemy patrol zones. Makes pathfinding slower but smarter.",
-    options: {
-      initialValue: false
-    }
-  },
-
-  // Property [10]
-  {
     type: PROPERTY_TYPE.FLOAT,
     id: "coyote_time",
     name: "Coyote Time",
@@ -211,7 +208,7 @@ export const properties = [
     }
   },
 
-  // Property [11]
+  // Property [10]
   {
     type: PROPERTY_TYPE.CHECK,
     id: "ledge_restriction",
@@ -220,7 +217,7 @@ export const properties = [
     options: { initialValue: false }
   },
 
-  // Property [12]
+  // Property [11]
   {
     type: PROPERTY_TYPE.FLOAT,
     id: "ledge_leniency",
@@ -233,7 +230,7 @@ export const properties = [
     }
   },
 
-  // Property [13]
+  // Property [12]
   {
     type: PROPERTY_TYPE.FLOAT,
     id: "repath_threshold",
@@ -246,7 +243,7 @@ export const properties = [
     }
   },
 
-  // Property [14]
+  // Property [13]
   {
     type: PROPERTY_TYPE.INTEGER,
     id: "hazard_radius",

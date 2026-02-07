@@ -452,6 +452,13 @@ expression("Pathfinding", "JumpTowardTargetY", {
   return this.aceGetJumpTowardTargetY();
 });
 
+expression("Pathfinding", "PathStrategy", {
+  returnType: "string",
+  description: "Get the current path strategy preset (balanced, shortest, safest, simplest)."
+}, function() {
+  return this.aceGetPathStrategy();
+});
+
 // ============================================================================
 // OBSTACLE MAP ACTIONS
 // ============================================================================
@@ -593,6 +600,29 @@ action("Pathfinding", "SetRePathCooldown", {
   ]
 }, function(seconds) {
   this.aceSetRePathCooldown(seconds);
+});
+
+action("Pathfinding", "SetPathStrategy", {
+  listName: "Set path strategy",
+  displayText: "Set path strategy to {0}",
+  description: "Change how the AI picks the best route when multiple paths exist. Balanced: weighs distance and difficulty equally. Shortest Distance: always takes the fastest route. Safest Route: avoids jumps and falls. Simplest Path: fewest waypoints.",
+  params: [
+    {
+      id: "strategy",
+      name: "Strategy",
+      desc: "The path selection strategy preset",
+      type: "combo",
+      initialValue: "balanced",
+      items: [
+        { balanced: "Balanced" },
+        { shortest: "Shortest Distance" },
+        { safest: "Safest Route" },
+        { simplest: "Simplest Path" }
+      ]
+    }
+  ]
+}, function(strategy) {
+  this.aceSetPathStrategy(strategy);
 });
 
 action("ObstacleMap", "SetHazardRadius", {
