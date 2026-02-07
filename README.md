@@ -129,7 +129,7 @@ npm run dev
 | Node exists at grid position | Check if a navigation node exists at the specified grid coordinates. Use this to validate positions before pathfinding or placing objects. | Grid X *(number)* <br>Grid Y *(number)* <br> |
 | Node exists at world position | Check if a navigation node exists at the specified world coordinates. Use this to validate world positions before pathfinding. | X *(number)* <br>Y *(number)* <br> |
 | On navigation graph generated | Triggered when the navigation graph has been successfully generated. Use this to start pathfinding operations after map setup. |  |
-| On jump toward executed | Triggered when the 'jump_toward' mode executes the final jump toward an unreachable target. Use this to handle partial path completion. |  |
+| On jump toward executed | Triggered when the 'jump at target' mode executes the final jump toward the target. Use this to handle jump attacks or stomps. |  |
 | On path complete | Triggered when the AI arrives at the final destination. Use this to trigger arrival animations, next actions, or goal completion logic. |  |
 | On path failed | Triggered when pathfinding fails to find a valid path to the target. Use this to handle unreachable destinations or implement fallback behaviors. |  |
 | On path found | Triggered when a path has been successfully calculated. Use this to start custom actions when pathfinding succeeds. |  |
@@ -196,8 +196,8 @@ npm run dev
 | CurrentWaypointY | Get the world Y position of the current waypoint. Returns 0 if no path is active. | number |  | 
 | DistanceToWaypoint | Get the distance in pixels from the character to the current waypoint. Returns 0 if no path is active. | number |  | 
 | EstimatedVelocityX | Get the estimated horizontal velocity needed to follow the current path. Returns 0 if no path is active. | number |  | 
-| JumpTowardTargetX | Get the world X position of the jump_toward target. Returns 0 if not in jump_toward mode. | number |  | 
-| JumpTowardTargetY | Get the world Y position of the jump_toward target. Returns 0 if not in jump_toward mode. | number |  | 
+| JumpTowardTargetX | Get the world X position of the jump-at target. Returns 0 if not in jump-at mode. | number |  | 
+| JumpTowardTargetY | Get the world Y position of the jump-at target. Returns 0 if not in jump-at mode. | number |  | 
 | LedgeLeniency | Get the ledge leniency setting in pixels. This is how far past a ledge edge the AI can walk before stopping. | number |  | 
 | LedgeRestriction | Get whether ledge restriction is enabled. Returns 1 if enabled, 0 if disabled. | number |  | 
 | NodeCount | Get the total number of navigation nodes in the generated graph. Returns 0 if no graph exists. | number |  | 

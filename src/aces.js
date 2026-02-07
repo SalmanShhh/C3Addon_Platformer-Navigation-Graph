@@ -139,7 +139,7 @@ condition("Pathfinding", "OnWaypointReached", {
 condition("Pathfinding", "OnJumpTowardExecuted", {
   listName: "On jump toward executed",
   displayText: "On jump toward executed",
-  description: "Triggered when the 'jump_toward' mode executes the final jump toward an unreachable target. Use this to handle partial path completion.",
+  description: "Triggered when the 'jump at target' mode executes the final jump toward the target. Use this to handle jump attacks or stomps.",
   isTrigger: true
 }, function() {
   return true;
@@ -440,14 +440,14 @@ expression("Pathfinding", "LedgeLeniency", {
 
 expression("Pathfinding", "JumpTowardTargetX", {
   returnType: "number",
-  description: "Get the world X position of the jump_toward target. Returns 0 if not in jump_toward mode."
+  description: "Get the world X position of the jump-at target. Returns 0 if not in jump-at mode."
 }, function() {
   return this.aceGetJumpTowardTargetX();
 });
 
 expression("Pathfinding", "JumpTowardTargetY", {
   returnType: "number",
-  description: "Get the world Y position of the jump_toward target. Returns 0 if not in jump_toward mode."
+  description: "Get the world Y position of the jump-at target. Returns 0 if not in jump-at mode."
 }, function() {
   return this.aceGetJumpTowardTargetY();
 });

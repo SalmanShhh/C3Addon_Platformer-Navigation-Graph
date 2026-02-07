@@ -1950,6 +1950,25 @@ export default function (parentClass) {
       let startNode = this.getNode(startGrid.gx, startGrid.gy);
       let goalNode = this.getNode(goalGrid.gx, goalGrid.gy);
 
+      // Snap to closest adjacent node if one is nearer (handles ledge-edge positions)
+      if (startNode) {
+        let bestDist = this.distance(startX, startY, startNode.x, startNode.y);
+        for (let dx = -1; dx <= 1; dx++) {
+          for (let dy = -1; dy <= 1; dy++) {
+            if (dx === 0 && dy === 0) continue;
+            const adj = this.getNode(startGrid.gx + dx, startGrid.gy + dy);
+            if (adj) {
+              const adjDist = this.distance(startX, startY, adj.x, adj.y);
+              if (adjDist < bestDist) {
+                startNode = adj;
+                startGrid = { gx: adj.gx, gy: adj.gy };
+                bestDist = adjDist;
+              }
+            }
+          }
+        }
+      }
+
       // Auto-correct to nearest ground node if exact position isn't on a node
       if (!startNode) {
         const corrected = this._correctToGround(startX, startY);
@@ -2370,6 +2389,39 @@ export default function (parentClass) {
             if (dist < bestDist) {
               const testPath = this.findPath(startX, startY, node.x, node.y);
               if (testPath !== null) {
+                bestNode = node;
+                bestDist = dist;
+              }
+            }
+          }
+        }
+        if (bestNode) break;
+      }
+
+      return bestNode;
+    }
+
+    _findBestLaunchNode(startX, startY, targetX, targetY) {
+      const targetGrid = this.worldToGrid(targetX, targetY);
+      const maxDistCells = Math.ceil(this.maxJumpDistance / this.cellSize);
+      const maxHeightCells = Math.ceil(this.maxJumpHeight / this.cellSize);
+      let bestNode = null;
+      let bestDist = Infinity;
+
+      const maxR = Math.max(maxDistCells, maxHeightCells);
+      for (let r = 1; r <= maxR; r++) {
+        for (let dx = -r; dx <= r; dx++) {
+          for (let dy = -r; dy <= r; dy++) {
+            if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
+            if (Math.abs(dx) > maxDistCells) continue;
+            // Only allow nodes above the target up to jump height
+            if (dy < 0 && Math.abs(dy) > maxHeightCells) continue;
+            const node = this.getNode(targetGrid.gx + dx, targetGrid.gy + dy);
+            if (!node) continue;
+            const dist = this.distance(node.x, node.y, targetX, targetY);
+            if (dist < bestDist) {
+              const testPath = this.findPath(startX, startY, node.x, node.y);
+              if (testPath) {
                 bestNode = node;
                 bestDist = dist;
               }
@@ -3028,9 +3080,14 @@ export default function (parentClass) {
       this.pathTargetGridX = correctedGrid.gx;
       this.pathTargetGridY = correctedGrid.gy;
 
-      let path = this.findPath(startX, startY, targetX, targetY);
+      // "jump_at" mode skips normal pathfinding — it always needs a launch node
+      let path = null;
+      if (this.lastPathMode !== "jump_at") {
+        path = this.findPath(startX, startY, targetX, targetY);
+      }
 
-      if (!path && this.lastPathMode === "jump_toward") {
+      // "nearest" mode: if normal pathfinding fails, path to the closest reachable node
+      if (!path && this.lastPathMode === "nearest") {
         const nearest = this._findNearestReachableNode(
           startX,
           startY,
@@ -3039,34 +3096,31 @@ export default function (parentClass) {
         );
         if (nearest) {
           path = this.findPath(startX, startY, nearest.x, nearest.y);
+        }
+      }
+
+      // "jump_at" mode: find a launch node offset from the target, then jump at it.
+      // Used for jump attacks, stomps, or hitting targets aggressively.
+      if (this.lastPathMode === "jump_at") {
+        const launch = this._findBestLaunchNode(
+          startX,
+          startY,
+          this.pathTargetX,
+          this.pathTargetY
+        );
+        if (launch) {
+          path = this.findPath(startX, startY, launch.x, launch.y);
           if (path) {
             path.push({
-              node: nearest,
+              node: launch,
               action: "jump_toward",
               x: this.pathTargetX,
               y: this.pathTargetY,
             });
           }
         }
-      }
-
-      // "jump_at_target" mode: always path to nearest ground near target, then jump at it.
-      // Useful for jump attacks, stomps, or hitting targets that aren't on walkable ground.
-      if (this.lastPathMode === "jump_at_target") {
-        // Find nearest walkable node to the target
-        const correctedTarget = this._correctToGround(this.pathTargetX, this.pathTargetY);
-        const nearPath = this.findPath(startX, startY, correctedTarget.x, correctedTarget.y);
-        if (nearPath) {
-          path = nearPath;
-          const lastWp = path[path.length - 1];
-          path.push({
-            node: lastWp.node,
-            action: "jump_toward",
-            x: this.pathTargetX,
-            y: this.pathTargetY,
-          });
-        } else if (!path) {
-          // Fallback: try nearest reachable node like jump_toward mode
+        // Fallback: nearest reachable node + jump
+        if (!path) {
           const nearest = this._findNearestReachableNode(
             startX,
             startY,
