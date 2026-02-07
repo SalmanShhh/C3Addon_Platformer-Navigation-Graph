@@ -12,7 +12,7 @@ action("Pathfinding", "FindPath", {
     { id: "x", name: "X", desc: "Target X position in pixels", type: "number", initialValue: "0" },
     { id: "y", name: "Y", desc: "Target Y position in pixels", type: "number", initialValue: "0" },
     { id: "correctToGround", name: "Correct to ground", desc: "Snap start/target to nearest walkable ground position", type: "combo", initialValue: "no", items: [{ no: "No" }, { yes: "Yes" }] },
-    { id: "mode", name: "Mode", desc: "Path mode: 'reach' finds complete path or fails. 'jump_toward' paths to nearest reachable point then jumps toward target (fallback). 'jump_at_target' always paths near target then jumps at it (for attacks/stomps).", type: "combo", initialValue: "reach", items: [{ reach: "Reach (default)" }, { jump_toward: "Jump toward (fallback)" }, { jump_at_target: "Jump at target (always)" }] }
+    { id: "mode", name: "Mode", desc: "Path mode: 'reach' finds a complete path or fails. 'nearest' paths as close as possible and never fails. 'jump_at' paths nearby then jumps at the target (for attacks).", type: "combo", initialValue: "reach", items: [{ reach: "Reach (default)" }, { nearest: "Nearest (never fails)" }, { jump_at: "Jump at target (attack)" }] }
   ]
 }, function(x, y, correctToGround, mode) {
   this.aceFindPath(x, y, correctToGround === "yes", mode);
@@ -522,7 +522,7 @@ action("ObstacleMap", "SetTileStateWorld", {
 action("ObstacleMap", "SetTileHazard", {
   listName: "Set tile hazard severity",
   displayText: "Set tile hazard at ({0}, {1}) to {2}",
-  description: "Set the hazard severity for a specific tile. Higher values make the AI avoid this tile more strongly. 0 = no hazard. Use this to mark dangerous areas like spikes or lava.",
+  description: "Set the hazard severity for a specific tile. Higher values make the AI avoid this tile more strongly. 0 = no hazard. Hazard avoidance is automatically enabled when any hazard is added. Use this to mark dangerous areas like spikes or lava.",
   params: [
     { id: "gx", name: "Grid X", desc: "Grid X coordinate (tile number)", type: "number", initialValue: "0" },
     { id: "gy", name: "Grid Y", desc: "Grid Y coordinate (tile number)", type: "number", initialValue: "0" },
@@ -862,7 +862,7 @@ expression("ObstacleMap", "RePathCooldown", {
 action("Hazards", "AddRectHazard", {
   listName: "Add rectangle hazard",
   displayText: "Add rectangle hazard at ({0}, {1}) [Size: {2} x {3}] [Severity: {4}]",
-  description: "Add a rectangular hazard area. The AI will avoid this area based on severity. Returns a hazard ID for later removal. Use for static danger zones like spike pits.",
+  description: "Add a rectangular hazard area. The AI will avoid this area based on severity. Hazard avoidance is automatically enabled. Returns a hazard ID for later removal. Use for static danger zones like spike pits.",
   params: [
     { id: "x", name: "X", desc: "World X position (center)", type: "number", initialValue: "0" },
     { id: "y", name: "Y", desc: "World Y position (center)", type: "number", initialValue: "0" },
@@ -877,7 +877,7 @@ action("Hazards", "AddRectHazard", {
 action("Hazards", "AddCircleHazard", {
   listName: "Add circle hazard",
   displayText: "Add circle hazard at ({0}, {1}) [Radius: {2}] [Severity: {3}]",
-  description: "Add a circular hazard area. The AI will avoid this area based on severity. Returns a hazard ID for later removal. Use for dynamic danger zones like explosions or enemy AOE.",
+  description: "Add a circular hazard area. The AI will avoid this area based on severity. Hazard avoidance is automatically enabled. Returns a hazard ID for later removal. Use for dynamic danger zones like explosions or enemy AOE.",
   params: [
     { id: "x", name: "X", desc: "World X position (center)", type: "number", initialValue: "0" },
     { id: "y", name: "Y", desc: "World Y position (center)", type: "number", initialValue: "0" },
@@ -983,7 +983,7 @@ expression("Hazards", "TileHazardSeverity", {
 action("Portals", "SetPortal", {
   listName: "Set portal",
   displayText: "Set portal {0} ({1}) from ({2}, {3}) to ({4}, {5}) [Cost: {6}] [Ignore hazards: {7}]",
-  description: "Create or update a portal connection. If a portal with this ID already exists, it is updated with the new settings. If not, a new portal is created. Use for teleporters, moving platforms, or special traversal points.",
+  description: "Create or update a portal connection. Portal navigation is automatically enabled. If a portal with this ID already exists, it is updated with the new settings. If not, a new portal is created. Use for teleporters, moving platforms, or special traversal points.",
   params: [
     { id: "portalId", name: "Portal ID", desc: "Unique ID for this portal. Use the same ID to update an existing portal.", type: "number", initialValue: "1" },
     { id: "type", name: "Type", desc: "Portal type name (for identification)", type: "string", initialValue: "\"teleport\"" },

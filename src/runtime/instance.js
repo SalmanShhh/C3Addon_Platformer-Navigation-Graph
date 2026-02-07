@@ -969,6 +969,7 @@ export default function (parentClass) {
       ) {
         return;
       }
+      if (severity > 0) this.enableHazards = true;
       if (!this.hazardMap) {
         this.hazardMap = new Float32Array(this.gridWidth * this.gridHeight);
       }
@@ -1383,10 +1384,11 @@ export default function (parentClass) {
           const targetGy = node.gy + fall;
           const target = this.getNode(node.gx, targetGy);
           if (target && this._canFall(node, target)) {
+            const baseCost = Math.abs(target.y - node.y) * this.FALL_COST;
             node.connections.push({
               target,
               action: "fall",
-              cost: Math.abs(target.y - node.y) * this.FALL_COST,
+              cost: baseCost * this._fallLandingCostMultiplier(target),
             });
             count++;
             break;
@@ -1435,10 +1437,11 @@ export default function (parentClass) {
 
           if (target && this._canDiagonalFall(node, target, direction)) {
             const dist = this.distance(node.x, node.y, target.x, target.y);
+            const baseCost = dist * this.FALL_COST;
             node.connections.push({
               target,
               action: direction < 0 ? "fall_left" : "fall_right",
-              cost: dist * this.FALL_COST,
+              cost: baseCost * this._fallLandingCostMultiplier(target),
             });
             break;
           }
@@ -1462,6 +1465,15 @@ export default function (parentClass) {
         }
       }
       return true;
+    }
+
+    // Prefer falling onto nodes that have walk connections — makes reverse
+    // pathing produce paths that are easier to climb upward from.
+    _fallLandingCostMultiplier(targetNode) {
+      const hasWalk = targetNode.connections.some(
+        (c) => c.action === "walk_left" || c.action === "walk_right"
+      );
+      return hasWalk ? 0.7 : 1.0;
     }
 
     _connectCoyoteJump() {
@@ -1528,10 +1540,11 @@ export default function (parentClass) {
         for (let fall = 2; fall <= maxFallCells; fall++) {
           const target = this.getNode(node.gx, node.gy + fall);
           if (target) {
+            const baseCost = Math.abs(target.y - node.y) * this.FALL_COST * 1.2;
             node.connections.push({
               target,
               action: "fall_through",
-              cost: Math.abs(target.y - node.y) * this.FALL_COST * 1.2,
+              cost: baseCost * this._fallLandingCostMultiplier(target),
             });
             count++;
             break;
@@ -1596,6 +1609,7 @@ export default function (parentClass) {
     }
 
     aceAddCircleHazard(x, y, radius, severity) {
+      this.enableHazards = true;
       const hazardId = this.nextHazardId++;
       const hazardsMap = this._getHazardsMap();
       hazardsMap.set(hazardId, {
@@ -1610,6 +1624,7 @@ export default function (parentClass) {
     }
 
     aceAddRectHazard(x, y, width, height, severity) {
+      this.enableHazards = true;
       const hazardId = this.nextHazardId++;
       const hazardsMap = this._getHazardsMap();
       hazardsMap.set(hazardId, {
