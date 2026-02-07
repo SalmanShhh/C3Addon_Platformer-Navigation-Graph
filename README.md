@@ -1,15 +1,24 @@
 <img src="./src/icon.svg" width="100" /><br>
 # Platformer Navigation Graph
 <i>AI pathfinding for platformers: lets characters jump, fall, and navigate complex levels. Easy presets for beginners, deep customization for advanced users. Supports auto or manual control, hazards, portals, and integrates with Platform behavior.</i> <br>
-### Version 0.2.0.0
+### Version 0.3.0.0
 
-[<img src="https://placehold.co/200x50/4493f8/FFF?text=Download&font=montserrat" width="200"/>](https://github.com/SalmanShhh/Platformer-Navigation-Graph-V2/releases/download/salmanshh_platformer_navigationgraph-0.2.0.0.c3addon/salmanshh_platformer_navigationgraph-0.2.0.0.c3addon)
+[<img src="https://placehold.co/200x50/4493f8/FFF?text=Download&font=montserrat" width="200"/>](https://github.com/SalmanShhh/Platformer-Navigation-Graph-V2/releases/download/salmanshh_platformer_navigationgraph-0.3.0.0.c3addon/salmanshh_platformer_navigationgraph-0.3.0.0.c3addon)
 <br>
 <sub> [See all releases](https://github.com/SalmanShhh/Platformer-Navigation-Graph-V2/releases) </sub> <br>
 
-#### What's New in 0.2.0.0
+#### What's New in 0.3.0.0
 **Added:**
-improved pathfinding implementation but needs further testing of the featureset.
+- Reverse Pathing, prefers turning fall nodes into jump nodes
+- Strict Tile Positioning Before Jumps / Ledge Departures
+- Reverse Pathing, prefers turning fall nodes into jump nodes. (to improve jump pathing)
+- Path Strategy Preset (Property + ACE) & Fix Climbing via Reverse Pathing…
+- Find Path Upgrade (Reach/Jump-Toward/Jump-At-Target)
+- more edgecase refinement
+- Debugger support
+-
+
+
 
 
 <sub>[View full changelog](#changelog)</sub>
@@ -224,6 +233,22 @@ npm run dev
 
 ---
 ## Changelog
+
+### Version 0.3.0.0
+
+**Added:**
+- Reverse Pathing, prefers turning fall nodes into jump nodes
+- Strict Tile Positioning Before Jumps / Ledge Departures
+- Reverse Pathing, prefers turning fall nodes into jump nodes. (to improve jump pathing)
+- Path Strategy Preset (Property + ACE) & Fix Climbing via Reverse Pathing…
+- Find Path Upgrade (Reach/Jump-Toward/Jump-At-Target)
+- more edgecase refinement
+- Debugger support
+-
+
+
+
+---
 
 ### Version 0.2.0.0
 
