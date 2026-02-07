@@ -198,8 +198,8 @@ npm run dev
 | LedgeLeniency | Get the ledge leniency setting in pixels. This is how far past a ledge edge the AI can walk before stopping. | number |  | 
 | LedgeRestriction | Get whether ledge restriction is enabled. Returns 1 if enabled, 0 if disabled. | number |  | 
 | NodeCount | Get the total number of navigation nodes in the generated graph. Returns 0 if no graph exists. | number |  | 
-| NodeWorldX | Get the world X position of a node at the specified grid coordinates. Returns 0 if node doesn't exist. | number | Grid X *(number)* <br>Grid Y *(number)* <br> | 
-| NodeWorldY | Get the world Y position of a node at the specified grid coordinates. Returns 0 if node doesn't exist. | number | Grid X *(number)* <br>Grid Y *(number)* <br> | 
+| NodeWorldX | Get the world X position of a node at the specified grid coordinates. the node position is centred within the tile. Returns 0 if node doesn't exist. | number | Grid X *(number)* <br>Grid Y *(number)* <br> | 
+| NodeWorldY | Get the world Y position of a node at the specified grid coordinates. the node position is centred within the tile. Returns 0 if node doesn't exist. | number | Grid X *(number)* <br>Grid Y *(number)* <br> | 
 | PathCost | Get the total calculated cost of the current path. Returns 0 if no path is active. | number |  | 
 | PathFailReason | Get the reason the last pathfinding attempt failed. Returns: 'no_start_node', 'no_goal_node', 'max_nodes_reached', 'no_path', or empty string if path succeeded. | string |  | 
 | PathTargetGridX | Get the grid X coordinate of the path target. Returns -1 if no path is active. | number |  | 
@@ -211,8 +211,8 @@ npm run dev
 | WaypointCount | Get the total number of waypoints in the current path. Returns 0 if no path is active. | number |  | 
 | WaypointGridX | Get the grid X coordinate of a waypoint by index. Returns -1 if index is out of bounds. | number | Index *(number)* <br> | 
 | WaypointGridY | Get the grid Y coordinate of a waypoint by index. Returns -1 if index is out of bounds. | number | Index *(number)* <br> | 
-| WaypointX | Get the world X position of a waypoint by index. Returns 0 if index is out of bounds. | number | Index *(number)* <br> | 
-| WaypointY | Get the world Y position of a waypoint by index. Returns 0 if index is out of bounds. | number | Index *(number)* <br> | 
+| WaypointX | Get the world X position of a waypoint by index. the waypoint position is centred within the tile. Returns 0 if index is out of bounds. | number | Index *(number)* <br> | 
+| WaypointY | Get the world Y position of a waypoint by index. the waypoint position is centred within the tile. Returns 0 if index is out of bounds. | number | Index *(number)* <br> | 
 
 
 ---

@@ -90,11 +90,11 @@
           },
           "ledge_restriction": {
             "name": "Ledge Restriction",
-            "desc": "When enabled, auto-movement prevents the AI from walking off platform edges. Only affects auto-control movement, not the navigation graph itself."
+            "desc": "When enabled, AI characters stop at platform edges instead of walking off. Useful for patrol guards in stealth games or NPCs that should stay on their platform. Only affects auto-control movement, not pathfinding."
           },
           "ledge_leniency": {
             "name": "Ledge Leniency",
-            "desc": "Pixels of tolerance past a ledge edge before stopping (0 = strict, stays on platform). Only used when Ledge Restriction is enabled."
+            "desc": "How many pixels past a platform edge the AI is allowed to walk before stopping (0 = strict stop at edge). Increase for more natural-looking movement near edges. Only used when Ledge Restriction is enabled."
           },
           "repath_threshold": {
             "name": "Re-Path Threshold",
@@ -473,7 +473,7 @@
           "SetLedgeLeniency": {
             "list-name": "Set ledge leniency",
             "display-text": "Set ledge leniency to {0} pixels",
-            "description": "Set pixels of tolerance past a ledge edge before stopping (0 = strict stop at edge). Only used when ledge restriction is enabled.",
+            "description": "Set how many pixels past a platform edge the AI can walk before stopping (0 = strict stop). Increase for more natural-looking patrol movement near edges. Only used when ledge restriction is enabled.",
             "params": {
               "pixels": {
                 "name": "Pixels",
@@ -484,7 +484,7 @@
           "SetLedgeRestriction": {
             "list-name": "Set ledge restriction",
             "display-text": "Set ledge restriction: {0}",
-            "description": "Toggle ledge restriction for auto-movement. When enabled, the AI avoids walking off platform edges unless the path requires it. When disabled, the AI can walk freely to edges.",
+            "description": "Toggle ledge restriction for auto-movement. When enabled, AI characters stop at platform edges instead of walking off — useful for patrol guards in stealth games or NPCs that should stay on their platform. When disabled, AI walks freely to edges.",
             "params": {
               "enabled": {
                 "name": "Enabled",
@@ -502,11 +502,32 @@
             "description": "Stop the character immediately and clear the current path. Use when you want to cancel AI navigation and regain manual control.",
             "params": {}
           },
-          "AddPortal": {
-            "list-name": "Add portal",
-            "display-text": "Add {0} portal from ({1}, {2}) to ({3}, {4}) [Cost: {5}] [Ignore hazards: {6}]",
-            "description": "Add a portal (teleport) connection between two points. The AI can use this as part of paths. Use for teleporters, ladders, or special traversal. Returns portal ID.",
+          "ClearAllPortals": {
+            "list-name": "Clear all portals",
+            "display-text": "Clear all portals",
+            "description": "Remove all portals from the navigation graph. Useful when resetting the level or switching layouts.",
+            "params": {}
+          },
+          "RemovePortal": {
+            "list-name": "Remove portal",
+            "display-text": "Remove portal with ID {0}",
+            "description": "Remove a portal by its ID. The portal connection is removed from the navigation graph immediately.",
             "params": {
+              "portalId": {
+                "name": "Portal ID",
+                "desc": "The ID returned when the portal was added"
+              }
+            }
+          },
+          "SetPortal": {
+            "list-name": "Set portal",
+            "display-text": "Set portal {0} ({1}) from ({2}, {3}) to ({4}, {5}) [Cost: {6}] [Ignore hazards: {7}]",
+            "description": "Create or update a portal connection. If a portal with this ID already exists, it is updated with the new settings. If not, a new portal is created. Use for teleporters, moving platforms, or special traversal points.",
+            "params": {
+              "portalId": {
+                "name": "Portal ID",
+                "desc": "Unique ID for this portal. Use the same ID to update an existing portal."
+              },
               "type": {
                 "name": "Type",
                 "desc": "Portal type name (for identification)"
@@ -1308,7 +1329,7 @@
           },
           "NodeWorldX": {
             "translated-name": "NodeWorldX",
-            "description": "Get the world X position of a node at the specified grid coordinates. Returns 0 if node doesn't exist.",
+            "description": "Get the world X position of a node at the specified grid coordinates. the node position is centred within the tile. Returns 0 if node doesn't exist.",
             "params": {
               "gx": {
                 "name": "Grid X",
@@ -1322,7 +1343,7 @@
           },
           "NodeWorldY": {
             "translated-name": "NodeWorldY",
-            "description": "Get the world Y position of a node at the specified grid coordinates. Returns 0 if node doesn't exist.",
+            "description": "Get the world Y position of a node at the specified grid coordinates. the node position is centred within the tile. Returns 0 if node doesn't exist.",
             "params": {
               "gx": {
                 "name": "Grid X",
@@ -1411,7 +1432,7 @@
           },
           "WaypointX": {
             "translated-name": "WaypointX",
-            "description": "Get the world X position of a waypoint by index. Returns 0 if index is out of bounds.",
+            "description": "Get the world X position of a waypoint by index. the waypoint position is centred within the tile. Returns 0 if index is out of bounds.",
             "params": {
               "index": {
                 "name": "Index",
@@ -1421,7 +1442,7 @@
           },
           "WaypointY": {
             "translated-name": "WaypointY",
-            "description": "Get the world Y position of a waypoint by index. Returns 0 if index is out of bounds.",
+            "description": "Get the world Y position of a waypoint by index. the waypoint position is centred within the tile. Returns 0 if index is out of bounds.",
             "params": {
               "index": {
                 "name": "Index",

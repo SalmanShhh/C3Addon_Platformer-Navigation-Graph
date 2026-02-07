@@ -204,9 +204,6 @@ export default function (parentClass) {
     _tick() {
       const dt = this.instance.dt;
 
-      //console.log("Did Tick")
-      this.logBehaviors();
-      
       // First-tick initialization: acquire layout UID, behaviors, and graph mode
       if (!this._initialized) {
         this._initialized = true;
@@ -260,12 +257,12 @@ export default function (parentClass) {
         this.rePathCooldown -= dt;
       }
 
-      if (this.justUsedPortal) {
-        this.justUsedPortal = false;
-      }
-
       if (this.hasPath) {
         this._followPath(dt);
+      }
+
+      if (this.justUsedPortal) {
+        this.justUsedPortal = false;
       }
 
       this.estimatedVelocityX =
@@ -504,118 +501,29 @@ export default function (parentClass) {
     }
 
     _getPlatformBehavior() {
-      console.log("-- Searching for Platform behavior...");
-      const b = this._GetBehaviorByType("Platform");
-      if (b) {
-        console.log("-- Detected Platform behavior");
-        return b;
-      }
-      console.log("-- No Platform behavior found");
-      return null;
+      return this._GetBehaviorByType("Platform");
     }
 
     _getPathfindingBehavior() {
-      console.log("-- Searching for Pathfinding behavior...");
-      const beh = this._GetBehaviorByType("Pathfinding");
-      if (beh) {
-        console.log("-- Detected Pathfinding behavior");
-        return beh;
-      }
-      console.log("-- No Pathfinding behavior found");
-      return null;
+      return this._GetBehaviorByType("Pathfinding");
     }
 
-        /**
-     * Helper to get a behavior by its ID (as attached in Construct)
-     * @param {string} behaviorId - The ID or name of the behavior to find
-     * @returns {object|null} The behavior instance or null if not found
-     */
-    getBehaviorById(behaviorId) {
-        const sdkInst = this.instance || this._inst;
-        if (!sdkInst || typeof sdkInst.GetBehaviorInstances !== "function") return null;
-        const behaviorInstances = sdkInst.GetBehaviorInstances();
-        for (const beh of behaviorInstances) {
-            const type = beh.GetBehaviorType();
-            if (type && (type._id === behaviorId || type.GetName() === behaviorId)) {
-                return beh;
-            }
-        }
-        return null;
-    }
-
-    /**
-   * Logs all behaviors attached to this instance
-   */
-    logBehaviors() {
-      // debug: log what we have access to.
-      console.log("Debugging Behavior Access:");
-      console.log("- this.instance:", this.instance);
-      console.log("this.instance.behaviors:", this.instance.behaviors);
-
-      // try accessing through the SDK Instance's behavior array.
-      const sdkInst = this.instance;
-      const behaviors = sdkInst.behaviors;
-
-      console.log("Behaviors Array: ", behaviors);
-      console.log("Behaviors counts: ", behaviors? Object.values(behaviors) : "no behaviors array");
-
-      // Iterate through behaviors and log their types.
-      if(behaviors){
-        for (let i = 0; i < behaviors.length; i++) {
-          const beh = behaviors[i];
-          console.log(`Behaviors ${i}:`, beh);
-          console.log(` - type:`, beh.type);
-          console.log(` - Type Name:`, beh.type ? beh.type.name : "no type");
-          console.log(` - instanceof IPlatformBehaviorInstance:`, beh instanceof self.IPlatformBehaviorInstance);
-          console.log(` - instanceof IPathfindingBehaviorInstance:`, beh instanceof self.IPathfindingBehaviorInstance);
-
-          // Check by type name as fallback          if (beh.type) {
-            if (beh.type.name === "Platform") {
-              console.log("Found Platform behavior via type name!");
-            }
-            if (beh.type.name === "Pathfinding") {
-              console.log("Found Pathfinding behavior via type name!");
-            }
-          }
-
-
-      }
-    }
-
+    // Utility to find a behavior by its plugin type name, even if renamed in the editor
     _GetBehaviorByType(typeName) {
-        const inst = this.instance;
-        if (!inst) {
-            console.error("No instance found to search for behaviors.");
-            return null;
+        const behaviors = this.instance?.behaviors;
+        if (!behaviors) return null;
+
+        // Fast path: direct access when editor name matches type name (default case)
+        const direct = behaviors[typeName];
+        if (direct) return direct;
+
+        // Fallback: iterate via for...in to handle renamed behaviors,
+        // checking behaviorType.name for the actual plugin type
+        for (const key in behaviors) {
+            const b = behaviors[key];
+            if (b?.behaviorType?.name === typeName) return b;
         }
 
-        // 1. Get all behaviors using the Scripting Interface method
-        if (typeof inst.getAllBehaviors !== "function") {
-            console.error("inst.getAllBehaviors is not a function. Check if 'this.instance' is a valid WorldInstance.");
-            return null;
-        }
-
-        const allBehaviors = inst.getAllBehaviors();
-
-        console.log(`--- [${name}] Behavior Scan ---`);
-        console.log("Searching for Behavior Type:", typeName);
-        console.log("Total Behaviors found on this instance:", allBehaviors.length);
-
-        for (const b of allBehaviors) {
-            // b.behaviorType.name is the internal type (e.g., "Platform", "Pathfinding")
-            // b.name is what the user named it in the editor (e.g., "PlayerMovement")
-            const behaviorTypeName = b.behaviorType.name;
-            const instanceName = b.name;
-
-            console.log(`Checking behavior: Name="${instanceName}", Type="${behaviorTypeName}"`, b);
-
-            if (behaviorTypeName === typeName) {
-                console.log(`MATCH FOUND: Attached behavior "${instanceName}" is a "${behaviorTypeName}" type.`);
-                return b;
-            }
-        }
-
-        console.warn(`No behavior of type "${typeName}" found on this instance.`);
         return null;
     }
 
@@ -686,7 +594,8 @@ export default function (parentClass) {
         singleJumpHeight += Math.max(0, sustainBonus);
       }
 
-      const timeToApex = jumpStrength / gravity;
+      const sustainTime = jumpSustain > 0 ? jumpSustain / 1000 : 0;
+      const timeToApex = jumpStrength / gravity + sustainTime;
       const totalJumpTime = timeToApex * 2;
       let maxJumpDist = maxSpeed * totalJumpTime * 0.8;
 
@@ -1349,6 +1258,7 @@ export default function (parentClass) {
       if (Math.abs(dx) > this.maxJumpDistance) return false;
       if (-dy > this.maxJumpHeight) return false;
 
+      const headCells = Math.ceil(this.characterHeight / this.cellSize);
       const apex = Math.max(from.y - this.maxJumpHeight, to.y);
 
       for (let i = 0; i <= 8; i++) {
@@ -1358,7 +1268,6 @@ export default function (parentClass) {
         const arcY = linearY + 4 * (apex - from.y) * t * (1 - t);
 
         const grid = this.worldToGrid(x, arcY);
-        const index = grid.gy * this.gridWidth + grid.gx;
 
         if (
           grid.gx < 0 ||
@@ -1369,18 +1278,30 @@ export default function (parentClass) {
           return false;
         }
 
-        const cellVal = this.obstacleMap ? this.obstacleMap[index] : 0;
+        for (let h = 0; h < headCells; h++) {
+          const checkGy = grid.gy - h;
+          if (checkGy < 0) return false;
+          const index = checkGy * this.gridWidth + grid.gx;
+          const cellVal = this.obstacleMap ? this.obstacleMap[index] : 0;
 
-        if (cellVal === 1) return false;
-        if (cellVal === 2) {
-          const prevT = Math.max(0, (i - 1) / 8);
-          const prevArcY =
-            from.y +
-            dy * prevT +
-            4 * (apex - from.y) * prevT * (1 - prevT);
-          if (arcY > prevArcY) return false;
+          if (h === 0) {
+            if (cellVal === 1) return false;
+            if (cellVal === 3) return false;
+            if (cellVal === 2) {
+              const prevT = Math.max(0, (i - 1) / 8);
+              const prevArcY =
+                from.y +
+                dy * prevT +
+                4 * (apex - from.y) * prevT * (1 - prevT);
+              if (arcY > prevArcY) return false;
+            }
+          } else {
+            if (cellVal === 1 && this.platformProps.ceilingCollisionMode === "stop") {
+              return false;
+            }
+            if (cellVal === 3) return false;
+          }
         }
-        if (cellVal === 3) return false;
       }
 
       return true;
@@ -1731,34 +1652,68 @@ export default function (parentClass) {
       }
     }
 
-    aceAddPortal(type, entryX, entryY, exitX, exitY, cost, ignoreHazards) {
-      const portalId = this.nextPortalId++;
+    aceSetPortal(portalId, type, entryX, entryY, exitX, exitY, cost, ignoreHazards) {
       const portalsMap = this._getPortalsMap();
-      portalsMap.set(portalId, {
-        id: portalId,
-        entryX,
-        entryY,
-        exitX,
-        exitY,
-        type: type || "teleport",
-        cost: cost || 10,
-        ignoreHazards: ignoreHazards || false,
-      });
+      const existing = portalsMap.get(portalId);
 
-      if (this.graphGenerated) {
-        this._connectPortalToGraph(portalsMap.get(portalId));
+      if (existing) {
+        const oldEntryNode = this._findNearestNode(existing.entryX, existing.entryY);
+        if (oldEntryNode) {
+          oldEntryNode.portalConnections = oldEntryNode.portalConnections.filter(
+            c => c.portalId !== portalId
+          );
+        }
+
+        existing.entryX = entryX;
+        existing.entryY = entryY;
+        existing.exitX = exitX;
+        existing.exitY = exitY;
+        existing.type = type || "teleport";
+        existing.cost = cost || 10;
+        existing.ignoreHazards = ignoreHazards || false;
+
+        if (this.graphGenerated) {
+          this._connectPortalToGraph(existing);
+        }
+      } else {
+        const portal = {
+          id: portalId,
+          entryX,
+          entryY,
+          exitX,
+          exitY,
+          type: type || "teleport",
+          cost: cost || 10,
+          ignoreHazards: ignoreHazards || false,
+        };
+        portalsMap.set(portalId, portal);
+
+        if (this.graphGenerated) {
+          this._connectPortalToGraph(portal);
+        }
       }
-
-      return portalId;
     }
 
     aceRemovePortal(portalId) {
       const portalsMap = this._getPortalsMap();
-      portalsMap.delete(portalId);
+      const portal = portalsMap.get(portalId);
+      if (portal) {
+        const entryNode = this._findNearestNode(portal.entryX, portal.entryY);
+        if (entryNode) {
+          entryNode.portalConnections = entryNode.portalConnections.filter(
+            c => c.portalId !== portalId
+          );
+        }
+        portalsMap.delete(portalId);
+      }
     }
 
     aceClearAllPortals() {
       const portalsMap = this._getPortalsMap();
+      const graph = this._getNavigationGraph();
+      for (const [, node] of graph) {
+        node.portalConnections = [];
+      }
       portalsMap.clear();
     }
 
@@ -1894,7 +1849,8 @@ export default function (parentClass) {
       const endTime = performance.now();
       this._log(`Graph generated in ${(endTime - startTime).toFixed(2)}ms`);
 
-      this._triggerGraphGenerated();
+      // this makes sure the trigger condition is called once the graph is generated.
+      this._trigger("OnGraphGenerated");
     }
 
     findPath(startX, startY, goalX, goalY) {
@@ -2213,7 +2169,22 @@ export default function (parentClass) {
       }
 
       if (this.autoControl) {
-        this._executeAction(waypoint.action, waypoint.x, waypoint.y, waypoint);
+        let effectiveAction = waypoint.action;
+
+        if (
+          (effectiveAction === "jump" || effectiveAction === "coyote_jump" ||
+           effectiveAction === "jump_toward" ||
+           effectiveAction === "fall" || effectiveAction === "fall_left" ||
+           effectiveAction === "fall_right") &&
+          this.platformBehavior?.isOnFloor
+        ) {
+          const yDist = Math.abs(this.instance.y - waypoint.y);
+          if (yDist < this.cellSize * 0.75) {
+            effectiveAction = waypoint.x < this.instance.x ? "walk_left" : "walk_right";
+          }
+        }
+
+        this._executeAction(effectiveAction, waypoint.x, waypoint.y, waypoint);
       }
     }
 
@@ -2358,15 +2329,25 @@ export default function (parentClass) {
           (direction === "left" && node.isLeftLedge) ||
           (direction === "right" && node.isRightLedge)
         ) {
-          const edgeX =
-            node.x +
-            (direction === "right" ? 1 : -1) *
-              (this.cellSize / 2 + this.ledgeLeniency);
-          const pastEdge =
-            direction === "right"
-              ? this.instance.x >= edgeX
-              : this.instance.x <= edgeX;
-          if (pastEdge) return;
+          const nextIdx = this.currentWaypoint + 1;
+          const nextWaypoint = nextIdx < this.currentPath.length ? this.currentPath[nextIdx] : null;
+          const nextNeedsDeparture = nextWaypoint && (
+            nextWaypoint.action === "fall" || nextWaypoint.action === "fall_left" ||
+            nextWaypoint.action === "fall_right" || nextWaypoint.action === "jump" ||
+            nextWaypoint.action === "coyote_jump" || nextWaypoint.action === "jump_toward"
+          );
+
+          if (!nextNeedsDeparture) {
+            const edgeX =
+              node.x +
+              (direction === "right" ? 1 : -1) *
+                (this.cellSize / 2 + this.ledgeLeniency);
+            const pastEdge =
+              direction === "right"
+                ? this.instance.x >= edgeX
+                : this.instance.x <= edgeX;
+            if (pastEdge) return;
+          }
         }
       }
 
@@ -2594,11 +2575,17 @@ export default function (parentClass) {
 
       if (path) {
         this.currentPath = path;
-        this.currentWaypoint = 0;
+        // Skip waypoint 0 (the start node) — the character is already there
+        this.currentWaypoint = path.length > 1 ? 1 : 0;
         this.hasPath = true;
         this.timeAtWaypoint = 0;
         this.doubleJumpPhase = 0;
         this.isHoldingJump = false;
+        if (this.isClimbing) {
+          this.isClimbing = false;
+          if (this.platformBehavior) this.platformBehavior.isEnabled = true;
+        }
+        this.coyoteJumpPending = false;
 
         this.lastPathCost = 0;
         for (let i = 1; i < path.length; i++) {
@@ -2628,6 +2615,11 @@ export default function (parentClass) {
       this.currentWaypoint = 0;
       this.doubleJumpPhase = 0;
       this.isHoldingJump = false;
+      if (this.isClimbing) {
+        this.isClimbing = false;
+        if (this.platformBehavior) this.platformBehavior.isEnabled = true;
+      }
+      this.coyoteJumpPending = false;
     }
 
     /** Stops movement along the current path without clearing the path data. */

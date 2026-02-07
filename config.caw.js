@@ -268,7 +268,7 @@ export const properties = [
     type: PROPERTY_TYPE.CHECK,
     id: "ledge_restriction",
     name: "Ledge Restriction",
-    desc: "When enabled, auto-movement prevents the AI from walking off platform edges. Only affects auto-control movement, not the navigation graph itself.",
+    desc: "When enabled, AI characters stop at platform edges instead of walking off. Useful for patrol guards in stealth games or NPCs that should stay on their platform. Only affects auto-control movement, not pathfinding.",
     options: { initialValue: false }
   },
 
@@ -277,7 +277,7 @@ export const properties = [
     type: PROPERTY_TYPE.FLOAT,
     id: "ledge_leniency",
     name: "Ledge Leniency",
-    desc: "Pixels of tolerance past a ledge edge before stopping (0 = strict, stays on platform). Only used when Ledge Restriction is enabled.",
+    desc: "How many pixels past a platform edge the AI is allowed to walk before stopping (0 = strict stop at edge). Increase for more natural-looking movement near edges. Only used when Ledge Restriction is enabled.",
     options: {
       initialValue: 0,
       minValue: 0,

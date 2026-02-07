@@ -59,7 +59,7 @@ action("Pathfinding", "SetCoyoteTime", {
 action("Pathfinding", "SetLedgeRestriction", {
   listName: "Set ledge restriction",
   displayText: "Set ledge restriction: {0}",
-  description: "Toggle ledge restriction for auto-movement. When enabled, the AI avoids walking off platform edges unless the path requires it. When disabled, the AI can walk freely to edges.",
+  description: "Toggle ledge restriction for auto-movement. When enabled, AI characters stop at platform edges instead of walking off — useful for patrol guards in stealth games or NPCs that should stay on their platform. When disabled, AI walks freely to edges.",
   params: [
     { id: "enabled", name: "Enabled", desc: "Enable or disable ledge restriction", type: "combo", initialValue: "yes", items: [{ yes: "Enabled" }, { no: "Disabled" }] }
   ]
@@ -70,7 +70,7 @@ action("Pathfinding", "SetLedgeRestriction", {
 action("Pathfinding", "SetLedgeLeniency", {
   listName: "Set ledge leniency",
   displayText: "Set ledge leniency to {0} pixels",
-  description: "Set pixels of tolerance past a ledge edge before stopping (0 = strict stop at edge). Only used when ledge restriction is enabled.",
+  description: "Set how many pixels past a platform edge the AI can walk before stopping (0 = strict stop). Increase for more natural-looking patrol movement near edges. Only used when ledge restriction is enabled.",
   params: [
     { id: "pixels", name: "Pixels", desc: "Pixels past ledge edge before stopping", type: "number", initialValue: "0" }
   ]
@@ -284,7 +284,7 @@ expression("Pathfinding", "WaypointGridY", {
 
 expression("Pathfinding", "WaypointX", {
   returnType: "number",
-  description: "Get the world X position of a waypoint by index. Returns 0 if index is out of bounds.",
+  description: "Get the world X position of a waypoint by index. the waypoint position is centred within the tile. Returns 0 if index is out of bounds.",
   params: [
     { id: "index", name: "Index", desc: "Waypoint index (0-based)", type: "number" }
   ]
@@ -294,7 +294,7 @@ expression("Pathfinding", "WaypointX", {
 
 expression("Pathfinding", "WaypointY", {
   returnType: "number",
-  description: "Get the world Y position of a waypoint by index. Returns 0 if index is out of bounds.",
+  description: "Get the world Y position of a waypoint by index. the waypoint position is centred within the tile. Returns 0 if index is out of bounds.",
   params: [
     { id: "index", name: "Index", desc: "Waypoint index (0-based)", type: "number" }
   ]
@@ -304,7 +304,7 @@ expression("Pathfinding", "WaypointY", {
 
 expression("Pathfinding", "NodeWorldX", {
   returnType: "number",
-  description: "Get the world X position of a node at the specified grid coordinates. Returns 0 if node doesn't exist.",
+  description: "Get the world X position of a node at the specified grid coordinates. the node position is centred within the tile. Returns 0 if node doesn't exist.",
   params: [
     { id: "gx", name: "Grid X", desc: "Grid X coordinate", type: "number" },
     { id: "gy", name: "Grid Y", desc: "Grid Y coordinate", type: "number" }
@@ -315,7 +315,7 @@ expression("Pathfinding", "NodeWorldX", {
 
 expression("Pathfinding", "NodeWorldY", {
   returnType: "number",
-  description: "Get the world Y position of a node at the specified grid coordinates. Returns 0 if node doesn't exist.",
+  description: "Get the world Y position of a node at the specified grid coordinates. the node position is centred within the tile. Returns 0 if node doesn't exist.",
   params: [
     { id: "gx", name: "Grid X", desc: "Grid X coordinate", type: "number" },
     { id: "gy", name: "Grid Y", desc: "Grid Y coordinate", type: "number" }
@@ -932,11 +932,12 @@ expression("Hazards", "TileHazardSeverity", {
 // PORTAL ACTIONS
 // ============================================================================
 
-action("Portals", "AddPortal", {
-  listName: "Add portal",
-  displayText: "Add {0} portal from ({1}, {2}) to ({3}, {4}) [Cost: {5}] [Ignore hazards: {6}]",
-  description: "Add a portal (teleport) connection between two points. The AI can use this as part of paths. Use for teleporters, ladders, or special traversal. Returns portal ID.",
+action("Portals", "SetPortal", {
+  listName: "Set portal",
+  displayText: "Set portal {0} ({1}) from ({2}, {3}) to ({4}, {5}) [Cost: {6}] [Ignore hazards: {7}]",
+  description: "Create or update a portal connection. If a portal with this ID already exists, it is updated with the new settings. If not, a new portal is created. Use for teleporters, moving platforms, or special traversal points.",
   params: [
+    { id: "portalId", name: "Portal ID", desc: "Unique ID for this portal. Use the same ID to update an existing portal.", type: "number", initialValue: "1" },
     { id: "type", name: "Type", desc: "Portal type name (for identification)", type: "string", initialValue: "\"teleport\"" },
     { id: "entryX", name: "Entry X", desc: "Entry world X position", type: "number", initialValue: "0" },
     { id: "entryY", name: "Entry Y", desc: "Entry world Y position", type: "number", initialValue: "0" },
@@ -947,8 +948,28 @@ action("Portals", "AddPortal", {
       items: [{ yes: "Yes" }, { no: "No" }]
     }
   ]
-}, function(type, entryX, entryY, exitX, exitY, cost, ignoreHazards) {
-  this.aceAddPortal(type, entryX, entryY, exitX, exitY, cost, ignoreHazards === "yes");
+}, function(portalId, type, entryX, entryY, exitX, exitY, cost, ignoreHazards) {
+  this.aceSetPortal(portalId, type, entryX, entryY, exitX, exitY, cost, ignoreHazards === "yes");
+});
+
+action("Portals", "RemovePortal", {
+  listName: "Remove portal",
+  displayText: "Remove portal with ID {0}",
+  description: "Remove a portal by its ID. The portal connection is removed from the navigation graph immediately.",
+  params: [
+    { id: "portalId", name: "Portal ID", desc: "The ID returned when the portal was added", type: "number", initialValue: "0" }
+  ]
+}, function(portalId) {
+  this.aceRemovePortal(portalId);
+});
+
+action("Portals", "ClearAllPortals", {
+  listName: "Clear all portals",
+  displayText: "Clear all portals",
+  description: "Remove all portals from the navigation graph. Useful when resetting the level or switching layouts.",
+  params: []
+}, function() {
+  this.aceClearAllPortals();
 });
 
 // ============================================================================
