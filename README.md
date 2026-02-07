@@ -49,12 +49,8 @@ npm run dev
 | --- | --- | --- |
 | Enable Debug Logging | Show helpful debug messages in browser console (F12) to troubleshoot pathfinding issues. Disable for better performance in final game. | check |
 | Tile Size | Size of each grid tile in pixels. MUST match the Cell Size in your Pathfinding behavior! Smaller = more precise paths but slower performance. | integer |
-| Character Height | Height of your character in pixels. Used to check if character can fit under platforms when jumping or moving. Should match your sprite's collision box height. | integer |
 | Max Search Nodes | Maximum pathfinding effort before giving up. Higher = finds paths in larger levels but may cause lag. Lower = faster but may fail on complex paths. | integer |
 | Setup Preset | Pre-configured jump/fall settings. Auto: detects from Platform behavior. Beginner: short jumps, safe falls. Intermediate: moderate mobility. Advanced: maximum jump/fall distances for complex levels. | combo |
-| Max Jump Height | Highest platform your character can jump to reach (in pixels). Automatically calculated from Platform behavior's jump strength and gravity when Setup Preset is 'Auto'. Only used as a manual override with other presets. | integer |
-| Max Jump Distance | Farthest gap your character can jump across (in pixels). Automatically calculated from Platform behavior's max speed and jump duration when Setup Preset is 'Auto'. Only used as a manual override with other presets. | integer |
-| Max Fall Distance | Maximum height your character can safely fall from (in pixels). Automatically calculated from Platform behavior's gravity and max fall speed when Setup Preset is 'Auto'. Only used as a manual override with other presets. | integer |
 | Auto-Control Movement | When enabled, AI automatically controls the character (moves left/right, jumps). When disabled, you handle movement yourself using the path data. | check |
 | Graph Mode | How navigation data is stored. Shared = all characters use same map (efficient). Per-Instance = each character has own map (rare use cases only). | combo |
 | Enable Portals | Allow AI to use special connections like teleporters, ladders, elevators, or doors. Disable if your game doesn't have these features. | check |
@@ -62,8 +58,8 @@ npm run dev
 | Max Waypoint Time | How long (in seconds) AI tries to reach each waypoint before giving up and recalculating path. Prevents infinite loops when stuck. | float |
 | Enable Hazard Avoidance | AI will try to avoid dangerous areas like spikes, fire, or enemy patrol zones. Makes pathfinding slower but smarter. | check |
 | Coyote Time | Seconds after walking off a ledge where a jump can still be executed. Allows AI to walk off edges and jump mid-air for greater reach. 0 = disabled. | float |
-| Ledge Restriction | When enabled, auto-movement prevents the AI from walking off platform edges. Only affects auto-control movement, not the navigation graph itself. | check |
-| Ledge Leniency | Pixels of tolerance past a ledge edge before stopping (0 = strict, stays on platform). Only used when Ledge Restriction is enabled. | float |
+| Ledge Restriction | When enabled, AI characters stop at platform edges instead of walking off. Useful for patrol guards in stealth games or NPCs that should stay on their platform. Only affects auto-control movement, not pathfinding. | check |
+| Ledge Leniency | How many pixels past a platform edge the AI is allowed to walk before stopping (0 = strict stop at edge). Increase for more natural-looking movement near edges. Only used when Ledge Restriction is enabled. | float |
 | Re-Path Threshold | How many tiles the character can deviate from its path before automatically recalculating. Useful when the character gets knocked off course. 0 = disabled. | float |
 | Hazard Radius | Tile radius for hazard cost falloff buffer zone. Nearby tiles within this radius of a hazard get cost penalties. 0 = no buffer, only exact hazard tiles affected. | integer |
 
@@ -75,6 +71,9 @@ npm run dev
 | Add ladder | Add a ladder connection between two points. The AI can use this to climb vertically. Returns ladder ID for later reference. Note: This feature may not be fully implemented yet. | Bottom X             *(number)* <br>Bottom Y             *(number)* <br>Top X             *(number)* <br>Top Y             *(number)* <br>Climb speed             *(number)* <br> |
 | Remove ladder | Remove a ladder by its ID. Use when a ladder is no longer accessible or has been destroyed. | ID             *(number)* <br> |
 | Set ladder climb speed | Change the climbing speed for a specific ladder. Use to adjust ladder traversal speed dynamically. | ID             *(number)* <br>Speed             *(number)* <br> |
+| Set max fall distance | Override the auto-calculated maximum fall distance. The navigation graph must be regenerated after changing this for the new value to take effect. | Distance (px)             *(number)* <br> |
+| Set max jump distance | Override the auto-calculated maximum horizontal jump distance. The navigation graph must be regenerated after changing this for the new value to take effect. | Distance (px)             *(number)* <br> |
+| Set max jump height | Override the auto-calculated maximum jump height. The navigation graph must be regenerated after changing this for the new value to take effect. | Height (px)             *(number)* <br> |
 | Log graph stats to console | Output detailed navigation graph statistics to the browser console. Use for debugging graph generation and connectivity issues. |  |
 | Add circle hazard | Add a circular hazard area. The AI will avoid this area based on severity. Returns a hazard ID for later removal. Use for dynamic danger zones like explosions or enemy AOE. | X             *(number)* <br>Y             *(number)* <br>Radius             *(number)* <br>Severity             *(number)* <br> |
 | Add rectangle hazard | Add a rectangular hazard area. The AI will avoid this area based on severity. Returns a hazard ID for later removal. Use for static danger zones like spike pits. | X             *(number)* <br>Y             *(number)* <br>Width             *(number)* <br>Height             *(number)* <br>Severity             *(number)* <br> |
@@ -97,10 +96,12 @@ npm run dev
 | Regenerate navigation graph | Rebuild the navigation graph from scratch. Use after modifying the level layout, adding/removing obstacles, or changing platform positions. |  |
 | Set auto-control | Toggle auto-movement on/off. When enabled, the behavior automatically controls the Platform behavior to follow paths. When disabled, you control movement yourself using path data expressions. | Enabled             *(combo)* <br> |
 | Set coyote time | Set the coyote time window in seconds. The AI can jump within this window after walking off a ledge. Set to 0 to disable coyote time. | Seconds             *(number)* <br> |
-| Set ledge leniency | Set pixels of tolerance past a ledge edge before stopping (0 = strict stop at edge). Only used when ledge restriction is enabled. | Pixels             *(number)* <br> |
-| Set ledge restriction | Toggle ledge restriction for auto-movement. When enabled, the AI avoids walking off platform edges unless the path requires it. When disabled, the AI can walk freely to edges. | Enabled             *(combo)* <br> |
+| Set ledge leniency | Set how many pixels past a platform edge the AI can walk before stopping (0 = strict stop). Increase for more natural-looking patrol movement near edges. Only used when ledge restriction is enabled. | Pixels             *(number)* <br> |
+| Set ledge restriction | Toggle ledge restriction for auto-movement. When enabled, AI characters stop at platform edges instead of walking off — useful for patrol guards in stealth games or NPCs that should stay on their platform. When disabled, AI walks freely to edges. | Enabled             *(combo)* <br> |
 | Stop pathfinding | Stop the character immediately and clear the current path. Use when you want to cancel AI navigation and regain manual control. |  |
-| Add portal | Add a portal (teleport) connection between two points. The AI can use this as part of paths. Use for teleporters, ladders, or special traversal. Returns portal ID. | Type             *(string)* <br>Entry X             *(number)* <br>Entry Y             *(number)* <br>Exit X             *(number)* <br>Exit Y             *(number)* <br>Cost             *(number)* <br>Ignore hazards             *(combo)* <br> |
+| Clear all portals | Remove all portals from the navigation graph. Useful when resetting the level or switching layouts. |  |
+| Remove portal | Remove a portal by its ID. The portal connection is removed from the navigation graph immediately. | Portal ID             *(number)* <br> |
+| Set portal | Create or update a portal connection. If a portal with this ID already exists, it is updated with the new settings. If not, a new portal is created. Use for teleporters, moving platforms, or special traversal points. | Portal ID             *(number)* <br>Type             *(string)* <br>Entry X             *(number)* <br>Entry Y             *(number)* <br>Exit X             *(number)* <br>Exit Y             *(number)* <br>Cost             *(number)* <br>Ignore hazards             *(combo)* <br> |
 
 
 ---

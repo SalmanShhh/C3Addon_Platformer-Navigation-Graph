@@ -9,6 +9,7 @@
         "help-url": "https://www.construct.net",
         "aceCategories": {
           "AdvancedTuning": "AdvancedTuning",
+          "Configuration": "Configuration",
           "GraphData": "GraphData",
           "Hazards": "Hazards",
           "MultiAgent": "MultiAgent",
@@ -26,10 +27,6 @@
             "name": "Tile Size",
             "desc": "Size of each grid tile in pixels. MUST match the Cell Size in your Pathfinding behavior! Smaller = more precise paths but slower performance."
           },
-          "character_height": {
-            "name": "Character Height",
-            "desc": "Height of your character in pixels. Used to check if character can fit under platforms when jumping or moving. Should match your sprite's collision box height."
-          },
           "max_search_nodes": {
             "name": "Max Search Nodes",
             "desc": "Maximum pathfinding effort before giving up. Higher = finds paths in larger levels but may cause lag. Lower = faster but may fail on complex paths."
@@ -43,18 +40,6 @@
               "intermediate": "Intermediate (moderate mobility)",
               "advanced": "Advanced (maximum distances)"
             }
-          },
-          "max_jump_height": {
-            "name": "Max Jump Height",
-            "desc": "Highest platform your character can jump to reach (in pixels). Automatically calculated from Platform behavior's jump strength and gravity when Setup Preset is 'Auto'. Only used as a manual override with other presets."
-          },
-          "max_jump_distance": {
-            "name": "Max Jump Distance",
-            "desc": "Farthest gap your character can jump across (in pixels). Automatically calculated from Platform behavior's max speed and jump duration when Setup Preset is 'Auto'. Only used as a manual override with other presets."
-          },
-          "max_fall_distance": {
-            "name": "Max Fall Distance",
-            "desc": "Maximum height your character can safely fall from (in pixels). Automatically calculated from Platform behavior's gravity and max fall speed when Setup Preset is 'Auto'. Only used as a manual override with other presets."
           },
           "auto_control": {
             "name": "Auto-Control Movement",
@@ -156,6 +141,39 @@
               "speed": {
                 "name": "Speed",
                 "desc": "New climb speed in pixels per second"
+              }
+            }
+          },
+          "SetMaxFallDistance": {
+            "list-name": "Set max fall distance",
+            "display-text": "Set max fall distance to {0} px",
+            "description": "Override the auto-calculated maximum fall distance. The navigation graph must be regenerated after changing this for the new value to take effect.",
+            "params": {
+              "value": {
+                "name": "Distance (px)",
+                "desc": "Maximum fall distance in pixels"
+              }
+            }
+          },
+          "SetMaxJumpDistance": {
+            "list-name": "Set max jump distance",
+            "display-text": "Set max jump distance to {0} px",
+            "description": "Override the auto-calculated maximum horizontal jump distance. The navigation graph must be regenerated after changing this for the new value to take effect.",
+            "params": {
+              "value": {
+                "name": "Distance (px)",
+                "desc": "Maximum jump distance in pixels"
+              }
+            }
+          },
+          "SetMaxJumpHeight": {
+            "list-name": "Set max jump height",
+            "display-text": "Set max jump height to {0} px",
+            "description": "Override the auto-calculated maximum jump height. The navigation graph must be regenerated after changing this for the new value to take effect.",
+            "params": {
+              "value": {
+                "name": "Height (px)",
+                "desc": "Maximum jump height in pixels"
               }
             }
           },

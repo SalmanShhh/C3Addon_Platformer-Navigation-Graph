@@ -105,19 +105,6 @@ export const properties = [
   // Property [2]
   {
     type: PROPERTY_TYPE.INTEGER,
-    id: "character_height",
-    name: "Character Height",
-    desc: "Height of your character in pixels. Used to check if character can fit under platforms when jumping or moving. Should match your sprite's collision box height.",
-    options: {
-      initialValue: 32,
-      minValue: 8,
-      maxValue: 128
-    }
-  },
-  
-  // Property [3]
-  {
-    type: PROPERTY_TYPE.INTEGER,
     id: "max_search_nodes",
     name: "Max Search Nodes",
     desc: "Maximum pathfinding effort before giving up. Higher = finds paths in larger levels but may cause lag. Lower = faster but may fail on complex paths.",
@@ -128,7 +115,7 @@ export const properties = [
     }
   },
 
-  // Property [4]
+  // Property [3]
   {
     type: PROPERTY_TYPE.COMBO,
     id: "setup_preset",
@@ -145,46 +132,7 @@ export const properties = [
     }
   },
 
-  // Property [5]
-  {
-    type: PROPERTY_TYPE.INTEGER,
-    id: "max_jump_height",
-    name: "Max Jump Height",
-    desc: "Highest platform your character can jump to reach (in pixels). Automatically calculated from Platform behavior's jump strength and gravity when Setup Preset is 'Auto'. Only used as a manual override with other presets.",
-    options: {
-      initialValue: 128,
-      minValue: 16,
-      maxValue: 512
-    }
-  },
-
-  // Property [6]
-  {
-    type: PROPERTY_TYPE.INTEGER,
-    id: "max_jump_distance",
-    name: "Max Jump Distance",
-    desc: "Farthest gap your character can jump across (in pixels). Automatically calculated from Platform behavior's max speed and jump duration when Setup Preset is 'Auto'. Only used as a manual override with other presets.",
-    options: {
-      initialValue: 192,
-      minValue: 32,
-      maxValue: 512
-    }
-  },
-
-  // Property [7]
-  {
-    type: PROPERTY_TYPE.INTEGER,
-    id: "max_fall_distance",
-    name: "Max Fall Distance",
-    desc: "Maximum height your character can safely fall from (in pixels). Automatically calculated from Platform behavior's gravity and max fall speed when Setup Preset is 'Auto'. Only used as a manual override with other presets.",
-    options: {
-      initialValue: 256,
-      minValue: 32,
-      maxValue: 1024
-    }
-  },
-
-  // Property [8]
+  // Property [4]
   {
     type: PROPERTY_TYPE.CHECK,
     id: "auto_control",
@@ -193,7 +141,7 @@ export const properties = [
     options: { initialValue: true }
   },
 
-  // Property [9]
+  // Property [5]
   {
     type: PROPERTY_TYPE.COMBO,
     id: "graph_mode",
@@ -208,7 +156,7 @@ export const properties = [
     }
   },
 
-  // Property [10]
+  // Property [6]
   {
     type: PROPERTY_TYPE.CHECK,
     id: "enable_portals",
@@ -217,7 +165,7 @@ export const properties = [
     options: { initialValue: true }
   },
 
-  // Property [11]
+  // Property [7]
   {
     type: PROPERTY_TYPE.CHECK,
     id: "smooth_paths",
@@ -226,7 +174,7 @@ export const properties = [
     options: { initialValue: true }
   },
 
-  // Property [12]
+  // Property [8]
   {
     type: PROPERTY_TYPE.FLOAT,
     id: "max_waypoint_time",
@@ -239,7 +187,7 @@ export const properties = [
     }
   },
 
-  // Property [13]
+  // Property [9]
   {
     type: PROPERTY_TYPE.CHECK,
     id: "enable_hazards",
@@ -250,7 +198,7 @@ export const properties = [
     }
   },
 
-  // Property [14]
+  // Property [10]
   {
     type: PROPERTY_TYPE.FLOAT,
     id: "coyote_time",
@@ -263,7 +211,7 @@ export const properties = [
     }
   },
 
-  // Property [15]
+  // Property [11]
   {
     type: PROPERTY_TYPE.CHECK,
     id: "ledge_restriction",
@@ -272,7 +220,7 @@ export const properties = [
     options: { initialValue: false }
   },
 
-  // Property [16]
+  // Property [12]
   {
     type: PROPERTY_TYPE.FLOAT,
     id: "ledge_leniency",
@@ -285,7 +233,7 @@ export const properties = [
     }
   },
 
-  // Property [17]
+  // Property [13]
   {
     type: PROPERTY_TYPE.FLOAT,
     id: "repath_threshold",
@@ -298,7 +246,7 @@ export const properties = [
     }
   },
 
-  // Property [18]
+  // Property [14]
   {
     type: PROPERTY_TYPE.INTEGER,
     id: "hazard_radius",

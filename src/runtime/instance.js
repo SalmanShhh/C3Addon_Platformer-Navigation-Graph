@@ -81,23 +81,27 @@ export default function (parentClass) {
 
       this.enableDebug = properties[0];
       this.cellSize = properties[1];
-      this.characterHeight = properties[2];
-      this.maxSearchNodes = properties[3];
-      this.setupPreset = properties[4];
-      this.maxJumpHeight = properties[5];
-      this.maxJumpDistance = properties[6];
-      this.maxFallDistance = properties[7];
-      this.autoControl = properties[8];
-      this.graphMode = properties[9];
-      this.enablePortals = properties[10];
-      this.smoothPaths = properties[11];
-      this.maxWaypointTime = properties[12];
-      this.enableHazards = properties[13];
-      this.coyoteTime = properties[14];
-      this.ledgeRestriction = properties[15];
-      this.ledgeLeniency = properties[16];
-      this.rePathThreshold = properties[17];
-      this.hazardRadius = properties[18];
+      this.maxSearchNodes = properties[2];
+      this.setupPreset = properties[3];
+      this.autoControl = properties[4];
+      this.graphMode = properties[5];
+      this.enablePortals = properties[6];
+      this.smoothPaths = properties[7];
+      this.maxWaypointTime = properties[8];
+      this.enableHazards = properties[9];
+      this.coyoteTime = properties[10];
+      this.ledgeRestriction = properties[11];
+      this.ledgeLeniency = properties[12];
+      this.rePathThreshold = properties[13];
+      this.hazardRadius = properties[14];
+
+      // Auto-detected from sprite bounding box on first tick
+      this.characterHeight = 32;
+      this.characterWidth = 32;
+      // Auto-calculated from Platform behavior (or overridden via ACEs)
+      this.maxJumpHeight = 128;
+      this.maxJumpDistance = 192;
+      this.maxFallDistance = 256;
 
       this.useSharedGraph = this.graphMode === "shared";
 
@@ -208,6 +212,9 @@ export default function (parentClass) {
       if (!this._initialized) {
         this._initialized = true;
         this.layoutUID = this.instance.layout.uid;
+        this.characterHeight = Math.abs(this.instance.height);
+        this.characterWidth = Math.abs(this.instance.width);
+        console.log(`[NavGraph] Character dimensions: ${this.characterWidth}x${this.characterHeight}px (instance: ${this.instance.width}x${this.instance.height})`);
         this._initializeGraphMode();
         this.platformBehavior = this._getPlatformBehavior();
         this.pathfindingBehavior = this._getPathfindingBehavior();
@@ -287,6 +294,7 @@ export default function (parentClass) {
         enableDebug: this.enableDebug,
         cellSize: this.cellSize,
         characterHeight: this.characterHeight,
+        characterWidth: this.characterWidth,
         maxSearchNodes: this.maxSearchNodes,
         setupPreset: this.setupPreset,
         maxJumpHeight: this.maxJumpHeight,
@@ -356,6 +364,7 @@ export default function (parentClass) {
       this.enableDebug = o.enableDebug;
       this.cellSize = o.cellSize;
       this.characterHeight = o.characterHeight;
+      this.characterWidth = o.characterWidth || 32;
       this.maxSearchNodes = o.maxSearchNodes;
       this.setupPreset = o.setupPreset;
       this.maxJumpHeight = o.maxJumpHeight;
@@ -1136,6 +1145,7 @@ export default function (parentClass) {
       let count = 0;
       const graph = this._getNavigationGraph();
       const headCells = Math.ceil(this.characterHeight / this.cellSize);
+      const widthCells = this._getWidthCells();
 
       for (const [key, node] of graph) {
         const leftNode = this.getNode(node.gx - 1, node.gy);
@@ -1143,10 +1153,13 @@ export default function (parentClass) {
 
         if (leftNode) {
           let canWalk = true;
-          for (let h = 1; h <= headCells; h++) {
-            if (this.isCellBlocked(node.gx - 1, node.gy - h)) {
-              canWalk = false;
-              break;
+          for (let w = -widthCells; w <= widthCells && canWalk; w++) {
+            const checkGx = leftNode.gx + w;
+            for (let h = (w === 0 ? 1 : 0); h <= headCells; h++) {
+              if (this.isCellBlocked(checkGx, leftNode.gy - h)) {
+                canWalk = false;
+                break;
+              }
             }
           }
           if (canWalk) {
@@ -1161,10 +1174,13 @@ export default function (parentClass) {
 
         if (rightNode) {
           let canWalk = true;
-          for (let h = 1; h <= headCells; h++) {
-            if (this.isCellBlocked(node.gx + 1, node.gy - h)) {
-              canWalk = false;
-              break;
+          for (let w = -widthCells; w <= widthCells && canWalk; w++) {
+            const checkGx = rightNode.gx + w;
+            for (let h = (w === 0 ? 1 : 0); h <= headCells; h++) {
+              if (this.isCellBlocked(checkGx, rightNode.gy - h)) {
+                canWalk = false;
+                break;
+              }
             }
           }
           if (canWalk) {
@@ -1251,6 +1267,10 @@ export default function (parentClass) {
       this._log(`Created ${count} jump connections`);
     }
 
+    _getWidthCells() {
+      return Math.ceil(this.characterWidth / this.cellSize / 2);
+    }
+
     _canJump(from, to) {
       const dx = to.x - from.x;
       const dy = to.y - from.y;
@@ -1259,13 +1279,15 @@ export default function (parentClass) {
       if (-dy > this.maxJumpHeight) return false;
 
       const headCells = Math.ceil(this.characterHeight / this.cellSize);
-      const apex = Math.max(from.y - this.maxJumpHeight, to.y);
+      const widthCells = this._getWidthCells();
+      const peakY = Math.min(from.y, to.y) - this.cellSize;
+      const controlY = 2 * peakY - (from.y + to.y) / 2;
 
       for (let i = 0; i <= 8; i++) {
         const t = i / 8;
         const x = from.x + dx * t;
-        const linearY = from.y + dy * t;
-        const arcY = linearY + 4 * (apex - from.y) * t * (1 - t);
+        const oneMinusT = 1 - t;
+        const arcY = from.y * oneMinusT * oneMinusT + 2 * controlY * t * oneMinusT + to.y * t * t;
 
         const grid = this.worldToGrid(x, arcY);
 
@@ -1279,27 +1301,30 @@ export default function (parentClass) {
         }
 
         for (let h = 0; h < headCells; h++) {
-          const checkGy = grid.gy - h;
-          if (checkGy < 0) return false;
-          const index = checkGy * this.gridWidth + grid.gx;
-          const cellVal = this.obstacleMap ? this.obstacleMap[index] : 0;
+          for (let w = -widthCells; w <= widthCells; w++) {
+            const checkGx = grid.gx + w;
+            const checkGy = grid.gy - h;
+            if (checkGy < 0 || checkGx < 0 || checkGx >= this.gridWidth) return false;
+            const index = checkGy * this.gridWidth + checkGx;
+            const cellVal = this.obstacleMap ? this.obstacleMap[index] : 0;
 
-          if (h === 0) {
-            if (cellVal === 1) return false;
-            if (cellVal === 3) return false;
-            if (cellVal === 2) {
-              const prevT = Math.max(0, (i - 1) / 8);
-              const prevArcY =
-                from.y +
-                dy * prevT +
-                4 * (apex - from.y) * prevT * (1 - prevT);
-              if (arcY > prevArcY) return false;
+            if (h === 0 && w === 0) {
+              if (cellVal === 1) return false;
+              if (cellVal === 3) return false;
+              if (cellVal === 2) {
+                const prevT = Math.max(0, (i - 1) / 8);
+                const prevOneMinusT = 1 - prevT;
+                const prevArcY = from.y * prevOneMinusT * prevOneMinusT + 2 * controlY * prevT * prevOneMinusT + to.y * prevT * prevT;
+                if (arcY > prevArcY) return false;
+              }
+            } else if (h === 0) {
+              if (cellVal === 1 || cellVal === 3) return false;
+            } else {
+              if (cellVal === 1 && this.platformProps.ceilingCollisionMode === "stop") {
+                return false;
+              }
+              if (cellVal === 3) return false;
             }
-          } else {
-            if (cellVal === 1 && this.platformProps.ceilingCollisionMode === "stop") {
-              return false;
-            }
-            if (cellVal === 3) return false;
           }
         }
       }
@@ -1340,11 +1365,14 @@ export default function (parentClass) {
 
     _canFall(from, to) {
       if (to.y <= from.y) return false;
+      const widthCells = this._getWidthCells();
 
       for (let i = 1; i < 5; i++) {
         const checkGy = from.gy + i;
         if (checkGy >= to.gy) break;
-        if (this.isCellBlocked(from.gx, checkGy)) return false;
+        for (let w = -widthCells; w <= widthCells; w++) {
+          if (this.isCellBlocked(from.gx + w, checkGy)) return false;
+        }
       }
 
       return true;
@@ -1381,13 +1409,16 @@ export default function (parentClass) {
       const steps = 10;
       const dx = to.x - from.x;
       const dy = to.y - from.y;
+      const widthCells = this._getWidthCells();
 
       for (let i = 0; i <= steps; i++) {
         const t = i / steps;
         const x = from.x + dx * t;
         const y = from.y + dy * t * t;
         const grid = this.worldToGrid(x, y);
-        if (this.isCellBlocked(grid.gx, grid.gy)) return false;
+        for (let w = -widthCells; w <= widthCells; w++) {
+          if (this.isCellBlocked(grid.gx + w, grid.gy)) return false;
+        }
       }
       return true;
     }
@@ -2044,9 +2075,12 @@ export default function (parentClass) {
       }
 
       const headCells = Math.ceil(this.characterHeight / this.cellSize);
+      const widthCells = this._getWidthCells();
       for (let gx = startGx; gx <= endGx; gx++) {
-        for (let h = 1; h <= headCells; h++) {
-          if (this.isCellBlocked(gx, gy - h)) return false;
+        for (let w = -widthCells; w <= widthCells; w++) {
+          for (let h = 1; h <= headCells; h++) {
+            if (this.isCellBlocked(gx + w, gy - h)) return false;
+          }
         }
       }
 

@@ -1386,3 +1386,40 @@ expression("Debug", "CalculatedJumpDistance", {
 }, function() {
   return this.aceGetCalculatedJumpDistance();
 });
+
+// ============================================================================
+// CONFIGURATION ACTIONS
+// ============================================================================
+
+action("Configuration", "SetMaxJumpHeight", {
+  listName: "Set max jump height",
+  displayText: "Set max jump height to {0} px",
+  description: "Override the auto-calculated maximum jump height. The navigation graph must be regenerated after changing this for the new value to take effect.",
+  params: [
+    { id: "value", name: "Height (px)", desc: "Maximum jump height in pixels", type: "number", initialValue: "128" }
+  ]
+}, function(value) {
+  this.maxJumpHeight = value;
+});
+
+action("Configuration", "SetMaxJumpDistance", {
+  listName: "Set max jump distance",
+  displayText: "Set max jump distance to {0} px",
+  description: "Override the auto-calculated maximum horizontal jump distance. The navigation graph must be regenerated after changing this for the new value to take effect.",
+  params: [
+    { id: "value", name: "Distance (px)", desc: "Maximum jump distance in pixels", type: "number", initialValue: "192" }
+  ]
+}, function(value) {
+  this.maxJumpDistance = value;
+});
+
+action("Configuration", "SetMaxFallDistance", {
+  listName: "Set max fall distance",
+  displayText: "Set max fall distance to {0} px",
+  description: "Override the auto-calculated maximum fall distance. The navigation graph must be regenerated after changing this for the new value to take effect.",
+  params: [
+    { id: "value", name: "Distance (px)", desc: "Maximum fall distance in pixels", type: "number", initialValue: "256" }
+  ]
+}, function(value) {
+  this.maxFallDistance = value;
+});
