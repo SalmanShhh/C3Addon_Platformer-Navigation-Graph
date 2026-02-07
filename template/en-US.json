@@ -75,9 +75,13 @@
             "name": "Coyote Time",
             "desc": "Seconds after walking off a ledge where a jump can still be executed. Allows AI to walk off edges and jump mid-air for greater reach. 0 = disabled."
           },
+          "strict_positioning": {
+            "name": "Strict Jump Positioning",
+            "desc": "When the AI is following a path and needs to jump or fall to another platform, it will slow down and carefully position itself on the tile before launching. This prevents characters from overshooting edges and missing jumps — like a chase enemy flying off a ledge instead of jumping across, or an escort NPC slipping off a narrow bridge mid-jump. Note: this only affects movement DURING pathfinding (jumps and falls that are part of the path). To stop characters from walking off edges entirely, use 'Ledge Restriction' instead. Recommended ON for most games."
+          },
           "ledge_restriction": {
             "name": "Ledge Restriction",
-            "desc": "When enabled, AI characters stop at platform edges instead of walking off. Useful for patrol guards in stealth games or NPCs that should stay on their platform. Only affects auto-control movement, not pathfinding."
+            "desc": "Prevents AI characters from walking off platform edges when they have no reason to leave. Useful for patrol guards that should stay on their platform, or NPCs that shouldn't wander off rooftops. Note: this only stops characters from casually walking off edges — if the AI's path requires a jump or fall to reach its goal, it will still leave the platform. To make those jumps and falls more precise, use 'Strict Jump Positioning' instead."
           },
           "ledge_leniency": {
             "name": "Ledge Leniency",
@@ -429,7 +433,7 @@
           },
           "FindPath": {
             "list-name": "Find path to position",
-            "display-text": "Find path to ({0}, {1}) [Ground correction: {2}] [Mode: {3}]",
+            "display-text": "Find path to ({0}, {1}) [Ground correction: {2}] [Mode: {3}] [Jump positioning: {4}]",
             "description": "Calculate a path from the character's position to the target coordinates. Use this when you want the AI to navigate to a specific point. Requires: Navigation graph must be generated first.",
             "params": {
               "x": {
@@ -455,6 +459,15 @@
                   "reach": "Reach (default)",
                   "nearest": "Nearest (never fails)",
                   "jump_at": "Jump at target (attack)"
+                }
+              },
+              "strict": {
+                "name": "Jump Positioning",
+                "desc": "Control how carefully the character positions itself before jumps and falls on THIS specific path. This only affects jump/fall precision during pathfinding — it does NOT affect edge walking (use Ledge Restriction for that). 'Default' uses whatever the property or SetStrictJumpPositioning action is set to. 'Strict' forces careful positioning — use for dangerous routes over pits or narrow platforms. 'Relaxed' skips positioning checks for maximum speed — use for chase sequences or when the character is fleeing and precision doesn't matter.",
+                "items": {
+                  "default": "Default (use property)",
+                  "strict": "Strict",
+                  "relaxed": "Relaxed"
                 }
               }
             }
@@ -505,7 +518,7 @@
           "SetLedgeRestriction": {
             "list-name": "Set ledge restriction",
             "display-text": "Set ledge restriction: {0}",
-            "description": "Toggle ledge restriction for auto-movement. When enabled, AI characters stop at platform edges instead of walking off — useful for patrol guards in stealth games or NPCs that should stay on their platform. When disabled, AI walks freely to edges.",
+            "description": "Prevents AI characters from walking off platform edges when they have no reason to leave. Useful for patrol guards that should stay on their platform, or NPCs that shouldn't wander off rooftops. This only stops characters from casually walking off edges — if the AI's path requires a jump or fall to reach its goal, it will still leave the platform. To make those jumps and falls more precise, use 'Set strict jump positioning' instead.",
             "params": {
               "enabled": {
                 "name": "Enabled",
@@ -542,6 +555,21 @@
               "seconds": {
                 "name": "Seconds",
                 "desc": "Cooldown in seconds"
+              }
+            }
+          },
+          "SetStrictJumpPositioning": {
+            "list-name": "Set strict jump positioning",
+            "display-text": "Set strict jump positioning: {0}",
+            "description": "Toggle whether this AI character slows down and carefully positions itself before jumping or falling during pathfinding. This does NOT affect walking off edges (use 'Set ledge restriction' for that). Use this to change behavior at runtime — for example, disable when a boss enters 'rage mode' for reckless movement, or enable when an NPC needs to carefully cross a narrow bridge. Overrides the property setting for this character.",
+            "params": {
+              "enabled": {
+                "name": "Enabled",
+                "desc": "Enable or disable strict jump positioning",
+                "items": {
+                  "yes": "Enabled",
+                  "no": "Disabled"
+                }
               }
             }
           },
@@ -1462,6 +1490,11 @@
           "StoppingDistance": {
             "translated-name": "StoppingDistance",
             "description": "Get the calculated stopping distance in pixels based on the Platform behavior's current speed. Used for waypoint arrival detection.",
+            "params": {}
+          },
+          "StrictJumpPositioning": {
+            "translated-name": "StrictJumpPositioning",
+            "description": "Get whether strict jump positioning is currently active for this character. Returns 1 if enabled, 0 if disabled. Useful for conditional logic — e.g. switching between careful and aggressive pathfinding modes.",
             "params": {}
           },
           "WaypointCount": {

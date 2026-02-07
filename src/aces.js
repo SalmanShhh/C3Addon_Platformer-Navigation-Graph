@@ -6,16 +6,17 @@ import { action, condition, expression } from "../template/aceDefine.js";
 
 action("Pathfinding", "FindPath", {
   listName: "Find path to position",
-  displayText: "Find path to ({0}, {1}) [Ground correction: {2}] [Mode: {3}]",
+  displayText: "Find path to ({0}, {1}) [Ground correction: {2}] [Mode: {3}] [Jump positioning: {4}]",
   description: "Calculate a path from the character's position to the target coordinates. Use this when you want the AI to navigate to a specific point. Requires: Navigation graph must be generated first.",
   params: [
     { id: "x", name: "X", desc: "Target X position in pixels", type: "number", initialValue: "0" },
     { id: "y", name: "Y", desc: "Target Y position in pixels", type: "number", initialValue: "0" },
     { id: "correctToGround", name: "Correct to ground", desc: "Snap start/target to nearest walkable ground position", type: "combo", initialValue: "no", items: [{ no: "No" }, { yes: "Yes" }] },
-    { id: "mode", name: "Mode", desc: "Path mode: 'reach' finds a complete path or fails. 'nearest' paths as close as possible and never fails. 'jump_at' paths nearby then jumps at the target (for attacks).", type: "combo", initialValue: "reach", items: [{ reach: "Reach (default)" }, { nearest: "Nearest (never fails)" }, { jump_at: "Jump at target (attack)" }] }
+    { id: "mode", name: "Mode", desc: "Path mode: 'reach' finds a complete path or fails. 'nearest' paths as close as possible and never fails. 'jump_at' paths nearby then jumps at the target (for attacks).", type: "combo", initialValue: "reach", items: [{ reach: "Reach (default)" }, { nearest: "Nearest (never fails)" }, { jump_at: "Jump at target (attack)" }] },
+    { id: "strict", name: "Jump Positioning", desc: "Control how carefully the character positions itself before jumps and falls on THIS specific path. This only affects jump/fall precision during pathfinding — it does NOT affect edge walking (use Ledge Restriction for that). 'Default' uses whatever the property or SetStrictJumpPositioning action is set to. 'Strict' forces careful positioning — use for dangerous routes over pits or narrow platforms. 'Relaxed' skips positioning checks for maximum speed — use for chase sequences or when the character is fleeing and precision doesn't matter.", type: "combo", initialValue: "default", items: [{ default: "Default (use property)" }, { strict: "Strict" }, { relaxed: "Relaxed" }] }
   ]
-}, function(x, y, correctToGround, mode) {
-  this.aceFindPath(x, y, correctToGround === "yes", mode);
+}, function(x, y, correctToGround, mode, strict) {
+  this.aceFindPath(x, y, correctToGround === "yes", mode, strict);
 });
 
 action("Pathfinding", "StopPathfinding", {
@@ -56,10 +57,21 @@ action("Pathfinding", "SetCoyoteTime", {
   this.aceSetCoyoteTime(seconds);
 });
 
+action("Pathfinding", "SetStrictJumpPositioning", {
+  listName: "Set strict jump positioning",
+  displayText: "Set strict jump positioning: {0}",
+  description: "Toggle whether this AI character slows down and carefully positions itself before jumping or falling during pathfinding. This does NOT affect walking off edges (use 'Set ledge restriction' for that). Use this to change behavior at runtime — for example, disable when a boss enters 'rage mode' for reckless movement, or enable when an NPC needs to carefully cross a narrow bridge. Overrides the property setting for this character.",
+  params: [
+    { id: "enabled", name: "Enabled", desc: "Enable or disable strict jump positioning", type: "combo", initialValue: "yes", items: [{ yes: "Enabled" }, { no: "Disabled" }] }
+  ]
+}, function(enabled) {
+  this.aceSetStrictJumpPositioning(enabled === "yes");
+});
+
 action("Pathfinding", "SetLedgeRestriction", {
   listName: "Set ledge restriction",
   displayText: "Set ledge restriction: {0}",
-  description: "Toggle ledge restriction for auto-movement. When enabled, AI characters stop at platform edges instead of walking off — useful for patrol guards in stealth games or NPCs that should stay on their platform. When disabled, AI walks freely to edges.",
+  description: "Prevents AI characters from walking off platform edges when they have no reason to leave. Useful for patrol guards that should stay on their platform, or NPCs that shouldn't wander off rooftops. This only stops characters from casually walking off edges — if the AI's path requires a jump or fall to reach its goal, it will still leave the platform. To make those jumps and falls more precise, use 'Set strict jump positioning' instead.",
   params: [
     { id: "enabled", name: "Enabled", desc: "Enable or disable ledge restriction", type: "combo", initialValue: "yes", items: [{ yes: "Enabled" }, { no: "Disabled" }] }
   ]
@@ -422,6 +434,13 @@ expression("Pathfinding", "CoyoteTimer", {
   description: "Get the current coyote timer value in seconds. This counts down after leaving the ground. Returns 0 when on ground or timer expired."
 }, function() {
   return this.aceGetCoyoteTimer();
+});
+
+expression("Pathfinding", "StrictJumpPositioning", {
+  returnType: "number",
+  description: "Get whether strict jump positioning is currently active for this character. Returns 1 if enabled, 0 if disabled. Useful for conditional logic — e.g. switching between careful and aggressive pathfinding modes."
+}, function() {
+  return this.aceGetStrictJumpPositioning();
 });
 
 expression("Pathfinding", "LedgeRestriction", {

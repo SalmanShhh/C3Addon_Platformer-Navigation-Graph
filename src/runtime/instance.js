@@ -90,10 +90,11 @@ export default function (parentClass) {
       this.smoothPaths = properties[7];
       this.maxWaypointTime = properties[8];
       this.coyoteTime = properties[9];
-      this.ledgeRestriction = properties[10];
-      this.ledgeLeniency = properties[11];
-      this.rePathThreshold = properties[12];
-      this.hazardRadius = properties[13];
+      this.strictPositioning = properties[10];
+      this.ledgeRestriction = properties[11];
+      this.ledgeLeniency = properties[12];
+      this.rePathThreshold = properties[13];
+      this.hazardRadius = properties[14];
       // Auto-enabled when portals/hazards are added via ACEs
       this.enablePortals = true;
       this.enableHazards = false;
@@ -186,6 +187,9 @@ export default function (parentClass) {
       this.doubleJumpPhase = 0;
       this.isHoldingJump = false;
       this.jumpHoldTimer = 0;
+
+      this.currentPathStrict = false;
+      this.departureCommitted = false;
 
       this.rePathCooldown = 0;
       this.rePathCooldownDuration = 0.5;
@@ -316,6 +320,7 @@ export default function (parentClass) {
         maxWaypointTime: this.maxWaypointTime,
         enableHazards: this.enableHazards,
         coyoteTime: this.coyoteTime,
+        strictPositioning: this.strictPositioning,
         ledgeRestriction: this.ledgeRestriction,
         ledgeLeniency: this.ledgeLeniency,
         rePathThreshold: this.rePathThreshold,
@@ -388,6 +393,7 @@ export default function (parentClass) {
       this.maxWaypointTime = o.maxWaypointTime;
       this.enableHazards = o.enableHazards;
       this.coyoteTime = o.coyoteTime;
+      this.strictPositioning = o.strictPositioning !== undefined ? o.strictPositioning : true;
       this.ledgeRestriction = o.ledgeRestriction;
       this.ledgeLeniency = o.ledgeLeniency;
       this.rePathThreshold = o.rePathThreshold;
@@ -2475,6 +2481,7 @@ export default function (parentClass) {
           } catch (e) {}
         }
         this.hasPath = false;
+        this.departureCommitted = false;
         this._trigger("OnPathComplete");
         return;
       }
@@ -2484,6 +2491,7 @@ export default function (parentClass) {
 
       if (this.timeAtWaypoint > this.maxWaypointTime) {
         this.hasPath = false;
+        this.departureCommitted = false;
         this.timeAtWaypoint = 0;
         this._log(`Stuck at waypoint ${this.currentWaypoint} (exceeded ${this.maxWaypointTime}s)`);
         this._trigger("OnWaypointStuck");
@@ -2508,7 +2516,19 @@ export default function (parentClass) {
         } catch (e) {}
         arrivalThreshold = walledBothSides ? this.cellSize * 0.45 : this.cellSize * 0.15;
       } else if (waypoint.action.includes("walk")) {
-        arrivalThreshold = this.cellSize * 0.3;
+        // Strict positioning: tighten arrival when the next action is a departure (jump/fall)
+        if (this.currentPathStrict) {
+          const nextIdx = this.currentWaypoint + 1;
+          const nextWp = nextIdx < this.currentPath.length ? this.currentPath[nextIdx] : null;
+          const nextIsDeparture = nextWp && (
+            nextWp.action === "jump" || nextWp.action === "coyote_jump" ||
+            nextWp.action === "jump_toward" || nextWp.action === "fall" ||
+            nextWp.action === "fall_left" || nextWp.action === "fall_right"
+          );
+          arrivalThreshold = nextIsDeparture ? this.cellSize * 0.15 : this.cellSize * 0.3;
+        } else {
+          arrivalThreshold = this.cellSize * 0.3;
+        }
       } else if (
         waypoint.action === "jump" ||
         waypoint.action === "coyote_jump"
@@ -2636,6 +2656,7 @@ export default function (parentClass) {
         // Re-pathed 5 times without getting closer — stuck in a loop
         this._warn(`Re-path loop detected (${this.rePathCount} re-paths without progress)`);
         this.hasPath = false;
+        this.departureCommitted = false;
         this.rePathCount = 0;
         this.rePathBestDist = Infinity;
         this._trigger("OnWaypointStuck");
@@ -2723,6 +2744,9 @@ export default function (parentClass) {
       const stoppingDist = (speed * speed) / (2 * decel);
 
       if (action === "walk_left" || action === "walk_right") {
+        // Committed departure: skip walk input so character doesn't overshoot before jump fires
+        if (this.departureCommitted) return;
+
         const movingLeft = action === "walk_left";
         const wallSide = movingLeft ? "left" : "right";
 
@@ -2775,6 +2799,27 @@ export default function (parentClass) {
         action === "fall_left" ||
         action === "fall_right"
       ) {
+        // Strict positioning: edge-align before diagonal falls
+        if (this.currentPathStrict && (action === "fall_left" || action === "fall_right")) {
+          try {
+            if (this.platformBehavior.isOnFloor) {
+              const prevIdx = this.currentWaypoint - 1;
+              const prevWp = prevIdx >= 0 ? this.currentPath[prevIdx] : null;
+              if (prevWp && prevWp.node) {
+                const dir = action === "fall_right" ? "right" : "left";
+                const edgeX = prevWp.node.x + (dir === "right" ? 1 : -1) * (this.cellSize / 2 - this.cellSize * 0.1);
+                const distToEdge = Math.abs(this.instance.x - edgeX);
+                const pastEdge = dir === "right" ? this.instance.x >= edgeX : this.instance.x <= edgeX;
+                if (!pastEdge && distToEdge > this.cellSize * 0.15) {
+                  if (!this.platformBehavior.isByWall(dir)) {
+                    this.platformBehavior.simulateControl(dir);
+                  }
+                  return; // Wait until at edge
+                }
+              }
+            }
+          } catch (e) {}
+        }
         this._handleFallAction(targetX, action);
         return;
       }
@@ -2825,6 +2870,23 @@ export default function (parentClass) {
         if (!walledBothSides) {
           const maxSafeSpeed = Math.sqrt(2 * decel * (this.cellSize * 0.4));
           if (speed > maxSafeSpeed) return;
+        }
+      }
+
+      // Strict positioning: cap speed when approaching a ledge before a departure action
+      if (this.currentPathStrict && waypoint && waypoint.node) {
+        const node = waypoint.node;
+        if (node.isLeftLedge || node.isRightLedge || node.isIsland) {
+          const nextIdx = this.currentWaypoint + 1;
+          const nextWp = nextIdx < this.currentPath.length ? this.currentPath[nextIdx] : null;
+          if (nextWp && (
+            nextWp.action === "jump" || nextWp.action === "coyote_jump" ||
+            nextWp.action === "jump_toward" || nextWp.action === "fall" ||
+            nextWp.action === "fall_left" || nextWp.action === "fall_right"
+          )) {
+            const maxDepartureSpeed = Math.sqrt(2 * decel * (this.cellSize * 0.35));
+            if (speed > maxDepartureSpeed) return; // Coast to safe speed
+          }
         }
       }
 
@@ -2903,6 +2965,10 @@ export default function (parentClass) {
             } catch (e) {}
             return; // Wait until centered
           }
+          // Centering complete — commit to departure (prevents walk input on this frame)
+          if (this.currentPathStrict) {
+            this.departureCommitted = true;
+          }
         }
       }
 
@@ -2917,6 +2983,7 @@ export default function (parentClass) {
           this.platformBehavior.simulateControl("jump");
           this.isHoldingJump = true;
           this.jumpHoldTimer = 0;
+          this.departureCommitted = false;
         } else if (
           this.isHoldingJump &&
           this.platformProps.jumpSustain > 0
@@ -2936,6 +3003,28 @@ export default function (parentClass) {
     _handleCoyoteJumpAction(targetX, targetY, waypoint) {
       const xDist = Math.abs(targetX - this.instance.x);
       const isVerticalJump = xDist < this.cellSize * 0.5;
+
+      // Strict positioning: edge-align before stepping off for coyote jump
+      if (this.currentPathStrict && this.platformBehavior.isOnFloor) {
+        const prevIdx = this.currentWaypoint - 1;
+        const prevWp = prevIdx >= 0 ? this.currentPath[prevIdx] : null;
+        if (prevWp && prevWp.node) {
+          const dir = targetX < this.instance.x ? "left" : "right";
+          // Target edge position: just inside the tile edge (90% from center to edge)
+          const edgeX = prevWp.node.x + (dir === "right" ? 1 : -1) * (this.cellSize / 2 - this.cellSize * 0.1);
+          const distToEdge = Math.abs(this.instance.x - edgeX);
+          const pastEdge = dir === "right" ? this.instance.x >= edgeX : this.instance.x <= edgeX;
+          if (!pastEdge && distToEdge > this.cellSize * 0.15) {
+            // Walk toward edge before stepping off
+            try {
+              if (!this.platformBehavior.isByWall(dir)) {
+                this.platformBehavior.simulateControl(dir);
+              }
+            } catch (e) {}
+            return; // Wait until at edge
+          }
+        }
+      }
 
       if (!isVerticalJump) {
         const dir = targetX < this.instance.x ? "left" : "right";
@@ -3048,8 +3137,8 @@ export default function (parentClass) {
     // ============================================================================
 
     /** Calculates a path from the character's current position to the target coordinates. Supports ground correction and jump-toward mode. */
-    aceFindPath(targetX, targetY, correctToGround, mode) {
-      this._log(`FindPath to (${Math.round(targetX)},${Math.round(targetY)}) mode=${mode || "reach"} groundCorrect=${correctToGround}`);
+    aceFindPath(targetX, targetY, correctToGround, mode, strict) {
+      this._log(`FindPath to (${Math.round(targetX)},${Math.round(targetY)}) mode=${mode || "reach"} groundCorrect=${correctToGround} strict=${strict || "default"}`);
       this.lastPathFailReason = "";
 
       let startX = this.instance.x;
@@ -3154,6 +3243,17 @@ export default function (parentClass) {
           if (this.platformBehavior) this.platformBehavior.isEnabled = true;
         }
         this.coyoteJumpPending = false;
+        this.departureCommitted = false;
+
+        // Resolve strict jump positioning for this path
+        // Priority: FindPath param > ACE/property setting
+        if (strict === "strict") {
+          this.currentPathStrict = true;
+        } else if (strict === "relaxed") {
+          this.currentPathStrict = false;
+        } else {
+          this.currentPathStrict = !!this.strictPositioning;
+        }
 
         this.lastPathCost = 0;
         for (let i = 1; i < path.length; i++) {
@@ -3183,6 +3283,7 @@ export default function (parentClass) {
       this.currentWaypoint = 0;
       this.doubleJumpPhase = 0;
       this.isHoldingJump = false;
+      this.departureCommitted = false;
       if (this.isClimbing) {
         this.isClimbing = false;
         if (this.platformBehavior) this.platformBehavior.isEnabled = true;
@@ -3193,6 +3294,7 @@ export default function (parentClass) {
     /** Stops movement along the current path without clearing the path data. */
     aceStopMovement() {
       this.hasPath = false;
+      this.departureCommitted = false;
     }
 
     /** Stops pathfinding entirely by clearing the path and stopping movement. */
@@ -3218,6 +3320,11 @@ export default function (parentClass) {
     /** Sets the coyote time duration in seconds (grace period for jumping after leaving a ledge). */
     aceSetCoyoteTime(seconds) {
       this.coyoteTime = seconds;
+    }
+
+    /** Enables or disables strict jump positioning (careful tile alignment before jumps/falls). */
+    aceSetStrictJumpPositioning(enabled) {
+      this.strictPositioning = enabled;
     }
 
     /** Enables or disables ledge restriction (prevents the character from walking off platform edges). */
@@ -3477,6 +3584,11 @@ export default function (parentClass) {
     /** Returns the current coyote timer value (counts down from coyoteTime when leaving ground). */
     aceGetCoyoteTimer() {
       return this.coyoteTimer;
+    }
+
+    /** Returns 1 if strict jump positioning is enabled, 0 otherwise. */
+    aceGetStrictJumpPositioning() {
+      return this.strictPositioning ? 1 : 0;
     }
 
     /** Returns 1 if ledge restriction is enabled, 0 otherwise. */

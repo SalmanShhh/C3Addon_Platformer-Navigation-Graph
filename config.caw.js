@@ -211,13 +211,22 @@ export const properties = [
   // Property [10]
   {
     type: PROPERTY_TYPE.CHECK,
-    id: "ledge_restriction",
-    name: "Ledge Restriction",
-    desc: "When enabled, AI characters stop at platform edges instead of walking off. Useful for patrol guards in stealth games or NPCs that should stay on their platform. Only affects auto-control movement, not pathfinding.",
-    options: { initialValue: false }
+    id: "strict_positioning",
+    name: "Strict Jump Positioning",
+    desc: "When the AI is following a path and needs to jump or fall to another platform, it will slow down and carefully position itself on the tile before launching. This prevents characters from overshooting edges and missing jumps — like a chase enemy flying off a ledge instead of jumping across, or an escort NPC slipping off a narrow bridge mid-jump. Note: this only affects movement DURING pathfinding (jumps and falls that are part of the path). To stop characters from walking off edges entirely, use 'Ledge Restriction' instead. Recommended ON for most games.",
+    options: { initialValue: true }
   },
 
   // Property [11]
+  {
+    type: PROPERTY_TYPE.CHECK,
+    id: "ledge_restriction",
+    name: "Ledge Restriction",
+    desc: "Prevents AI characters from walking off platform edges when they have no reason to leave. Useful for patrol guards that should stay on their platform, or NPCs that shouldn't wander off rooftops. Note: this only stops characters from casually walking off edges — if the AI's path requires a jump or fall to reach its goal, it will still leave the platform. To make those jumps and falls more precise, use 'Strict Jump Positioning' instead.",
+    options: { initialValue: false }
+  },
+
+  // Property [12]
   {
     type: PROPERTY_TYPE.FLOAT,
     id: "ledge_leniency",
@@ -230,7 +239,7 @@ export const properties = [
     }
   },
 
-  // Property [12]
+  // Property [13]
   {
     type: PROPERTY_TYPE.FLOAT,
     id: "repath_threshold",
@@ -243,7 +252,7 @@ export const properties = [
     }
   },
 
-  // Property [13]
+  // Property [14]
   {
     type: PROPERTY_TYPE.INTEGER,
     id: "hazard_radius",
