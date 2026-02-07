@@ -131,6 +131,7 @@ export default function (parentClass) {
       this.timeAtWaypoint = 0;
       this.lastPathMode = "reach";
       this.lastPathCost = 0;
+      this.lastPathFailReason = "";
 
       this.pathTargetX = 0;
       this.pathTargetY = 0;
@@ -203,6 +204,9 @@ export default function (parentClass) {
     _tick() {
       const dt = this.instance.dt;
 
+      //console.log("Did Tick")
+      this.logBehaviors();
+      
       // First-tick initialization: acquire layout UID, behaviors, and graph mode
       if (!this._initialized) {
         this._initialized = true;
@@ -216,18 +220,27 @@ export default function (parentClass) {
         }
       }
 
-      if (!this.platformBehavior) {
+      // Use "Lazy Loading" - only find them if we don't have them yet
+    if (!this.platformBehavior) {
         this.platformBehavior = this._getPlatformBehavior();
         if (this.platformBehavior) {
-          this._readPlatformProperties();
-          if (this.setupPreset !== "custom") this._applyPreset();
+            this._readPlatformProperties();
+            if (this.setupPreset !== "custom") this._applyPreset();
         }
-      }
-      if (!this.pathfindingBehavior) {
+    }
+
+
+    if (!this.pathfindingBehavior) {
         this.pathfindingBehavior = this._getPathfindingBehavior();
+    }
+
+    // If either behavior is present but disabled, skip all processing and log a warning
+      if (this.platformBehavior && !this.platformBehavior.isEnabled) {
+        return;
       }
 
-      if (this.platformBehavior && !this.platformBehavior.isEnabled) {
+      if (this.pathfindingBehavior && !this.pathfindingBehavior.isEnabled) {
+        console.log("Pathfinding behavior is disabled, make sure it is enabled.");
         return;
       }
 
@@ -306,6 +319,7 @@ export default function (parentClass) {
         timeAtWaypoint: this.timeAtWaypoint,
         lastPathMode: this.lastPathMode,
         lastPathCost: this.lastPathCost,
+        lastPathFailReason: this.lastPathFailReason,
         pathTargetX: this.pathTargetX,
         pathTargetY: this.pathTargetY,
         pathTargetCorrectedX: this.pathTargetCorrectedX,
@@ -367,6 +381,7 @@ export default function (parentClass) {
       this.timeAtWaypoint = o.timeAtWaypoint;
       this.lastPathMode = o.lastPathMode;
       this.lastPathCost = o.lastPathCost;
+      this.lastPathFailReason = o.lastPathFailReason || "";
       this.pathTargetX = o.pathTargetX;
       this.pathTargetY = o.pathTargetY;
       this.pathTargetCorrectedX = o.pathTargetCorrectedX;
@@ -440,34 +455,168 @@ export default function (parentClass) {
       }
     }
 
+    _getDebuggerProperties() {
+      const prefix = "$" + this.behaviorType.name;
+      const graph = this._initialized ? this._getNavigationGraph() : new Map();
+      const currentAction = this.hasPath && this.currentPath[this.currentWaypoint]
+        ? this.currentPath[this.currentWaypoint].action
+        : "none";
+
+      return [{
+        title: prefix + " - Navigation Graph",
+        properties: [
+          { name: "$generated", value: this.graphGenerated },
+          { name: "$nodes", value: graph.size },
+          { name: "$gridSize", value: `${this.gridWidth}x${this.gridHeight}` },
+          { name: "$obstacleSource", value: this.obstacleMapSource || "none" },
+        ]
+      }, {
+        title: prefix + " - Pathfinding",
+        properties: [
+          { name: "$hasPath", value: this.hasPath },
+          { name: "$waypoint", value: this.hasPath ? `${this.currentWaypoint}/${this.currentPath.length}` : "N/A" },
+          { name: "$action", value: currentAction },
+          { name: "$pathCost", value: Math.round(this.lastPathCost) },
+          { name: "$failReason", value: this.lastPathFailReason || "none" },
+          { name: "$target", value: `(${Math.round(this.pathTargetX)}, ${Math.round(this.pathTargetY)})` },
+        ]
+      }, {
+        title: prefix + " - Movement",
+        properties: [
+          { name: "$climbing", value: this.isClimbing },
+          { name: "$coyoteTimer", value: Math.round(this.coyoteTimer * 1000) / 1000 },
+          { name: "$velocityX", value: Math.round(this.estimatedVelocityX) },
+          { name: "$waypointTime", value: Math.round(this.timeAtWaypoint * 1000) / 1000 },
+        ]
+      }, {
+        title: prefix + " - Settings",
+        properties: [
+          { name: "$cellSize", value: this.cellSize },
+          { name: "$maxJumpHeight", value: Math.round(this.maxJumpHeight) },
+          { name: "$maxJumpDistance", value: Math.round(this.maxJumpDistance) },
+          { name: "$maxFallDistance", value: Math.round(this.maxFallDistance) },
+          { name: "$debug", value: this.enableDebug },
+          { name: "$platformBehavior", value: this.platformBehavior ? "found" : "not found" },
+          { name: "$pathfindingBehavior", value: this.pathfindingBehavior ? "found" : "not found" },
+          { name: "$waitingForMap", value: this.isWaitingForPathfindingMap },
+        ]
+      }];
+    }
+
     _getPlatformBehavior() {
-      try {
-        const behaviors = this.instance.behaviors;
-        for (const key of Object.keys(behaviors)) {
-          const behavior = behaviors[key];
-          if (key.toLowerCase().includes("platform")) {
-            return behavior;
-          }
-        }
-      } catch (e) {
-        this.error("Error detecting Platform behavior:", e);
+      console.log("-- Searching for Platform behavior...");
+      const b = this._GetBehaviorByType("Platform");
+      if (b) {
+        console.log("-- Detected Platform behavior");
+        return b;
       }
+      console.log("-- No Platform behavior found");
       return null;
     }
 
     _getPathfindingBehavior() {
-      try {
-        const behaviors = this.instance.behaviors;
-        for (const key of Object.keys(behaviors)) {
-          const behavior = behaviors[key];
-          if (key.toLowerCase().includes("pathfinding")) {
-            return behavior;
-          }
-        }
-      } catch (e) {
-        this.error("Error detecting Pathfinding behavior:", e);
+      console.log("-- Searching for Pathfinding behavior...");
+      const beh = this._GetBehaviorByType("Pathfinding");
+      if (beh) {
+        console.log("-- Detected Pathfinding behavior");
+        return beh;
       }
+      console.log("-- No Pathfinding behavior found");
       return null;
+    }
+
+        /**
+     * Helper to get a behavior by its ID (as attached in Construct)
+     * @param {string} behaviorId - The ID or name of the behavior to find
+     * @returns {object|null} The behavior instance or null if not found
+     */
+    getBehaviorById(behaviorId) {
+        const sdkInst = this.instance || this._inst;
+        if (!sdkInst || typeof sdkInst.GetBehaviorInstances !== "function") return null;
+        const behaviorInstances = sdkInst.GetBehaviorInstances();
+        for (const beh of behaviorInstances) {
+            const type = beh.GetBehaviorType();
+            if (type && (type._id === behaviorId || type.GetName() === behaviorId)) {
+                return beh;
+            }
+        }
+        return null;
+    }
+
+    /**
+   * Logs all behaviors attached to this instance
+   */
+    logBehaviors() {
+      // debug: log what we have access to.
+      console.log("Debugging Behavior Access:");
+      console.log("- this.instance:", this.instance);
+      console.log("this.instance.behaviors:", this.instance.behaviors);
+
+      // try accessing through the SDK Instance's behavior array.
+      const sdkInst = this.instance;
+      const behaviors = sdkInst.behaviors;
+
+      console.log("Behaviors Array: ", behaviors);
+      console.log("Behaviors counts: ", behaviors? Object.values(behaviors) : "no behaviors array");
+
+      // Iterate through behaviors and log their types.
+      if(behaviors){
+        for (let i = 0; i < behaviors.length; i++) {
+          const beh = behaviors[i];
+          console.log(`Behaviors ${i}:`, beh);
+          console.log(` - type:`, beh.type);
+          console.log(` - Type Name:`, beh.type ? beh.type.name : "no type");
+          console.log(` - instanceof IPlatformBehaviorInstance:`, beh instanceof self.IPlatformBehaviorInstance);
+          console.log(` - instanceof IPathfindingBehaviorInstance:`, beh instanceof self.IPathfindingBehaviorInstance);
+
+          // Check by type name as fallback          if (beh.type) {
+            if (beh.type.name === "Platform") {
+              console.log("Found Platform behavior via type name!");
+            }
+            if (beh.type.name === "Pathfinding") {
+              console.log("Found Pathfinding behavior via type name!");
+            }
+          }
+
+
+      }
+    }
+
+    _GetBehaviorByType(typeName) {
+        const inst = this.instance;
+        if (!inst) {
+            console.error("No instance found to search for behaviors.");
+            return null;
+        }
+
+        // 1. Get all behaviors using the Scripting Interface method
+        if (typeof inst.getAllBehaviors !== "function") {
+            console.error("inst.getAllBehaviors is not a function. Check if 'this.instance' is a valid WorldInstance.");
+            return null;
+        }
+
+        const allBehaviors = inst.getAllBehaviors();
+
+        console.log(`--- [${name}] Behavior Scan ---`);
+        console.log("Searching for Behavior Type:", typeName);
+        console.log("Total Behaviors found on this instance:", allBehaviors.length);
+
+        for (const b of allBehaviors) {
+            // b.behaviorType.name is the internal type (e.g., "Platform", "Pathfinding")
+            // b.name is what the user named it in the editor (e.g., "PlayerMovement")
+            const behaviorTypeName = b.behaviorType.name;
+            const instanceName = b.name;
+
+            console.log(`Checking behavior: Name="${instanceName}", Type="${behaviorTypeName}"`, b);
+
+            if (behaviorTypeName === typeName) {
+                console.log(`MATCH FOUND: Attached behavior "${instanceName}" is a "${behaviorTypeName}" type.`);
+                return b;
+            }
+        }
+
+        console.warn(`No behavior of type "${typeName}" found on this instance.`);
+        return null;
     }
 
     _readPlatformProperties() {
@@ -497,7 +646,7 @@ export default function (parentClass) {
             this.platformBehavior.ceilingCollisionMode;
         }
       } catch (e) {
-        this.error("Error reading Platform properties:", e);
+        this._error("Error reading Platform properties:", e);
       }
     }
 
@@ -555,33 +704,26 @@ export default function (parentClass) {
       this.maxFallDistance = this.platformProps.maxFallSpeed * 2;
     }
 
-    log(...args) {
+    _log(...args) {
       if (this.enableDebug) {
         console.log(`[${name}]`, ...args);
       }
     }
 
-    warn(...args) {
-      console.warn(`[${name}]`, ...args);
-    }
-
-    error(...args) {
-      console.error(`[${name}]`, ...args);
-    }
-
-    _GetBehavior(behaviorName) {
-      try {
-        const behaviors = this.instance.behaviors;
-        for (const behavior of behaviors) {
-          if (behavior.name === behaviorName) {
-            return behavior;
-          }
-        }
-      } catch (e) {
-        this.error(`Error getting behavior "${behaviorName}":`, e);
+    _warn(...args) {
+      if (this.enableDebug) {
+        console.warn(`[${name}]`, ...args);
       }
-      return null;
     }
+
+    _error(...args) {
+      if (this.enableDebug) {
+        console.error(`[${name}]`, ...args);
+      }
+    }
+
+    // find behavior by plugin type (e.g. "Platform", "Pathfinding"), ensures it works even if the behavior is renamed in the editor
+    
 
     worldToGrid(x, y) {
       const gx = Math.floor(x / this.cellSize);
@@ -659,7 +801,12 @@ export default function (parentClass) {
       }
 
       if (this.pathfindingBehavior) {
-        this._copyObstacleMapFromPathfinding();
+        const success = this._copyObstacleMapFromPathfinding();
+        if (!success) {
+          this.isWaitingForPathfindingMap = true;
+          this.waitTickCount = 0;
+          this._log("Pathfinding behavior found but map not ready, starting poll...");
+        }
       } else {
         this.isWaitingForPathfindingMap = true;
         this.waitTickCount = 0;
@@ -669,10 +816,11 @@ export default function (parentClass) {
     _checkPathfindingMapReady() {
       this.waitTickCount++;
       if (this.waitTickCount >= this.maxWaitTicks) {
-        this.warn(
-          "Pathfinding behavior still not available after max wait time."
+        this._warn(
+          "Pathfinding map not ready after max wait time (" + this.maxWaitTicks + " ticks)."
         );
         this.isWaitingForPathfindingMap = false;
+        this._trigger("OnPathfindingMapTimeout");
         return;
       }
 
@@ -680,52 +828,68 @@ export default function (parentClass) {
         this.pathfindingBehavior = this._getPathfindingBehavior();
       }
 
-      if (this.pathfindingBehavior) {
-        this.isWaitingForPathfindingMap = false;
-        this.waitTickCount = 0;
-        if (this.autoRegenOnReady) {
-          this._copyObstacleMapFromPathfinding();
+      if (!this.pathfindingBehavior) return;
+
+      // Check if the map data is actually ready via .map interface
+      const pfMap = this.pathfindingBehavior.map;
+      if (!pfMap) return;
+      const w = pfMap.widthInCells;
+      const h = pfMap.heightInCells;
+      if (!w || !h || w <= 0 || h <= 0) return;
+
+      // Map is ready
+      this.isWaitingForPathfindingMap = false;
+      this.waitTickCount = 0;
+      this._trigger("OnPathfindingMapReady");
+
+      if (this.autoRegenOnReady) {
+        const success = this._copyObstacleMapFromPathfinding();
+        if (success) {
           this._generateGraph();
+        } else {
+          this._trigger("OnPathfindingMapFailed");
         }
       }
     }
 
     _copyObstacleMapFromPathfinding() {
-      if (!this.pathfindingBehavior) return;
+      if (!this.pathfindingBehavior) return false;
 
       try {
-        const cells = this.pathfindingBehavior.cells;
-        if (!cells || cells.length === 0) {
-          this.warn("Pathfinding cells array is empty or not ready.");
-          return;
+        const pfMap = this.pathfindingBehavior.map;
+        if (!pfMap) {
+          this._log("Pathfinding .map interface not available");
+          return false;
         }
 
-        const cellSize = this.pathfindingBehavior.cellSize || this.cellSize;
-        const cellBorder = this.pathfindingBehavior.cellBorder || 0;
-        const regionWidth = this.pathfindingBehavior.regionWidth || 0;
+        const w = pfMap.widthInCells;
+        const h = pfMap.heightInCells;
 
-        if (regionWidth === 0) {
-          this.warn("Pathfinding regionWidth is zero.");
-          return;
+        if (!w || !h || w <= 0 || h <= 0) {
+          this._log("Pathfinding map not ready yet (widthInCells=" + w + ", heightInCells=" + h + ")");
+          return false;
         }
 
-        this.cellSize = cellSize;
-        this.gridWidth = regionWidth;
-        this.gridHeight = Math.ceil(cells.length / regionWidth);
+        this.gridWidth = w;
+        this.gridHeight = h;
 
-        const cellCount = this.gridWidth * this.gridHeight;
+        const cellCount = w * h;
         this.obstacleMap = new Array(cellCount).fill(0);
 
-        for (let i = 0; i < cells.length; i++) {
-          const cell = cells[i];
-          if (cell >= cellBorder) {
-            this.obstacleMap[i] = 1;
+        for (let gy = 0; gy < h; gy++) {
+          for (let gx = 0; gx < w; gx++) {
+            if (pfMap.isCellObstacle(gx, gy)) {
+              this.obstacleMap[gy * w + gx] = 1;
+            }
           }
         }
 
         this.obstacleMapSource = "pathfinding";
+        this._log(`Copied obstacle map from Pathfinding: ${w}x${h} (${cellCount} cells)`);
+        return true;
       } catch (e) {
-        this.error("Error copying obstacle map from Pathfinding:", e);
+        this._error("Error copying obstacle map from Pathfinding:", e);
+        return false;
       }
     }
 
@@ -750,12 +914,16 @@ export default function (parentClass) {
       const cellCount = this.gridWidth * this.gridHeight;
       this.obstacleMap = new Array(cellCount).fill(0);
       this.obstacleMapSource = "custom";
+      this._trigger("OnObstacleMapCreated");
     }
 
     aceClearObstacleMap() {
-      if (this.obstacleMap) {
-        this.obstacleMap.fill(0);
-      }
+      this.obstacleMap = null;
+      this.obstacleMapSource = null;
+      this.gridWidth = 0;
+      this.gridHeight = 0;
+      this.graphGenerated = false;
+      this._trigger("OnObstacleMapRemoved");
     }
 
     aceSaveObstacleMapToJSON() {
@@ -786,7 +954,7 @@ export default function (parentClass) {
           this.hazardMap = new Float32Array(data.hazardMap);
         }
       } catch (e) {
-        this.error("Error loading obstacle map from JSON:", e);
+        this._error("Error loading obstacle map from JSON:", e);
       }
     }
 
@@ -798,7 +966,24 @@ export default function (parentClass) {
       this.obstacleMapSource = null;
       this.obstacleMap = null;
       this.graphGenerated = false;
-      this.autoRegenOnPathfindingChange = autoRegen !== false;
+      this.autoRegenOnReady = autoRegen !== false;
+
+      // Try to copy immediately if pathfinding behavior is already available and ready
+      if (this.pathfindingBehavior) {
+        const success = this._copyObstacleMapFromPathfinding();
+        if (success) {
+          this._trigger("OnPathfindingMapReady");
+          if (this.autoRegenOnReady) {
+            this._generateGraph();
+          }
+          return;
+        }
+      }
+
+      // Not ready yet — start polling
+      this.isWaitingForPathfindingMap = true;
+      this.waitTickCount = 0;
+      this._log("Waiting for Pathfinding obstacle map...");
     }
 
     aceSetTileState(gx, gy, state) {
@@ -967,7 +1152,7 @@ export default function (parentClass) {
       }
 
       this.nodeIndexArray = Array.from(graph.values());
-      this.log(`Generated ${nodeCount} nodes`);
+      this._log(`Generated ${nodeCount} nodes`);
     }
 
     _createNode(x, y, gx, gy) {
@@ -1084,7 +1269,7 @@ export default function (parentClass) {
         }
       }
 
-      this.log(`Created ${count} walk connections`);
+      this._log(`Created ${count} walk connections`);
     }
 
     _connectJump() {
@@ -1154,7 +1339,7 @@ export default function (parentClass) {
         }
       }
 
-      this.log(`Created ${count} jump connections`);
+      this._log(`Created ${count} jump connections`);
     }
 
     _canJump(from, to) {
@@ -1229,7 +1414,7 @@ export default function (parentClass) {
         }
       }
 
-      this.log(`Created ${count} fall connections`);
+      this._log(`Created ${count} fall connections`);
     }
 
     _canFall(from, to) {
@@ -1336,7 +1521,7 @@ export default function (parentClass) {
         }
       }
 
-      this.log(`Created ${count} coyote jump connections`);
+      this._log(`Created ${count} coyote jump connections`);
     }
 
     _connectFallThrough() {
@@ -1361,7 +1546,7 @@ export default function (parentClass) {
         }
       }
 
-      this.log(`Created ${count} fall-through connections`);
+      this._log(`Created ${count} fall-through connections`);
     }
 
     _connectSlope() {
@@ -1414,7 +1599,7 @@ export default function (parentClass) {
         }
       }
 
-      this.log(`Created ${count} slope connections`);
+      this._log(`Created ${count} slope connections`);
     }
 
     aceAddCircleHazard(x, y, radius, severity) {
@@ -1582,7 +1767,7 @@ export default function (parentClass) {
       const exitNode = this._findNearestNode(portal.exitX, portal.exitY);
 
       if (!entryNode || !exitNode) {
-        this.warn(`Portal ${portal.id} could not connect to graph`);
+        this._warn(`Portal ${portal.id} could not connect to graph`);
         return;
       }
 
@@ -1602,7 +1787,7 @@ export default function (parentClass) {
       for (const [id, portal] of portalsMap) {
         this._connectPortalToGraph(portal);
       }
-      this.log(`Connected ${portalsMap.size} portals to graph`);
+      this._log(`Connected ${portalsMap.size} portals to graph`);
     }
 
     _findNearestNode(x, y) {
@@ -1680,10 +1865,12 @@ export default function (parentClass) {
       for (const [id] of this.ladders) {
         this._connectLadderToGraph(id);
       }
-      this.log(`Connected ${this.ladders.size} ladders`);
+      this._log(`Connected ${this.ladders.size} ladders`);
     }
 
     _generateGraph() {
+      if (this.isWaitingForPathfindingMap) return;
+
       const startTime = performance.now();
       const graph = this._getNavigationGraph();
       graph.clear();
@@ -1705,7 +1892,7 @@ export default function (parentClass) {
       this._markGraphAsGenerated();
 
       const endTime = performance.now();
-      this.log(`Graph generated in ${(endTime - startTime).toFixed(2)}ms`);
+      this._log(`Graph generated in ${(endTime - startTime).toFixed(2)}ms`);
 
       this._triggerGraphGenerated();
     }
@@ -1714,11 +1901,19 @@ export default function (parentClass) {
       const startGrid = this.worldToGrid(startX, startY);
       const goalGrid = this.worldToGrid(goalX, goalY);
 
+      this._log(`Finding path from (${startGrid.gx},${startGrid.gy}) to (${goalGrid.gx},${goalGrid.gy})`);
+
       const startNode = this.getNode(startGrid.gx, startGrid.gy);
       const goalNode = this.getNode(goalGrid.gx, goalGrid.gy);
 
       if (!startNode || !goalNode) {
-        this.warn("Start or goal node not found");
+        if (!startNode) {
+          this.lastPathFailReason = "no_start_node";
+          this._warn(`Start node not found at grid (${startGrid.gx},${startGrid.gy})`);
+        } else {
+          this.lastPathFailReason = "no_goal_node";
+          this._warn(`Goal node not found at grid (${goalGrid.gx},${goalGrid.gy})`);
+        }
         return null;
       }
 
@@ -1751,7 +1946,8 @@ export default function (parentClass) {
 
       while (openSet.length > 0) {
         if (nodesExplored >= this.maxSearchNodes) {
-          this.warn("Max search nodes reached");
+          this.lastPathFailReason = "max_nodes_reached";
+          this._warn(`Max search nodes reached (${this.maxSearchNodes})`);
           return null;
         }
 
@@ -1820,7 +2016,8 @@ export default function (parentClass) {
         }
       }
 
-      this.warn("No path found");
+      this.lastPathFailReason = "no_path";
+      this._warn("No path found — all reachable nodes explored");
       return null;
     }
 
@@ -1961,6 +2158,7 @@ export default function (parentClass) {
       if (this.timeAtWaypoint > this.maxWaypointTime) {
         this.hasPath = false;
         this.timeAtWaypoint = 0;
+        this._log(`Stuck at waypoint ${this.currentWaypoint} (exceeded ${this.maxWaypointTime}s)`);
         this._trigger("OnWaypointStuck");
         return;
       }
@@ -1991,6 +2189,7 @@ export default function (parentClass) {
       }
 
       if (dist < arrivalThreshold) {
+        this._log(`Waypoint ${this.currentWaypoint} reached (action=${waypoint.action})`);
         this.currentWaypoint++;
         this.timeAtWaypoint = 0;
         this._trigger("OnWaypointReached");
@@ -2346,6 +2545,9 @@ export default function (parentClass) {
 
     /** Calculates a path from the character's current position to the target coordinates. Supports ground correction and jump-toward mode. */
     aceFindPath(targetX, targetY, correctToGround, mode) {
+      this._log(`FindPath to (${Math.round(targetX)},${Math.round(targetY)}) mode=${mode || "reach"} groundCorrect=${correctToGround}`);
+      this.lastPathFailReason = "";
+
       let startX = this.instance.x;
       let startY = this.instance.y;
 
@@ -2408,10 +2610,13 @@ export default function (parentClass) {
           );
         }
 
+        this.lastPathFailReason = "";
+        this._log(`Path found: ${path.length} waypoints, cost=${Math.round(this.lastPathCost)}`);
         this._trigger("OnPathFound");
         return true;
       }
 
+      this._log(`Path failed: ${this.lastPathFailReason}`);
       this._trigger("OnPathFailed");
       return false;
     }
@@ -2527,7 +2732,7 @@ export default function (parentClass) {
 
     /** Returns whether the pathfinding system is still initializing (waiting for obstacle map setup). */
     aceIsSettingUpPathfinding() {
-      return this.waitingForPathfinding || false;
+      return this.isWaitingForPathfindingMap || false;
     }
 
     /** Returns whether the node at the given grid coordinates is a ledge (left or right edge). */
@@ -2612,6 +2817,11 @@ export default function (parentClass) {
       )
         return "";
       return this.currentPath[index].action || "";
+    }
+
+    /** Returns the reason the last pathfinding attempt failed. Empty string if succeeded. */
+    aceGetPathFailReason() {
+      return this.lastPathFailReason;
     }
 
     /** Returns the total estimated cost of the current path (sum of distances between waypoints). */

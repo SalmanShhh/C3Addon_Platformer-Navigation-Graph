@@ -154,6 +154,15 @@ condition("Pathfinding", "OnRePathTriggered", {
   return true;
 });
 
+condition("Pathfinding", "OnWaypointStuck", {
+  listName: "On waypoint stuck",
+  displayText: "On waypoint stuck",
+  description: "Triggered when the character has been stuck at a waypoint for too long (exceeds Max Waypoint Time). The path is automatically cancelled. Use this to handle stuck situations or repath.",
+  isTrigger: true
+}, function() {
+  return true;
+});
+
 condition("Pathfinding", "IsPlatformEnabled", {
   listName: "Is platform enabled",
   displayText: "Platform behavior is enabled",
@@ -313,6 +322,13 @@ expression("Pathfinding", "NodeWorldY", {
   ]
 }, function(gx, gy) {
   return this.aceGetNodeWorldY(gx, gy);
+});
+
+expression("Pathfinding", "PathFailReason", {
+  returnType: "string",
+  description: "Get the reason the last pathfinding attempt failed. Returns: 'no_start_node', 'no_goal_node', 'max_nodes_reached', 'no_path', or empty string if path succeeded."
+}, function() {
+  return this.aceGetPathFailReason();
 });
 
 expression("Pathfinding", "PathCost", {

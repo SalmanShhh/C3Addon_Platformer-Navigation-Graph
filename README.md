@@ -133,6 +133,7 @@ npm run dev
 | On path found | Triggered when a path has been successfully calculated. Use this to start custom actions when pathfinding succeeds. |  |
 | On re-path triggered | Triggered when automatic re-pathing occurs due to the character drifting too far from the path. Use this to monitor navigation accuracy. |  |
 | On waypoint reached | Triggered each time the character reaches a waypoint along the path. Use this to play footstep sounds, particle effects, or update animations. |  |
+| On waypoint stuck | Triggered when the character has been stuck at a waypoint for too long (exceeds Max Waypoint Time). The path is automatically cancelled. Use this to handle stuck situations or repath. |  |
 
 
 ---
@@ -200,6 +201,7 @@ npm run dev
 | NodeWorldX | Get the world X position of a node at the specified grid coordinates. Returns 0 if node doesn't exist. | number | Grid X *(number)* <br>Grid Y *(number)* <br> | 
 | NodeWorldY | Get the world Y position of a node at the specified grid coordinates. Returns 0 if node doesn't exist. | number | Grid X *(number)* <br>Grid Y *(number)* <br> | 
 | PathCost | Get the total calculated cost of the current path. Returns 0 if no path is active. | number |  | 
+| PathFailReason | Get the reason the last pathfinding attempt failed. Returns: 'no_start_node', 'no_goal_node', 'max_nodes_reached', 'no_path', or empty string if path succeeded. | string |  | 
 | PathTargetGridX | Get the grid X coordinate of the path target. Returns -1 if no path is active. | number |  | 
 | PathTargetGridY | Get the grid Y coordinate of the path target. Returns -1 if no path is active. | number |  | 
 | PathTargetX | Get the world X position of the path target. Pass 'original' for raw input or 'corrected' for ground-snapped position. | number | Type *(string)* <br> | 
