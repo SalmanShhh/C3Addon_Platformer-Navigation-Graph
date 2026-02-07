@@ -514,6 +514,17 @@
               }
             }
           },
+          "SetRePathCooldown": {
+            "list-name": "Set re-path cooldown",
+            "display-text": "Set re-path cooldown to {0} seconds",
+            "description": "Set the minimum time in seconds between automatic re-path attempts. Lower values = more responsive re-pathing but more CPU usage. Default is 0.5 seconds.",
+            "params": {
+              "seconds": {
+                "name": "Seconds",
+                "desc": "Cooldown in seconds"
+              }
+            }
+          },
           "StopPathfinding": {
             "list-name": "Stop pathfinding",
             "display-text": "Stop pathfinding",
@@ -1210,6 +1221,11 @@
           "ObstacleMapSource": {
             "translated-name": "ObstacleMapSource",
             "description": "Get the source of the current obstacle map. Returns 'custom', 'pathfinding', or 'none'.",
+            "params": {}
+          },
+          "RePathCooldown": {
+            "translated-name": "RePathCooldown",
+            "description": "Get the current re-path cooldown in seconds. This is the minimum time between automatic re-path attempts.",
             "params": {}
           },
           "RePathThreshold": {

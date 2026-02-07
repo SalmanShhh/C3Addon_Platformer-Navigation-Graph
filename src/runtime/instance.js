@@ -185,6 +185,7 @@ export default function (parentClass) {
       this.jumpHoldTimer = 0;
 
       this.rePathCooldown = 0;
+      this.rePathCooldownDuration = 0.5;
       this.rePathCount = 0;
       this.rePathBestDist = Infinity;
       this.justUsedPortal = false;
@@ -313,6 +314,7 @@ export default function (parentClass) {
         ledgeRestriction: this.ledgeRestriction,
         ledgeLeniency: this.ledgeLeniency,
         rePathThreshold: this.rePathThreshold,
+        rePathCooldownDuration: this.rePathCooldownDuration,
         hazardRadius: this.hazardRadius,
         multiAgentAvoidance: this.multiAgentAvoidance,
         currentPath: this.currentPath.map((wp) => ({
@@ -383,6 +385,7 @@ export default function (parentClass) {
       this.ledgeRestriction = o.ledgeRestriction;
       this.ledgeLeniency = o.ledgeLeniency;
       this.rePathThreshold = o.rePathThreshold;
+      this.rePathCooldownDuration = o.rePathCooldownDuration || 0.5;
       this.hazardRadius = o.hazardRadius;
       this.multiAgentAvoidance = o.multiAgentAvoidance;
       this.currentWaypoint = o.currentWaypoint;
@@ -1158,7 +1161,9 @@ export default function (parentClass) {
           let canWalk = true;
           for (let w = -widthCells; w <= widthCells && canWalk; w++) {
             const checkGx = leftNode.gx + w;
-            for (let h = (w === 0 ? 1 : 0); h <= headCells; h++) {
+            // Only check headroom (h >= 1) for all cells.
+            // Feet-level (h=0) wall overlap is handled by Platform behavior at runtime.
+            for (let h = 1; h <= headCells; h++) {
               if (this.isCellBlocked(checkGx, leftNode.gy - h)) {
                 canWalk = false;
                 break;
@@ -1179,7 +1184,9 @@ export default function (parentClass) {
           let canWalk = true;
           for (let w = -widthCells; w <= widthCells && canWalk; w++) {
             const checkGx = rightNode.gx + w;
-            for (let h = (w === 0 ? 1 : 0); h <= headCells; h++) {
+            // Only check headroom (h >= 1) for all cells.
+            // Feet-level (h=0) wall overlap is handled by Platform behavior at runtime.
+            for (let h = 1; h <= headCells; h++) {
               if (this.isCellBlocked(checkGx, rightNode.gy - h)) {
                 canWalk = false;
                 break;
@@ -1314,6 +1321,11 @@ export default function (parentClass) {
           return false;
         }
 
+        // At start (i=0) and end (i=8), skip feet-level width checks — the character
+        // is on a valid node and the Platform behavior handles wall collisions at runtime.
+        // During the arc (0 < i < 8), check full width to ensure the body clears obstacles.
+        const isEndpoint = (i === 0 || i === 8);
+
         for (let h = 0; h <= headCells; h++) {
           for (let w = -widthCells; w <= widthCells; w++) {
             const checkGx = grid.gx + w;
@@ -1332,7 +1344,8 @@ export default function (parentClass) {
                 if (arcY > prevArcY) return false;
               }
             } else if (h === 0) {
-              if (cellVal === 1 || cellVal === 3) return false;
+              // Skip feet-level width check at start/end (wall overlap handled by Platform behavior)
+              if (!isEndpoint && (cellVal === 1 || cellVal === 3)) return false;
             } else {
               if (cellVal === 1 && this.platformProps.ceilingCollisionMode === "stop") {
                 return false;
@@ -1931,10 +1944,14 @@ export default function (parentClass) {
       }
 
       // Try forward path (start → goal)
+      this._lastAStarFailDetail = "";
       const forwardPath = this._runAStar(startNode, goalNode);
+      const forwardFailDetail = this._lastAStarFailDetail;
 
       // Try reverse path (goal → start), then reverse it for a start → goal path
+      this._lastAStarFailDetail = "";
       const reversePath = this._runAStar(goalNode, startNode);
+      const reverseFailDetail = this._lastAStarFailDetail;
       let reversedPath = null;
       if (reversePath) {
         reversedPath = this._reversePathDirection(reversePath);
@@ -1960,8 +1977,23 @@ export default function (parentClass) {
         return bestPath;
       }
 
-      this.lastPathFailReason = "no_path";
-      this._warn("No path found in either direction");
+      // Build informative fail reason
+      const startConns = startNode.connections.length + startNode.portalConnections.length + (startNode.ladderConnections || []).length;
+      const goalConns = goalNode.connections.length + goalNode.portalConnections.length + (goalNode.ladderConnections || []).length;
+
+      if (startConns === 0 && goalConns === 0) {
+        this.lastPathFailReason = "both_isolated";
+        this._warn(`No path: both start (${startGrid.gx},${startGrid.gy}) and goal (${goalGrid.gx},${goalGrid.gy}) have 0 connections`);
+      } else if (startConns === 0) {
+        this.lastPathFailReason = "start_isolated";
+        this._warn(`No path: start node (${startGrid.gx},${startGrid.gy}) has 0 connections`);
+      } else if (goalConns === 0) {
+        this.lastPathFailReason = "goal_isolated";
+        this._warn(`No path: goal node (${goalGrid.gx},${goalGrid.gy}) has 0 connections`);
+      } else {
+        this.lastPathFailReason = "no_path";
+        this._warn(`No path found. Forward: ${forwardFailDetail || "failed"}. Reverse: ${reverseFailDetail || "failed"}`);
+      }
       return null;
     }
 
@@ -1995,6 +2027,7 @@ export default function (parentClass) {
 
       while (openSet.length > 0) {
         if (nodesExplored >= this.maxSearchNodes) {
+          this._lastAStarFailDetail = `search_exhausted (explored ${nodesExplored}/${this.maxSearchNodes} nodes)`;
           return null;
         }
 
@@ -2063,6 +2096,12 @@ export default function (parentClass) {
         }
       }
 
+      const startConns = startNode.connections.length + startNode.portalConnections.length + (startNode.ladderConnections || []).length;
+      if (startConns === 0) {
+        this._lastAStarFailDetail = `start_isolated (node at ${startNode.gx},${startNode.gy} has 0 connections)`;
+      } else {
+        this._lastAStarFailDetail = `goal_unreachable (explored ${nodesExplored} nodes, goal at ${goalNode.gx},${goalNode.gy})`;
+      }
       return null;
     }
 
@@ -2290,6 +2329,23 @@ export default function (parentClass) {
       }
 
       if (dist < arrivalThreshold) {
+        // Before advancing, check if the next waypoint requires ground contact (jump, fall, etc.)
+        // If so, the character must land first — don't advance while still airborne
+        const nextIdx = this.currentWaypoint + 1;
+        const nextWp = nextIdx < this.currentPath.length ? this.currentPath[nextIdx] : null;
+        if (nextWp && this.platformBehavior) {
+          const nextNeedsGround = nextWp.action === "jump" || nextWp.action === "coyote_jump" ||
+            nextWp.action === "jump_toward" || nextWp.action === "fall" ||
+            nextWp.action === "fall_left" || nextWp.action === "fall_right" ||
+            nextWp.action === "fall_through";
+          try {
+            if (nextNeedsGround && !this.platformBehavior.isOnFloor) {
+              // Close to waypoint but still airborne — wait for landing before advancing
+              return;
+            }
+          } catch (e) {}
+        }
+
         this._log(`Waypoint ${this.currentWaypoint} reached (action=${waypoint.action})`);
         this.currentWaypoint++;
         this.timeAtWaypoint = 0;
@@ -2315,6 +2371,16 @@ export default function (parentClass) {
 
       if (this.autoControl) {
         let effectiveAction = waypoint.action;
+
+        // Convert jump to fall when the target is below — no need to jump, just walk off the edge
+        if (effectiveAction === "jump" && waypoint.y > this.instance.y + this.cellSize * 0.3) {
+          const xDiff = waypoint.x - this.instance.x;
+          if (Math.abs(xDiff) < this.cellSize * 0.3) {
+            effectiveAction = "fall";
+          } else {
+            effectiveAction = xDiff < 0 ? "fall_left" : "fall_right";
+          }
+        }
 
         if (
           (effectiveAction === "jump" || effectiveAction === "coyote_jump" ||
@@ -2356,7 +2422,7 @@ export default function (parentClass) {
     }
 
     _rePath() {
-      this.rePathCooldown = 0.5;
+      this.rePathCooldown = this.rePathCooldownDuration;
 
       // Track distance to goal to detect re-path loops
       const distToGoal = this.distance(
@@ -2626,9 +2692,37 @@ export default function (parentClass) {
       const xDist = Math.abs(targetX - this.instance.x);
       const isVerticalJump = xDist < this.cellSize * 0.5;
 
-      // Only push horizontally if the target has meaningful horizontal offset
-      // and we're not blocked by a wall in that direction
-      if (!isVerticalJump) {
+      // Detect if character is on a confined tile (island or walled on jump side)
+      // When confined, skip edge-approach delay — there's no reachable edge to walk to
+      let isConfined = false;
+      try {
+        const prevIdx = this.currentWaypoint - 1;
+        const prevWp = prevIdx >= 0 ? this.currentPath[prevIdx] : null;
+        if (prevWp && prevWp.node && prevWp.node.isIsland) {
+          isConfined = true;
+        } else {
+          const jumpDir = targetX > this.instance.x ? "right" : "left";
+          if (this.platformBehavior.isByWall(jumpDir)) {
+            isConfined = true;
+          }
+        }
+      } catch (e) {}
+
+      // For confined tiles with small horizontal offset, nudge toward target
+      // but don't require edge approach — jump as soon as possible
+      if (isConfined && !isVerticalJump && xDist < this.cellSize * 1.0) {
+        if (xDist >= this.cellSize * 0.3) {
+          const dir = targetX < this.instance.x ? "left" : "right";
+          try {
+            if (!this.platformBehavior.isByWall(dir)) {
+              this.platformBehavior.simulateControl(dir);
+            }
+          } catch (e) {}
+        }
+        // Skip edge-approach, fall through to jump execution below
+      } else if (!isVerticalJump) {
+        // Only push horizontally if the target has meaningful horizontal offset
+        // and we're not blocked by a wall in that direction
         const dir = targetX < this.instance.x ? "left" : "right";
         try {
           if (!this.platformBehavior.isByWall(dir)) {
@@ -2642,7 +2736,8 @@ export default function (parentClass) {
         // doesn't jump too early and fall short into the gap.
         // Only delay the jump while on the floor and the previous waypoint node
         // is a ledge in the jump direction (meaning there's an edge to walk to).
-        if (this.platformBehavior.isOnFloor) {
+        // SKIP when confined — no reachable edge to approach.
+        if (!isConfined && this.platformBehavior.isOnFloor) {
           const prevIdx = this.currentWaypoint - 1;
           const prevWp = prevIdx >= 0 ? this.currentPath[prevIdx] : null;
           if (prevWp && prevWp.node) {
@@ -2752,17 +2847,18 @@ export default function (parentClass) {
       } else if (action === "fall_right") {
         this.platformBehavior.simulateControl("right");
       } else {
+        // Straight fall — nudge toward target X for precise tile landing
+        // This is important when a subsequent jump needs the character centered on the tile
         const speed =
           this.platformBehavior.speed || Math.abs(this.estimatedVelocityX);
         const decel = this.platformProps.deceleration;
         const distToTarget = Math.abs(targetX - this.instance.x);
         const stoppingDist = (speed * speed) / (2 * decel);
 
-        if (distToTarget > stoppingDist + 4) {
-          if (targetX < this.instance.x) {
-            this.platformBehavior.simulateControl("left");
-          } else {
-            this.platformBehavior.simulateControl("right");
+        if (distToTarget > this.cellSize * 0.2) {
+          const dir = targetX < this.instance.x ? "left" : "right";
+          if (distToTarget > stoppingDist + this.cellSize * 0.1) {
+            this.platformBehavior.simulateControl(dir);
           }
         }
       }
@@ -2944,6 +3040,11 @@ export default function (parentClass) {
     /** Sets the re-path threshold in tiles (minimum deviation before automatically recalculating the path). */
     aceSetRePathThreshold(tiles) {
       this.rePathThreshold = tiles;
+    }
+
+    /** Sets the re-path cooldown duration in seconds (minimum time between re-path attempts). */
+    aceSetRePathCooldown(seconds) {
+      this.rePathCooldownDuration = Math.max(0, seconds);
     }
 
     /** Sets the hazard avoidance radius in tiles (how far to steer around hazardous areas). */
@@ -3194,6 +3295,11 @@ export default function (parentClass) {
     /** Returns the re-path threshold in tiles. */
     aceGetRePathThreshold() {
       return this.rePathThreshold;
+    }
+
+    /** Returns the re-path cooldown duration in seconds. */
+    aceGetRePathCooldown() {
+      return this.rePathCooldownDuration;
     }
 
     // ============================================================================

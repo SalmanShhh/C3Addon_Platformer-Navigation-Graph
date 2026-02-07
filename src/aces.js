@@ -584,6 +584,17 @@ action("ObstacleMap", "SetRePathThreshold", {
   this.aceSetRePathThreshold(tiles);
 });
 
+action("Pathfinding", "SetRePathCooldown", {
+  listName: "Set re-path cooldown",
+  displayText: "Set re-path cooldown to {0} seconds",
+  description: "Set the minimum time in seconds between automatic re-path attempts. Lower values = more responsive re-pathing but more CPU usage. Default is 0.5 seconds.",
+  params: [
+    { id: "seconds", name: "Seconds", desc: "Cooldown in seconds", type: "number", initialValue: "0.5" }
+  ]
+}, function(seconds) {
+  this.aceSetRePathCooldown(seconds);
+});
+
 action("ObstacleMap", "SetHazardRadius", {
   listName: "Set hazard radius",
   displayText: "Set hazard radius to {0} tiles",
@@ -805,6 +816,13 @@ expression("ObstacleMap", "RePathThreshold", {
   description: "Get the current re-path threshold in tiles. This is how far the character can drift before automatic re-pathing triggers."
 }, function() {
   return this.aceGetRePathThreshold();
+});
+
+expression("ObstacleMap", "RePathCooldown", {
+  returnType: "number",
+  description: "Get the current re-path cooldown in seconds. This is the minimum time between automatic re-path attempts."
+}, function() {
+  return this.aceGetRePathCooldown();
 });
 
 // ============================================================================

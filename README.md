@@ -98,6 +98,7 @@ npm run dev
 | Set coyote time | Set the coyote time window in seconds. The AI can jump within this window after walking off a ledge. Set to 0 to disable coyote time. | Seconds             *(number)* <br> |
 | Set ledge leniency | Set how many pixels past a platform edge the AI can walk before stopping (0 = strict stop). Increase for more natural-looking patrol movement near edges. Only used when ledge restriction is enabled. | Pixels             *(number)* <br> |
 | Set ledge restriction | Toggle ledge restriction for auto-movement. When enabled, AI characters stop at platform edges instead of walking off — useful for patrol guards in stealth games or NPCs that should stay on their platform. When disabled, AI walks freely to edges. | Enabled             *(combo)* <br> |
+| Set re-path cooldown | Set the minimum time in seconds between automatic re-path attempts. Lower values = more responsive re-pathing but more CPU usage. Default is 0.5 seconds. | Seconds             *(number)* <br> |
 | Stop pathfinding | Stop the character immediately and clear the current path. Use when you want to cancel AI navigation and regain manual control. |  |
 | Clear all portals | Remove all portals from the navigation graph. Useful when resetting the level or switching layouts. |  |
 | Remove portal | Remove a portal by its ID. The portal connection is removed from the navigation graph immediately. | Portal ID             *(number)* <br> |
@@ -179,6 +180,7 @@ npm run dev
 | HazardRadius | Get the current hazard radius setting in tiles. This affects how far hazard influence spreads. | number |  | 
 | ObstacleMapJSON | Get the current obstacle map as a JSON string. Use this to save the map to local storage or export to files. | string |  | 
 | ObstacleMapSource | Get the source of the current obstacle map. Returns 'custom', 'pathfinding', or 'none'. | string |  | 
+| RePathCooldown | Get the current re-path cooldown in seconds. This is the minimum time between automatic re-path attempts. | number |  | 
 | RePathThreshold | Get the current re-path threshold in tiles. This is how far the character can drift before automatic re-pathing triggers. | number |  | 
 | SlopeDirection | Get the slope direction of a tile at the specified grid coordinates. Returns 'left', 'right', or empty string if not a slope. | string | Grid X *(number)* <br>Grid Y *(number)* <br> | 
 | TileState | Get the state of a tile at the specified grid coordinates. Returns 'solid', 'clear', 'jump-thru', 'avoid', 'slope-left', 'slope-right', or empty string if out of bounds. | string | Grid X *(number)* <br>Grid Y *(number)* <br> | 
