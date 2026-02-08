@@ -168,6 +168,7 @@ export default function (parentClass) {
 
       this.portals = new Map();
       this.nextPortalId = 1;
+      this.lastPortalId = 0;
 
       this.ladders = new Map();
       this.nextLadderId = 1;
@@ -359,6 +360,7 @@ export default function (parentClass) {
         hazardMap: this.hazardMap ? Array.from(this.hazardMap) : null,
         hazards: Array.from(this.hazards.values()),
         portals: Array.from(this.portals.values()),
+        lastPortalId: this.lastPortalId,
         ladders: Array.from(this.ladders.values()),
         isClimbing: this.isClimbing,
         climbStartY: this.climbStartY,
@@ -446,6 +448,7 @@ export default function (parentClass) {
 
       this.portals.clear();
       this.nextPortalId = 1;
+      this.lastPortalId = o.lastPortalId || 0;
       if (o.portals) {
         for (const p of o.portals) {
           this.portals.set(p.id, p);
@@ -1745,46 +1748,27 @@ export default function (parentClass) {
       }
     }
 
-    aceSetPortal(portalId, type, entryX, entryY, exitX, exitY, cost, ignoreHazards) {
+    aceAddPortal(direction, entryX, entryY, exitX, exitY) {
       this.enablePortals = true;
       const portalsMap = this._getPortalsMap();
-      const existing = portalsMap.get(portalId);
+      const portalId = this.nextPortalId++;
+      this.lastPortalId = portalId;
 
-      if (existing) {
-        const oldEntryNode = this._findNearestNode(existing.entryX, existing.entryY);
-        if (oldEntryNode) {
-          oldEntryNode.portalConnections = oldEntryNode.portalConnections.filter(
-            c => c.portalId !== portalId
-          );
-        }
+      const portal = {
+        id: portalId,
+        entryX,
+        entryY,
+        exitX,
+        exitY,
+        type: "teleport",
+        cost: 1,
+        ignoreHazards: false,
+        twoWay: direction === "two-way",
+      };
+      portalsMap.set(portalId, portal);
 
-        existing.entryX = entryX;
-        existing.entryY = entryY;
-        existing.exitX = exitX;
-        existing.exitY = exitY;
-        existing.type = type || "teleport";
-        existing.cost = cost || 10;
-        existing.ignoreHazards = ignoreHazards || false;
-
-        if (this.graphGenerated) {
-          this._connectPortalToGraph(existing);
-        }
-      } else {
-        const portal = {
-          id: portalId,
-          entryX,
-          entryY,
-          exitX,
-          exitY,
-          type: type || "teleport",
-          cost: cost || 10,
-          ignoreHazards: ignoreHazards || false,
-        };
-        portalsMap.set(portalId, portal);
-
-        if (this.graphGenerated) {
-          this._connectPortalToGraph(portal);
-        }
+      if (this.graphGenerated) {
+        this._connectPortalToGraph(portal);
       }
     }
 
@@ -1792,12 +1776,7 @@ export default function (parentClass) {
       const portalsMap = this._getPortalsMap();
       const portal = portalsMap.get(portalId);
       if (portal) {
-        const entryNode = this._findNearestNode(portal.entryX, portal.entryY);
-        if (entryNode) {
-          entryNode.portalConnections = entryNode.portalConnections.filter(
-            c => c.portalId !== portalId
-          );
-        }
+        this._removePortalConnections(portalId, portal);
         portalsMap.delete(portalId);
       }
     }
@@ -1827,6 +1806,16 @@ export default function (parentClass) {
         portalId: portal.id,
         ignoreHazards: portal.ignoreHazards || false,
       });
+
+      if (portal.twoWay) {
+        exitNode.portalConnections.push({
+          target: entryNode,
+          action: `portal_${portal.type}`,
+          cost: portal.cost,
+          portalId: portal.id,
+          ignoreHazards: portal.ignoreHazards || false,
+        });
+      }
     }
 
     _connectAllPortals() {
@@ -1837,6 +1826,77 @@ export default function (parentClass) {
         this._connectPortalToGraph(portal);
       }
       this._log(`Connected ${portalsMap.size} portals to graph`);
+    }
+
+    aceAddPortalFromObjects(direction, entryObjectClass, exitObjectClass) {
+      const entryInst = entryObjectClass.getFirstPickedInstance();
+      const exitInst = exitObjectClass.getFirstPickedInstance();
+      if (!entryInst || !exitInst) {
+        this._warn("Add portal from objects: could not find picked instances");
+        return;
+      }
+      this.aceAddPortal(direction, entryInst.x, entryInst.y, exitInst.x, exitInst.y);
+    }
+
+    aceRemovePortalAtObject(objectClass) {
+      const inst = objectClass.getFirstPickedInstance();
+      if (!inst) return;
+      const portalsMap = this._getPortalsMap();
+      let closestId = -1;
+      let closestDist = Infinity;
+      for (const [id, portal] of portalsMap) {
+        const dist = this.distance(inst.x, inst.y, portal.entryX, portal.entryY);
+        if (dist < closestDist) {
+          closestDist = dist;
+          closestId = id;
+        }
+      }
+      if (closestId >= 0) {
+        this.aceRemovePortal(closestId);
+      }
+    }
+
+    aceSetPortalCost(portalId, cost) {
+      const portalsMap = this._getPortalsMap();
+      const portal = portalsMap.get(portalId);
+      if (!portal) return;
+      portal.cost = cost;
+      if (this.graphGenerated) {
+        this._removePortalConnections(portalId, portal);
+        this._connectPortalToGraph(portal);
+      }
+    }
+
+    aceSetPortalIgnoreHazards(portalId, ignoreHazards) {
+      const portalsMap = this._getPortalsMap();
+      const portal = portalsMap.get(portalId);
+      if (!portal) return;
+      portal.ignoreHazards = ignoreHazards;
+      if (this.graphGenerated) {
+        this._removePortalConnections(portalId, portal);
+        this._connectPortalToGraph(portal);
+      }
+    }
+
+    _removePortalConnections(portalId, portal) {
+      const entryNode = this._findNearestNode(portal.entryX, portal.entryY);
+      if (entryNode) {
+        entryNode.portalConnections = entryNode.portalConnections.filter(
+          c => c.portalId !== portalId
+        );
+      }
+      if (portal.twoWay) {
+        const exitNode = this._findNearestNode(portal.exitX, portal.exitY);
+        if (exitNode) {
+          exitNode.portalConnections = exitNode.portalConnections.filter(
+            c => c.portalId !== portalId
+          );
+        }
+      }
+    }
+
+    aceGetLastPortalId() {
+      return this.lastPortalId;
     }
 
     _findNearestNode(x, y) {

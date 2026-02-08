@@ -260,6 +260,13 @@ expression("Pathfinding", "PortalCount", {
   return this.aceGetPortalCount();
 });
 
+expression("Pathfinding", "LastPortalID", {
+  returnType: "number",
+  description: "Returns the ID of the most recently added portal. Use this right after 'Add portal' or 'Add portal from objects' to save the ID into a variable, so you can later remove or configure that specific portal."
+}, function() {
+  return this.aceGetLastPortalId();
+});
+
 expression("Pathfinding", "CurrentWaypointX", {
   returnType: "number",
   description: "Get the world X position of the current waypoint. Returns 0 if no path is active."
@@ -999,35 +1006,84 @@ expression("Hazards", "TileHazardSeverity", {
 // PORTAL ACTIONS
 // ============================================================================
 
-action("Portals", "SetPortal", {
-  listName: "Set portal",
-  displayText: "Set portal {0} ({1}) from ({2}, {3}) to ({4}, {5}) [Cost: {6}] [Ignore hazards: {7}]",
-  description: "Create or update a portal connection. Portal navigation is automatically enabled. If a portal with this ID already exists, it is updated with the new settings. If not, a new portal is created. Use for teleporters, moving platforms, or special traversal points.",
+action("Portals", "AddPortal", {
+  listName: "Add portal",
+  displayText: "Add {0} portal from ({1}, {2}) to ({3}, {4})",
+  description: "Add a portal connection between two positions. The AI can use this portal during pathfinding to teleport from the entry to the exit. Use 'one-way' for things like launch pads or trap doors that only send you in one direction. Use 'two-way' for doors, elevators, or teleporters that work in both directions. The portal is automatically assigned an ID — use the 'LastPortalID' expression right after this action to save it, so you can remove or configure the portal later. Portal navigation is automatically enabled.",
   params: [
-    { id: "portalId", name: "Portal ID", desc: "Unique ID for this portal. Use the same ID to update an existing portal.", type: "number", initialValue: "1" },
-    { id: "type", name: "Type", desc: "Portal type name (for identification)", type: "string", initialValue: "\"teleport\"" },
-    { id: "entryX", name: "Entry X", desc: "Entry world X position", type: "number", initialValue: "0" },
-    { id: "entryY", name: "Entry Y", desc: "Entry world Y position", type: "number", initialValue: "0" },
-    { id: "exitX", name: "Exit X", desc: "Exit world X position", type: "number", initialValue: "0" },
-    { id: "exitY", name: "Exit Y", desc: "Exit world Y position", type: "number", initialValue: "0" },
-    { id: "cost", name: "Cost", desc: "Movement cost (lower = preferred)", type: "number", initialValue: "1" },
-    { id: "ignoreHazards", name: "Ignore hazards", desc: "Should this portal ignore hazards when calculating cost", type: "combo", initialValue: "no",
-      items: [{ yes: "Yes" }, { no: "No" }]
-    }
+    { id: "direction", name: "Direction", desc: "One-way: entry to exit only. Two-way: works in both directions.", type: "combo", initialValue: "one-way",
+      items: [{ "one-way": "One-way" }, { "two-way": "Two-way" }]
+    },
+    { id: "entryX", name: "Entry X", desc: "Entry world X position in pixels", type: "number", initialValue: "0" },
+    { id: "entryY", name: "Entry Y", desc: "Entry world Y position in pixels", type: "number", initialValue: "0" },
+    { id: "exitX", name: "Exit X", desc: "Exit world X position in pixels", type: "number", initialValue: "0" },
+    { id: "exitY", name: "Exit Y", desc: "Exit world Y position in pixels", type: "number", initialValue: "0" }
   ]
-}, function(portalId, type, entryX, entryY, exitX, exitY, cost, ignoreHazards) {
-  this.aceSetPortal(portalId, type, entryX, entryY, exitX, exitY, cost, ignoreHazards === "yes");
+}, function(direction, entryX, entryY, exitX, exitY) {
+  this.aceAddPortal(direction, entryX, entryY, exitX, exitY);
+});
+
+action("Portals", "AddPortalFromObjects", {
+  listName: "Add portal from objects",
+  displayText: "Add {0} portal from {1} to {2}",
+  description: "Add a portal between two objects, using their current positions as the entry and exit points. The AI can then pathfind through this portal to teleport between them. Great for connecting doors, elevators, or teleporter sprites — just place the objects in your layout and use this action to link them. Use 'one-way' for things like launch pads. Use 'two-way' for doors that work both ways. Use the 'LastPortalID' expression to retrieve the assigned portal ID.",
+  params: [
+    { id: "direction", name: "Direction", desc: "One-way: entry to exit only. Two-way: works in both directions.", type: "combo", initialValue: "one-way",
+      items: [{ "one-way": "One-way" }, { "two-way": "Two-way" }]
+    },
+    { id: "entryObject", name: "Entry object", desc: "The object to use as the portal entry point (uses its X, Y position)", type: "object" },
+    { id: "exitObject", name: "Exit object", desc: "The object to use as the portal exit point (uses its X, Y position)", type: "object" }
+  ]
+}, function(direction, entryObject, exitObject) {
+  this.aceAddPortalFromObjects(direction, entryObject, exitObject);
 });
 
 action("Portals", "RemovePortal", {
-  listName: "Remove portal",
+  listName: "Remove portal by ID",
   displayText: "Remove portal with ID {0}",
-  description: "Remove a portal by its ID. The portal connection is removed from the navigation graph immediately.",
+  description: "Remove a portal by its ID. The portal connection is removed from the navigation graph immediately. Use 'LastPortalID' to get the ID right after adding a portal, or store it in a variable for later removal.",
   params: [
-    { id: "portalId", name: "Portal ID", desc: "The ID returned when the portal was added", type: "number", initialValue: "0" }
+    { id: "portalId", name: "Portal ID", desc: "The ID of the portal to remove", type: "number", initialValue: "0" }
   ]
 }, function(portalId) {
   this.aceRemovePortal(portalId);
+});
+
+action("Portals", "RemovePortalAtObject", {
+  listName: "Remove portal at object",
+  displayText: "Remove portal at {0}",
+  description: "Remove the portal whose entry point is closest to this object's position. Useful when you placed portals using objects and want to remove one without tracking its ID — just reference the same entry object. If no portal is found near the object, nothing happens.",
+  params: [
+    { id: "object", name: "Object", desc: "The object whose position to match against portal entry points", type: "object" }
+  ]
+}, function(object) {
+  this.aceRemovePortalAtObject(object);
+});
+
+action("Portals", "SetPortalCost", {
+  listName: "Set portal cost",
+  displayText: "Set portal {0} cost to {1}",
+  description: "Change how 'expensive' a portal is for the AI to use. Lower cost means the AI prefers this portal; higher cost means it will avoid it unless there's no better route. Default cost is 1. Use this to make certain portals less desirable — for example, a dangerous teleporter could have cost 50 so the AI only uses it as a last resort.",
+  params: [
+    { id: "portalId", name: "Portal ID", desc: "The ID of the portal to configure", type: "number", initialValue: "0" },
+    { id: "cost", name: "Cost", desc: "Movement cost (lower = preferred, default is 1)", type: "number", initialValue: "1" }
+  ]
+}, function(portalId, cost) {
+  this.aceSetPortalCost(portalId, cost);
+});
+
+action("Portals", "SetPortalIgnoreHazards", {
+  listName: "Set portal ignore hazards",
+  displayText: "Set portal {0} ignore hazards: {1}",
+  description: "Set whether a portal ignores nearby hazards when calculating its pathfinding cost. Normally, portals near hazard zones get a higher cost to discourage the AI from using them. Enable this to make the AI always consider this portal regardless of surrounding dangers — useful for escape portals near fire, or safe teleporters that bypass dangerous areas.",
+  params: [
+    { id: "portalId", name: "Portal ID", desc: "The ID of the portal to configure", type: "number", initialValue: "0" },
+    { id: "ignoreHazards", name: "Ignore hazards", desc: "Whether this portal should ignore hazards", type: "combo", initialValue: "no",
+      items: [{ yes: "Yes" }, { no: "No" }]
+    }
+  ]
+}, function(portalId, ignoreHazards) {
+  this.aceSetPortalIgnoreHazards(portalId, ignoreHazards === "yes");
 });
 
 action("Portals", "ClearAllPortals", {
