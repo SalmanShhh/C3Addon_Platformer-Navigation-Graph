@@ -1008,34 +1008,36 @@ expression("Hazards", "TileHazardSeverity", {
 
 action("Portals", "AddPortal", {
   listName: "Add portal",
-  displayText: "Add {0} portal from ({1}, {2}) to ({3}, {4})",
+  displayText: "Add {0} portal from ({1}, {2}) to ({3}, {4}) with cost {5}",
   description: "Add a portal connection between two positions. The AI can use this portal during pathfinding to teleport from the entry to the exit. Use 'one-way' for things like launch pads or trap doors that only send you in one direction. Use 'two-way' for doors, elevators, or teleporters that work in both directions. The portal is automatically assigned an ID — use the 'LastPortalID' expression right after this action to save it, so you can remove or configure the portal later. Portal navigation is automatically enabled.",
   params: [
-    { id: "direction", name: "Direction", desc: "One-way: entry to exit only. Two-way: works in both directions.", type: "combo", initialValue: "one-way",
-      items: [{ "one-way": "One-way" }, { "two-way": "Two-way" }]
+    { id: "direction", name: "Direction", desc: "One-way: entry to exit only. Two-way: works in both directions.", type: "combo", initialValue: "one_way",
+      items: [{ one_way: "One-way" }, { two_way: "Two-way" }]
     },
     { id: "entryX", name: "Entry X", desc: "Entry world X position in pixels", type: "number", initialValue: "0" },
     { id: "entryY", name: "Entry Y", desc: "Entry world Y position in pixels", type: "number", initialValue: "0" },
     { id: "exitX", name: "Exit X", desc: "Exit world X position in pixels", type: "number", initialValue: "0" },
-    { id: "exitY", name: "Exit Y", desc: "Exit world Y position in pixels", type: "number", initialValue: "0" }
+    { id: "exitY", name: "Exit Y", desc: "Exit world Y position in pixels", type: "number", initialValue: "0" },
+    { id: "cost", name: "Cost", desc: "How much the AI 'pays' to use this portal. Default 1 = same as walking one tile. Set lower (e.g. 0.5) to make the AI prefer this portal over walking. Set higher (e.g. 10) to make the AI avoid this portal unless there's no other route. Useful for making the AI prefer shorter walking paths over convenient but lore-unfriendly teleports, or for making certain portals feel like a last resort.", type: "number", initialValue: "1" }
   ]
-}, function(direction, entryX, entryY, exitX, exitY) {
-  this.aceAddPortal(direction, entryX, entryY, exitX, exitY);
+}, function(direction, entryX, entryY, exitX, exitY, cost) {
+  this.aceAddPortal(direction, entryX, entryY, exitX, exitY, cost);
 });
 
 action("Portals", "AddPortalFromObjects", {
   listName: "Add portal from objects",
-  displayText: "Add {0} portal from {1} to {2}",
+  displayText: "Add {0} portal from {1} to {2} with cost {3}",
   description: "Add a portal between two objects, using their current positions as the entry and exit points. The AI can then pathfind through this portal to teleport between them. Great for connecting doors, elevators, or teleporter sprites — just place the objects in your layout and use this action to link them. Use 'one-way' for things like launch pads. Use 'two-way' for doors that work both ways. Use the 'LastPortalID' expression to retrieve the assigned portal ID.",
   params: [
-    { id: "direction", name: "Direction", desc: "One-way: entry to exit only. Two-way: works in both directions.", type: "combo", initialValue: "one-way",
-      items: [{ "one-way": "One-way" }, { "two-way": "Two-way" }]
+    { id: "direction", name: "Direction", desc: "One-way: entry to exit only. Two-way: works in both directions.", type: "combo", initialValue: "one_way",
+      items: [{ one_way: "One-way" }, { two_way: "Two-way" }]
     },
     { id: "entryObject", name: "Entry object", desc: "The object to use as the portal entry point (uses its X, Y position)", type: "object" },
-    { id: "exitObject", name: "Exit object", desc: "The object to use as the portal exit point (uses its X, Y position)", type: "object" }
+    { id: "exitObject", name: "Exit object", desc: "The object to use as the portal exit point (uses its X, Y position)", type: "object" },
+    { id: "cost", name: "Cost", desc: "How much the AI 'pays' to use this portal. Default 1 = same as walking one tile. Set lower (e.g. 0.5) to make the AI prefer this portal over walking. Set higher (e.g. 10) to make the AI avoid this portal unless there's no other route. Useful for making the AI prefer shorter walking paths over convenient but lore-unfriendly teleports, or for making certain portals feel like a last resort.", type: "number", initialValue: "1" }
   ]
-}, function(direction, entryObject, exitObject) {
-  this.aceAddPortalFromObjects(direction, entryObject, exitObject);
+}, function(direction, entryObject, exitObject, cost) {
+  this.aceAddPortalFromObjects(direction, entryObject, exitObject, cost);
 });
 
 action("Portals", "RemovePortal", {
@@ -1093,6 +1095,30 @@ action("Portals", "ClearAllPortals", {
   params: []
 }, function() {
   this.aceClearAllPortals();
+});
+
+// ============================================================================
+// PORTAL CONDITIONS
+// ============================================================================
+
+condition("Portals", "OnPortalUsed", {
+  listName: "On portal used",
+  displayText: "On portal used",
+  description: "Triggered when the AI teleports through a portal during pathfinding. Use this to play teleport effects, sounds, or animations. Use the 'CurrentPortalID' expression to get which portal was used.",
+  isTrigger: true
+}, function() {
+  return true;
+});
+
+// ============================================================================
+// PORTAL EXPRESSIONS
+// ============================================================================
+
+expression("Portals", "CurrentPortalID", {
+  returnType: "number",
+  description: "Returns the ID of the portal currently being used. Only valid inside an 'On portal used' trigger. Use this to look up which portal the AI just teleported through."
+}, function() {
+  return this.aceGetCurrentPortalId();
 });
 
 // ============================================================================

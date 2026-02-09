@@ -581,15 +581,15 @@
           },
           "AddPortal": {
             "list-name": "Add portal",
-            "display-text": "Add {0} portal from ({1}, {2}) to ({3}, {4})",
+            "display-text": "Add {0} portal from ({1}, {2}) to ({3}, {4}) with cost {5}",
             "description": "Add a portal connection between two positions. The AI can use this portal during pathfinding to teleport from the entry to the exit. Use 'one-way' for things like launch pads or trap doors that only send you in one direction. Use 'two-way' for doors, elevators, or teleporters that work in both directions. The portal is automatically assigned an ID — use the 'LastPortalID' expression right after this action to save it, so you can remove or configure the portal later. Portal navigation is automatically enabled.",
             "params": {
               "direction": {
                 "name": "Direction",
                 "desc": "One-way: entry to exit only. Two-way: works in both directions.",
                 "items": {
-                  "one-way": "One-way",
-                  "two-way": "Two-way"
+                  "one_way": "One-way",
+                  "two_way": "Two-way"
                 }
               },
               "entryX": {
@@ -607,20 +607,24 @@
               "exitY": {
                 "name": "Exit Y",
                 "desc": "Exit world Y position in pixels"
+              },
+              "cost": {
+                "name": "Cost",
+                "desc": "How much the AI 'pays' to use this portal. Default 1 = same as walking one tile. Set lower (e.g. 0.5) to make the AI prefer this portal over walking. Set higher (e.g. 10) to make the AI avoid this portal unless there's no other route. Useful for making the AI prefer shorter walking paths over convenient but lore-unfriendly teleports, or for making certain portals feel like a last resort."
               }
             }
           },
           "AddPortalFromObjects": {
             "list-name": "Add portal from objects",
-            "display-text": "Add {0} portal from {1} to {2}",
+            "display-text": "Add {0} portal from {1} to {2} with cost {3}",
             "description": "Add a portal between two objects, using their current positions as the entry and exit points. The AI can then pathfind through this portal to teleport between them. Great for connecting doors, elevators, or teleporter sprites — just place the objects in your layout and use this action to link them. Use 'one-way' for things like launch pads. Use 'two-way' for doors that work both ways. Use the 'LastPortalID' expression to retrieve the assigned portal ID.",
             "params": {
               "direction": {
                 "name": "Direction",
                 "desc": "One-way: entry to exit only. Two-way: works in both directions.",
                 "items": {
-                  "one-way": "One-way",
-                  "two-way": "Two-way"
+                  "one_way": "One-way",
+                  "two_way": "Two-way"
                 }
               },
               "entryObject": {
@@ -630,6 +634,10 @@
               "exitObject": {
                 "name": "Exit object",
                 "desc": "The object to use as the portal exit point (uses its X, Y position)"
+              },
+              "cost": {
+                "name": "Cost",
+                "desc": "How much the AI 'pays' to use this portal. Default 1 = same as walking one tile. Set lower (e.g. 0.5) to make the AI prefer this portal over walking. Set higher (e.g. 10) to make the AI avoid this portal unless there's no other route. Useful for making the AI prefer shorter walking paths over convenient but lore-unfriendly teleports, or for making certain portals feel like a last resort."
               }
             }
           },
@@ -933,6 +941,12 @@
             "list-name": "On waypoint stuck",
             "display-text": "On waypoint stuck",
             "description": "Triggered when the character has been stuck at a waypoint for too long (exceeds Max Waypoint Time). The path is automatically cancelled. Use this to handle stuck situations or repath.",
+            "params": {}
+          },
+          "OnPortalUsed": {
+            "list-name": "On portal used",
+            "display-text": "On portal used",
+            "description": "Triggered when the AI teleports through a portal during pathfinding. Use this to play teleport effects, sounds, or animations. Use the 'CurrentPortalID' expression to get which portal was used.",
             "params": {}
           }
         },
@@ -1602,6 +1616,11 @@
                 "desc": "Waypoint index (0-based)"
               }
             }
+          },
+          "CurrentPortalID": {
+            "translated-name": "CurrentPortalID",
+            "description": "Returns the ID of the portal currently being used. Only valid inside an 'On portal used' trigger. Use this to look up which portal the AI just teleported through.",
+            "params": {}
           }
         }
       }
