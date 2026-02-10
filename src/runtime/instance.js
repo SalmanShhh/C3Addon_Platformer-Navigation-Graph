@@ -82,7 +82,7 @@ export default function (parentClass) {
       this.enableDebug = properties[0];
       this.cellSize = properties[1];
       this.maxSearchNodes = properties[2];
-      this.setupPreset = properties[3];
+      this.maxFallDistanceSetting = properties[3];
       this.autoControl = properties[4];
       this.graphMode = properties[5];
       const strategyMap = ["balanced", "shortest", "safest", "simplest"];
@@ -170,14 +170,6 @@ export default function (parentClass) {
       this.nextPortalId = 1;
       this.lastPortalId = 0;
 
-      this.ladders = new Map();
-      this.nextLadderId = 1;
-      this.isClimbing = false;
-      this.climbStartY = 0;
-      this.climbTargetY = 0;
-      this.climbSpeed = 0;
-      this.currentLadderId = 0;
-
       this.coyoteTimer = 0;
       this.wasOnFloor = false;
       this.coyoteJumpPending = false;
@@ -188,6 +180,7 @@ export default function (parentClass) {
       this.doubleJumpPhase = 0;
       this.isHoldingJump = false;
       this.jumpHoldTimer = 0;
+      this.jumpStartY = 0;
 
       this.currentPathStrict = false;
       this.departureCommitted = false;
@@ -198,6 +191,22 @@ export default function (parentClass) {
       this.rePathBestDist = Infinity;
       this.justUsedPortal = false;
       this.currentPortalId = 0;
+
+      // Portal execution state
+      this.portalState = "none"; // "none" | "paused" | "traversing"
+      this.portalPaused = false;
+      this.portalTraverseProgress = 0;
+      this.portalTraverseStartX = 0;
+      this.portalTraverseStartY = 0;
+      this.portalTraverseTargetX = 0;
+      this.portalTraverseTargetY = 0;
+      this.portalTraverseSpeed = 0;
+      this.portalCurrentWaypoint = null;
+      this.platformWasEnabled = true;
+      this._inPortalEntryTrigger = false;
+      this.portalPauseTimer = 0;
+      this.portalPauseWarned = false;
+      this.elevatorGroups = new Map();
 
       this.multiAgentAvoidance = false;
 
@@ -235,7 +244,7 @@ export default function (parentClass) {
         this.pathfindingBehavior = this._getPathfindingBehavior();
         if (this.platformBehavior) {
           this._readPlatformProperties();
-          if (this.setupPreset !== "custom") this._applyPreset();
+          this._calculateJumpParametersFromPlatform();
         }
       }
 
@@ -244,7 +253,7 @@ export default function (parentClass) {
         this.platformBehavior = this._getPlatformBehavior();
         if (this.platformBehavior) {
             this._readPlatformProperties();
-            if (this.setupPreset !== "custom") this._applyPreset();
+            this._calculateJumpParametersFromPlatform();
         }
     }
 
@@ -300,7 +309,10 @@ export default function (parentClass) {
       this.navGraph.clear();
       this.portals.clear();
       this.hazards.clear();
-      if (this.ladders) this.ladders.clear();
+      if (this.portalState === "traversing" && this.platformBehavior) {
+        this.platformBehavior.isEnabled = this.platformWasEnabled;
+      }
+      this.portalState = "none";
     }
 
     _saveToJson() {
@@ -311,7 +323,7 @@ export default function (parentClass) {
         characterHeight: this.characterHeight,
         characterWidth: this.characterWidth,
         maxSearchNodes: this.maxSearchNodes,
-        setupPreset: this.setupPreset,
+        maxFallDistanceSetting: this.maxFallDistanceSetting,
         maxJumpHeight: this.maxJumpHeight,
         maxJumpDistance: this.maxJumpDistance,
         maxFallDistance: this.maxFallDistance,
@@ -335,6 +347,8 @@ export default function (parentClass) {
           y: wp.y,
           action: wp.action,
           portalId: wp.portalId || null,
+          speed: wp.speed || 0,
+          peakHeight: wp.peakHeight || 0,
           gx: wp.node ? wp.node.gx : -1,
           gy: wp.node ? wp.node.gy : -1,
         })),
@@ -363,18 +377,23 @@ export default function (parentClass) {
         hazards: Array.from(this.hazards.values()),
         portals: Array.from(this.portals.values()),
         lastPortalId: this.lastPortalId,
-        ladders: Array.from(this.ladders.values()),
-        isClimbing: this.isClimbing,
-        climbStartY: this.climbStartY,
-        climbTargetY: this.climbTargetY,
-        climbSpeed: this.climbSpeed,
-        currentLadderId: this.currentLadderId,
+        portalState: this.portalState,
+        portalTraverseProgress: this.portalTraverseProgress,
+        portalTraverseStartX: this.portalTraverseStartX,
+        portalTraverseStartY: this.portalTraverseStartY,
+        portalTraverseTargetX: this.portalTraverseTargetX,
+        portalTraverseTargetY: this.portalTraverseTargetY,
+        portalTraverseSpeed: this.portalTraverseSpeed,
+        platformWasEnabled: this.platformWasEnabled,
+        currentPortalId: this.currentPortalId,
+        elevatorGroups: Object.fromEntries(this.elevatorGroups),
         coyoteTimer: this.coyoteTimer,
         wasOnFloor: this.wasOnFloor,
         coyoteJumpPending: this.coyoteJumpPending,
         doubleJumpPhase: this.doubleJumpPhase,
         isHoldingJump: this.isHoldingJump,
         jumpHoldTimer: this.jumpHoldTimer,
+        jumpStartY: this.jumpStartY,
       };
     }
 
@@ -386,7 +405,7 @@ export default function (parentClass) {
       this.characterHeight = o.characterHeight;
       this.characterWidth = o.characterWidth || 32;
       this.maxSearchNodes = o.maxSearchNodes;
-      this.setupPreset = o.setupPreset;
+      this.maxFallDistanceSetting = o.maxFallDistanceSetting || 0;
       this.maxJumpHeight = o.maxJumpHeight;
       this.maxJumpDistance = o.maxJumpDistance;
       this.maxFallDistance = o.maxFallDistance;
@@ -427,17 +446,13 @@ export default function (parentClass) {
       this.gridHeight = o.gridHeight;
       this.slopeMap = o.slopeMap ? new Uint8Array(o.slopeMap) : null;
       this.hazardMap = o.hazardMap ? new Float32Array(o.hazardMap) : null;
-      this.isClimbing = o.isClimbing;
-      this.climbStartY = o.climbStartY;
-      this.climbTargetY = o.climbTargetY;
-      this.climbSpeed = o.climbSpeed;
-      this.currentLadderId = o.currentLadderId;
       this.coyoteTimer = o.coyoteTimer;
       this.wasOnFloor = o.wasOnFloor;
       this.coyoteJumpPending = o.coyoteJumpPending;
       this.doubleJumpPhase = o.doubleJumpPhase;
       this.isHoldingJump = o.isHoldingJump;
       this.jumpHoldTimer = o.jumpHoldTimer;
+      this.jumpStartY = o.jumpStartY || 0;
 
       this.hazards.clear();
       this.nextHazardId = 1;
@@ -458,13 +473,28 @@ export default function (parentClass) {
         }
       }
 
-      this.ladders.clear();
-      this.nextLadderId = 1;
-      if (o.ladders) {
-        for (const l of o.ladders) {
-          this.ladders.set(l.id, l);
-          this.nextLadderId = Math.max(this.nextLadderId, l.id + 1);
+      // Restore portal execution state
+      this.portalState = o.portalState || "none";
+      this.portalTraverseProgress = o.portalTraverseProgress || 0;
+      this.portalTraverseStartX = o.portalTraverseStartX || 0;
+      this.portalTraverseStartY = o.portalTraverseStartY || 0;
+      this.portalTraverseTargetX = o.portalTraverseTargetX || 0;
+      this.portalTraverseTargetY = o.portalTraverseTargetY || 0;
+      this.portalTraverseSpeed = o.portalTraverseSpeed || 0;
+      this.platformWasEnabled = o.platformWasEnabled !== undefined ? o.platformWasEnabled : true;
+      this.currentPortalId = o.currentPortalId || 0;
+
+      // Restore elevator groups
+      this.elevatorGroups.clear();
+      if (o.elevatorGroups) {
+        for (const [key, val] of Object.entries(o.elevatorGroups)) {
+          this.elevatorGroups.set(key, val);
         }
+      }
+
+      // Re-disable Platform if traversing
+      if (this.portalState === "traversing" && this.platformBehavior) {
+        this.platformBehavior.isEnabled = false;
       }
 
       if (this.graphGenerated && this.obstacleMap) {
@@ -480,6 +510,8 @@ export default function (parentClass) {
             y: wp.y,
             action: wp.action,
             portalId: wp.portalId || null,
+            speed: wp.speed || 0,
+            peakHeight: wp.peakHeight || 0,
             node: node,
           };
         });
@@ -514,10 +546,18 @@ export default function (parentClass) {
       }, {
         title: prefix + " - Movement",
         properties: [
-          { name: "$climbing", value: this.isClimbing },
           { name: "$coyoteTimer", value: Math.round(this.coyoteTimer * 1000) / 1000 },
           { name: "$velocityX", value: Math.round(this.estimatedVelocityX) },
           { name: "$waypointTime", value: Math.round(this.timeAtWaypoint * 1000) / 1000 },
+        ]
+      }, {
+        title: prefix + " - Portals",
+        properties: [
+          { name: "$portalCount", value: this._getPortalsMap().size },
+          { name: "$portalState", value: this.portalState },
+          { name: "$currentPortalId", value: this.currentPortalId },
+          { name: "$traverseProgress", value: Math.round(this.portalTraverseProgress * 100) + "%" },
+          { name: "$elevatorGroups", value: this.elevatorGroups.size },
         ]
       }, {
         title: prefix + " - Settings",
@@ -592,24 +632,6 @@ export default function (parentClass) {
       }
     }
 
-    _applyPreset() {
-      if (this.setupPreset === "auto") {
-        this._calculateJumpParametersFromPlatform();
-      } else if (this.setupPreset === "beginner") {
-        this.maxJumpHeight = 64;
-        this.maxJumpDistance = 96;
-        this.maxFallDistance = 128;
-      } else if (this.setupPreset === "intermediate") {
-        this.maxJumpHeight = 96;
-        this.maxJumpDistance = 128;
-        this.maxFallDistance = 192;
-      } else if (this.setupPreset === "advanced") {
-        this.maxJumpHeight = 128;
-        this.maxJumpDistance = 160;
-        this.maxFallDistance = 256;
-      }
-    }
-
     _calculateJumpParametersFromPlatform() {
       const {
         jumpStrength,
@@ -644,7 +666,22 @@ export default function (parentClass) {
         this.maxJumpDistance = maxSpeed * totalDoubleTime * 0.8;
       }
 
-      this.maxFallDistance = this.platformProps.maxFallSpeed * 2;
+      // Apply maxFallDistance based on property setting
+      if (this.maxFallDistanceSetting === 0) {
+        // Auto: use physics-based fall distance — the distance to reach terminal
+        // velocity gives a good baseline, then ensure it's at least 2x jump height.
+        // v²/(2g) = distance to reach terminal velocity; we use v²/g for margin.
+        const physicalFallDist = (this.platformProps.maxFallSpeed ** 2) / this.platformProps.gravity;
+        this.maxFallDistance = Math.max(this.maxJumpHeight * 2, this.cellSize * 6, physicalFallDist);
+      } else if (this.maxFallDistanceSetting < 0) {
+        // Unlimited
+        this.maxFallDistance = 9999;
+      } else {
+        // Custom value
+        this.maxFallDistance = this.maxFallDistanceSetting;
+      }
+
+      this._log(`Jump params: maxJumpHeight=${Math.round(this.maxJumpHeight)}px, maxJumpDistance=${Math.round(this.maxJumpDistance)}px, maxFallDistance=${Math.round(this.maxFallDistance)}px (${Math.ceil(this.maxFallDistance / this.cellSize)} tiles), maxFallSpeed=${this.platformProps.maxFallSpeed}, gravity=${this.platformProps.gravity}`);
     }
 
     _log(...args) {
@@ -1131,7 +1168,6 @@ export default function (parentClass) {
         walkable: true,
         connections: [],
         portalConnections: [],
-        ladderConnections: [],
         hazardMultiplier,
         isLeftLedge,
         isRightLedge,
@@ -1145,6 +1181,8 @@ export default function (parentClass) {
         parent: null,
         parentAction: null,
         parentPortalId: null,
+        parentSpeed: null,
+        parentPeakHeight: null,
       };
     }
 
@@ -1224,7 +1262,13 @@ export default function (parentClass) {
       const maxHeightCells = Math.ceil(this.maxJumpHeight / this.cellSize);
       const maxFallCells = Math.ceil(this.maxFallDistance / this.cellSize);
       const maxDistCells = Math.ceil(this.maxJumpDistance / this.cellSize);
+      // Cap downward range: a jump arc goes UP peakHeight then descends back.
+      // From launch, you land at most ~maxHeightCells below via the arc itself.
+      // Targets further below should use fall connections from ledge nodes.
+      // Old formula (maxHeightCells*2+2) allowed 10-tile shortcuts when maxHeightCells=4.
+      const maxDownCells = Math.min(maxFallCells, maxHeightCells + 2);
       let count = 0;
+      let upCount = 0, downCount = 0, levelCount = 0;
       const graph = this._getNavigationGraph();
 
       for (const [key, node] of graph) {
@@ -1233,7 +1277,7 @@ export default function (parentClass) {
             // When dist=0 (vertical jump), only check once (dir=1) to avoid duplicates
             if (dist === 0 && dir === -1) continue;
 
-            for (let height = -maxFallCells; height <= maxHeightCells; height++) {
+            for (let height = -maxDownCells; height <= maxHeightCells; height++) {
               // dist=0 with height<=0 is not a valid jump (same position or falling)
               if (dist === 0 && height <= 0) continue;
 
@@ -1241,14 +1285,19 @@ export default function (parentClass) {
               const targetGy = node.gy - height;
               const target = this.getNode(targetGx, targetGy);
 
-              if (target && this._canJump(node, target)) {
+              const peakHeight = target ? this._canJump(node, target) : 0;
+              if (peakHeight > 0) {
                 const distance = this.distance(node.x, node.y, target.x, target.y);
                 node.connections.push({
                   target,
                   action: "jump",
                   cost: distance * this.JUMP_COST,
+                  peakHeight,
                 });
                 count++;
+                if (height > 0) upCount++;
+                else if (height < 0) downCount++;
+                else levelCount++;
               }
             }
           }
@@ -1267,13 +1316,14 @@ export default function (parentClass) {
           for (const dir of [-1, 1]) {
             for (let dist = 0; dist <= doubleMaxDistCells; dist++) {
               if (dist === 0 && dir === -1) continue;
-              for (let height = -maxFallCells; height <= doubleMaxHeightCells; height++) {
+              for (let height = -maxDownCells; height <= doubleMaxHeightCells; height++) {
                 if (dist === 0 && height <= 0) continue;
                 const targetGx = node.gx + dir * dist;
                 const targetGy = node.gy - height;
                 const target = this.getNode(targetGx, targetGy);
 
-                if (target && this._canJump(node, target)) {
+                const dblPeakHeight = target ? this._canJump(node, target) : 0;
+                if (dblPeakHeight > 0) {
                   if (height > maxHeightCells || dist > maxDistCells) {
                     const distance = this.distance(
                       node.x,
@@ -1286,6 +1336,7 @@ export default function (parentClass) {
                       action: "jump",
                       cost: distance * this.JUMP_COST * 1.3,
                       requiresDoubleJump: true,
+                      peakHeight: dblPeakHeight,
                     });
                     count++;
                   }
@@ -1296,19 +1347,22 @@ export default function (parentClass) {
         }
       }
 
-      this._log(`Created ${count} jump connections`);
+      this._log(`Created ${count} jump connections (up=${upCount}, down=${downCount}, level=${levelCount}, maxDownCells=${maxDownCells}, maxHeightCells=${maxHeightCells}, maxDistCells=${maxDistCells})`);
     }
 
     _getWidthCells() {
       return Math.ceil(this.characterWidth / this.cellSize / 2);
     }
 
+    // Returns the minimum viable peak height in pixels (>0) if jump is possible,
+    // or 0 if the jump is blocked. The peak height is stored in connections and
+    // used by the movement code to release the jump button at the right time.
     _canJump(from, to) {
       const dx = to.x - from.x;
       const dy = to.y - from.y;
 
-      if (Math.abs(dx) > this.maxJumpDistance) return false;
-      if (-dy > this.maxJumpHeight) return false;
+      if (Math.abs(dx) > this.maxJumpDistance) return 0;
+      if (-dy > this.maxJumpHeight) return 0;
 
       const headCells = Math.max(0, Math.ceil(this.characterHeight / this.cellSize) - 1);
 
@@ -1320,19 +1374,19 @@ export default function (parentClass) {
         for (let gy = minGy; gy <= maxGy; gy++) {
           for (let h = 0; h <= headCells; h++) {
             const checkGy = gy - h;
-            if (checkGy < 0) return false;
+            if (checkGy < 0) continue; // Above grid — no ceiling to hit
             const index = checkGy * this.gridWidth + from.gx;
-            if (from.gx < 0 || from.gx >= this.gridWidth) return false;
+            if (from.gx < 0 || from.gx >= this.gridWidth) return 0;
             const cellVal = this.obstacleMap ? this.obstacleMap[index] : 0;
             if (h === 0) {
-              if (cellVal === 1 || cellVal === 3) return false;
+              if (cellVal === 1 || cellVal === 3) return 0;
             } else {
-              if (cellVal === 1 && this.platformProps.ceilingCollisionMode === "stop") return false;
-              if (cellVal === 3) return false;
+              if (cellVal === 1 && this.platformProps.ceilingCollisionMode === "stop") return 0;
+              if (cellVal === 3) return 0;
             }
           }
         }
-        return true;
+        return this.maxJumpHeight; // Vertical jumps use full sustain
       }
 
       // Horizontal jump: use Bezier arc check
@@ -1356,41 +1410,42 @@ export default function (parentClass) {
           grid.gy < 0 ||
           grid.gy >= this.gridHeight
         ) {
-          return false;
+          return 0;
         }
 
         // Only check center column — Platform behavior handles wall collisions at runtime.
         // This allows jumps through 1-tile-wide gaps and past adjacent walls.
         for (let h = 0; h <= headCells; h++) {
           const checkGy = grid.gy - h;
-          if (checkGy < 0) return false;
+          if (checkGy < 0) return 0;
           const index = checkGy * this.gridWidth + grid.gx;
           const cellVal = this.obstacleMap ? this.obstacleMap[index] : 0;
 
           if (h === 0) {
-            if (cellVal === 1) return false;
-            if (cellVal === 3) return false;
+            if (cellVal === 1) return 0;
+            if (cellVal === 3) return 0;
             if (cellVal === 2) {
               const prevT = Math.max(0, (i - 1) / 8);
               const prevOneMinusT = 1 - prevT;
               const prevArcY = from.y * prevOneMinusT * prevOneMinusT + 2 * controlY * prevT * prevOneMinusT + to.y * prevT * prevT;
-              if (arcY > prevArcY) return false;
+              if (arcY > prevArcY) return 0;
             }
           } else {
             if (cellVal === 1 && this.platformProps.ceilingCollisionMode === "stop") {
-              return false;
+              return 0;
             }
-            if (cellVal === 3) return false;
+            if (cellVal === 3) return 0;
           }
         }
       }
 
-      return true;
+      return actualPeakHeight;
     }
 
     _connectFall() {
       const maxFallCells = Math.ceil(this.maxFallDistance / this.cellSize);
       let count = 0;
+      let diagCount = 0;
       const graph = this._getNavigationGraph();
 
       for (const [key, node] of graph) {
@@ -1410,14 +1465,14 @@ export default function (parentClass) {
         }
 
         if (node.isLeftLedge) {
-          this._addDiagonalFall(node, -1, maxFallCells);
+          diagCount += this._addDiagonalFall(node, -1, maxFallCells);
         }
         if (node.isRightLedge) {
-          this._addDiagonalFall(node, 1, maxFallCells);
+          diagCount += this._addDiagonalFall(node, 1, maxFallCells);
         }
       }
 
-      this._log(`Created ${count} fall connections`);
+      this._log(`Created ${count} straight fall + ${diagCount} diagonal fall connections (maxFallCells=${maxFallCells})`);
     }
 
     _canFall(from, to) {
@@ -1438,6 +1493,7 @@ export default function (parentClass) {
     _addDiagonalFall(node, direction, maxFallCells) {
       const gravity = this.platformProps.gravity;
       const maxSpeed = this.platformProps.maxSpeed;
+      let added = 0;
 
       for (let fall = 1; fall <= maxFallCells; fall++) {
         const fallDist = fall * this.cellSize;
@@ -1457,10 +1513,12 @@ export default function (parentClass) {
               action: direction < 0 ? "fall_left" : "fall_right",
               cost: baseCost * this._fallLandingCostMultiplier(target),
             });
+            added++;
             break;
           }
         }
       }
+      return added;
     }
 
     _canDiagonalFall(from, to, direction) {
@@ -1753,7 +1811,7 @@ export default function (parentClass) {
       }
     }
 
-    aceAddPortal(direction, entryX, entryY, exitX, exitY, cost) {
+    aceAddPortal(direction, entryX, entryY, exitX, exitY, portalType, cost, speed) {
       this.enablePortals = true;
       const portalsMap = this._getPortalsMap();
       const portalId = this.nextPortalId++;
@@ -1765,8 +1823,9 @@ export default function (parentClass) {
         entryY,
         exitX,
         exitY,
-        type: "teleport",
+        type: portalType || "instant",
         cost: (cost != null && cost > 0) ? cost : 1,
+        speed: speed || 0,
         ignoreHazards: false,
         twoWay: direction === "two_way",
       };
@@ -1775,6 +1834,14 @@ export default function (parentClass) {
       if (this.graphGenerated) {
         this._connectPortalToGraph(portal);
       }
+    }
+
+    aceAddInstantPortal(direction, entryX, entryY, exitX, exitY, cost) {
+      this.aceAddPortal(direction, entryX, entryY, exitX, exitY, "instant", cost, 0);
+    }
+
+    aceAddGradualPortal(direction, entryX, entryY, exitX, exitY, cost, speed) {
+      this.aceAddPortal(direction, entryX, entryY, exitX, exitY, "gradual", cost, speed);
     }
 
     aceRemovePortal(portalId) {
@@ -1808,11 +1875,18 @@ export default function (parentClass) {
         this._warn(`Portal ${portal.id}: entry and exit resolved to the same node (${entryNode.gx},${entryNode.gy}). Make sure entry and exit positions are on different platforms/nodes.`);
       }
 
+      let portalCost = portal.cost;
+      if (portal.type === "gradual" && portal.speed > 0 && portalCost === 1) {
+        const dist = Math.sqrt((portal.exitX - portal.entryX) ** 2 + (portal.exitY - portal.entryY) ** 2);
+        portalCost = (dist / portal.speed) * this.WALK_COST;
+      }
+
       entryNode.portalConnections.push({
         target: exitNode,
         action: `portal_${portal.type}`,
-        cost: portal.cost,
+        cost: portalCost,
         portalId: portal.id,
+        speed: portal.speed || 0,
         ignoreHazards: portal.ignoreHazards || false,
       });
 
@@ -1820,8 +1894,9 @@ export default function (parentClass) {
         exitNode.portalConnections.push({
           target: entryNode,
           action: `portal_${portal.type}`,
-          cost: portal.cost,
+          cost: portalCost,
           portalId: portal.id,
+          speed: portal.speed || 0,
           ignoreHazards: portal.ignoreHazards || false,
         });
       }
@@ -1836,14 +1911,22 @@ export default function (parentClass) {
       }
     }
 
-    aceAddPortalFromObjects(direction, entryObjectClass, exitObjectClass, cost) {
+    aceAddPortalFromObjects(direction, entryObjectClass, exitObjectClass, portalType, cost, speed) {
       const entryInst = entryObjectClass.getFirstPickedInstance();
       const exitInst = exitObjectClass.getFirstPickedInstance();
       if (!entryInst || !exitInst) {
         this._warn("Add portal from objects: could not find picked instances");
         return;
       }
-      this.aceAddPortal(direction, entryInst.x, entryInst.y, exitInst.x, exitInst.y, cost);
+      this.aceAddPortal(direction, entryInst.x, entryInst.y, exitInst.x, exitInst.y, portalType, cost, speed);
+    }
+
+    aceAddInstantPortalFromObjects(direction, entryObjectClass, exitObjectClass, cost) {
+      this.aceAddPortalFromObjects(direction, entryObjectClass, exitObjectClass, "instant", cost, 0);
+    }
+
+    aceAddGradualPortalFromObjects(direction, entryObjectClass, exitObjectClass, cost, speed) {
+      this.aceAddPortalFromObjects(direction, entryObjectClass, exitObjectClass, "gradual", cost, speed);
     }
 
     aceRemovePortalAtObject(objectClass) {
@@ -1886,6 +1969,44 @@ export default function (parentClass) {
         this._removePortalConnections(portalId, portal);
         this._connectPortalToGraph(portal);
       }
+    }
+
+    aceSetPortalSpeed(portalId, speed) {
+      const portalsMap = this._getPortalsMap();
+      const portal = portalsMap.get(portalId);
+      if (!portal) return;
+      portal.speed = speed;
+      if (this.graphGenerated) {
+        this._removePortalConnections(portalId, portal);
+        this._connectPortalToGraph(portal);
+      }
+    }
+
+    aceAddElevatorStop(groupId, x, y, speed) {
+      if (!this.elevatorGroups.has(groupId)) {
+        this.elevatorGroups.set(groupId, []);
+      }
+      const stops = this.elevatorGroups.get(groupId);
+      const newStop = { x, y, speed };
+
+      // Create two-way gradual portals between this stop and all existing stops
+      for (const stop of stops) {
+        const dist = Math.sqrt((x - stop.x) ** 2 + (y - stop.y) ** 2);
+        const portalSpeed = speed || stop.speed || 100;
+        const cost = dist > 0 ? (dist / portalSpeed) * this.WALK_COST : 1;
+        this.aceAddPortal("two_way", stop.x, stop.y, x, y, "gradual", cost, portalSpeed);
+      }
+
+      stops.push(newStop);
+    }
+
+    aceAddElevatorStopFromObject(groupId, objectClass, speed) {
+      const inst = objectClass.getFirstPickedInstance();
+      if (!inst) {
+        this._warn("Add elevator stop from object: could not find picked instance");
+        return;
+      }
+      this.aceAddElevatorStop(groupId, inst.x, inst.y, speed);
     }
 
     _removePortalConnections(portalId, portal) {
@@ -1935,68 +2056,6 @@ export default function (parentClass) {
       return null;
     }
 
-    aceAddLadder(bottomX, bottomY, topX, topY, climbSpeed) {
-      const ladderId = this.nextLadderId++;
-      this.ladders.set(ladderId, {
-        id: ladderId,
-        bottomX,
-        bottomY,
-        topX,
-        topY,
-        climbSpeed,
-      });
-
-      if (this.graphGenerated) {
-        this._connectLadderToGraph(ladderId);
-      }
-      return ladderId;
-    }
-
-    aceRemoveLadder(ladderId) {
-      this.ladders.delete(ladderId);
-    }
-
-    aceSetLadderClimbSpeed(ladderId, speed) {
-      const ladder = this.ladders.get(ladderId);
-      if (ladder) ladder.climbSpeed = speed;
-    }
-
-    _connectLadderToGraph(ladderId) {
-      const ladder = this.ladders.get(ladderId);
-      if (!ladder) return;
-
-      const bottomNode = this._findNearestNode(ladder.bottomX, ladder.bottomY);
-      const topNode = this._findNearestNode(ladder.topX, ladder.topY);
-
-      if (!bottomNode || !topNode) return;
-
-      const height = Math.abs(ladder.topY - ladder.bottomY);
-      const cost = (height / ladder.climbSpeed) * this.WALK_COST;
-
-      if (!bottomNode.ladderConnections) bottomNode.ladderConnections = [];
-      if (!topNode.ladderConnections) topNode.ladderConnections = [];
-
-      bottomNode.ladderConnections.push({
-        target: topNode,
-        action: "ladder_climb",
-        cost,
-        ladderId,
-      });
-      topNode.ladderConnections.push({
-        target: bottomNode,
-        action: "ladder_climb",
-        cost,
-        ladderId,
-      });
-    }
-
-    _connectAllLadders() {
-      for (const [id] of this.ladders) {
-        this._connectLadderToGraph(id);
-      }
-      this._log(`Connected ${this.ladders.size} ladders`);
-    }
-
     _generateGraph() {
       if (this.isWaitingForPathfindingMap) return;
 
@@ -2015,7 +2074,6 @@ export default function (parentClass) {
       this._connectFallThrough();
       this._connectSlope();
       this._connectAllPortals();
-      this._connectAllLadders();
       this._updateHazardCosts();
 
       this._markGraphAsGenerated();
@@ -2078,6 +2136,16 @@ export default function (parentClass) {
         return null;
       }
 
+      // Log start/goal node connection summary
+      const _connSummary = (n) => {
+        const conns = [...n.connections, ...n.portalConnections];
+        const actions = {};
+        for (const c of conns) { actions[c.action] = (actions[c.action] || 0) + 1; }
+        return Object.entries(actions).map(([a,c]) => `${a}:${c}`).join(', ');
+      };
+      this._log(`Start node (${startNode.gx},${startNode.gy}): ${startNode.connections.length + startNode.portalConnections.length} connections [${_connSummary(startNode)}]`);
+      this._log(`Goal node (${goalNode.gx},${goalNode.gy}): ${goalNode.connections.length + goalNode.portalConnections.length} connections [${_connSummary(goalNode)}]`);
+
       // Try forward path (start → goal)
       this._lastAStarFailDetail = "";
       const forwardPath = this._runAStar(startNode, goalNode);
@@ -2092,15 +2160,29 @@ export default function (parentClass) {
         reversedPath = this._reversePathDirection(reversePath);
       }
 
+      // Validate paths — reject any with broken connections
+      const validForward = this._validatePath(forwardPath);
+      const validReversed = this._validatePath(reversedPath);
+
+      if (!validForward && forwardPath) this._log(`Forward path REJECTED by validation`);
+      if (!validReversed && reversedPath) this._log(`Reversed path REJECTED by validation`);
+      if (!validForward && !forwardPath) this._log(`Forward A* found no path: ${forwardFailDetail}`);
+      if (!validReversed && !reversePath) this._log(`Reverse A* found no path: ${reverseFailDetail}`);
+
       // Combine forward and reverse paths for the best result
       let bestPath = null;
-      if (forwardPath && reversedPath) {
-        bestPath = this._combinePaths(forwardPath, reversedPath);
-      } else if (forwardPath) {
-        bestPath = forwardPath;
-      } else if (reversedPath) {
-        bestPath = reversedPath;
+      if (validForward && validReversed) {
+        bestPath = this._combinePaths(validForward, validReversed);
+      } else if (validForward) {
+        this._log(`Using forward path only (no valid reverse)`);
+        bestPath = validForward;
+      } else if (validReversed) {
+        this._log(`Using reversed path only (no valid forward)`);
+        bestPath = validReversed;
       }
+
+      // Validate the final combined path too
+      bestPath = this._validatePath(bestPath);
 
       if (bestPath) {
         if (this.smoothPaths && bestPath.length > 2) {
@@ -2110,8 +2192,8 @@ export default function (parentClass) {
       }
 
       // Build informative fail reason
-      const startConns = startNode.connections.length + startNode.portalConnections.length + (startNode.ladderConnections || []).length;
-      const goalConns = goalNode.connections.length + goalNode.portalConnections.length + (goalNode.ladderConnections || []).length;
+      const startConns = startNode.connections.length + startNode.portalConnections.length;
+      const goalConns = goalNode.connections.length + goalNode.portalConnections.length;
 
       if (startConns === 0 && goalConns === 0) {
         this.lastPathFailReason = "both_isolated";
@@ -2138,6 +2220,7 @@ export default function (parentClass) {
         node.parent = null;
         node.parentAction = null;
         node.parentPortalId = null;
+        node.parentSpeed = null;
       }
 
       startNode.gScore = 0;
@@ -2177,7 +2260,6 @@ export default function (parentClass) {
         const allConnections = [
           ...current.connections,
           ...current.portalConnections,
-          ...(current.ladderConnections || []),
         ];
 
         for (const conn of allConnections) {
@@ -2214,6 +2296,8 @@ export default function (parentClass) {
             neighbor.parent = current;
             neighbor.parentAction = conn.action;
             neighbor.parentPortalId = conn.portalId || null;
+            neighbor.parentSpeed = conn.speed || 0;
+            neighbor.parentPeakHeight = conn.peakHeight || 0;
             neighbor.gScore = tentativeG;
             neighbor.hScore = this.distance(
               neighbor.x,
@@ -2230,7 +2314,7 @@ export default function (parentClass) {
         }
       }
 
-      const startConns = startNode.connections.length + startNode.portalConnections.length + (startNode.ladderConnections || []).length;
+      const startConns = startNode.connections.length + startNode.portalConnections.length;
       if (startConns === 0) {
         this._lastAStarFailDetail = `start_isolated (node at ${startNode.gx},${startNode.gy} has 0 connections)`;
       } else {
@@ -2250,6 +2334,7 @@ export default function (parentClass) {
           y: path[i].y,
           action: "start",
           portalId: null,
+          speed: 0,
         });
       }
       // Fix actions: each waypoint needs the action to reach the NEXT waypoint
@@ -2263,16 +2348,35 @@ export default function (parentClass) {
         }
         reversed[i + 1].action = conn.action;
         reversed[i + 1].portalId = conn.portalId || null;
+        reversed[i + 1].speed = conn.speed || 0;
+        reversed[i + 1].peakHeight = conn.peakHeight || 0;
       }
       reversed[0].action = "start";
       return reversed;
+    }
+
+    /** Validate that every consecutive waypoint pair has a valid graph connection.
+     * Returns the path if valid, or null if any segment is unreachable. */
+    _validatePath(path) {
+      if (!path || path.length < 2) return path;
+      for (let i = 0; i < path.length - 1; i++) {
+        const fromNode = path[i].node;
+        const toNode = path[i + 1].node;
+        if (!fromNode || !toNode) continue; // start/end may not have nodes
+        if (fromNode === toNode) continue;
+        const conn = this._findConnectionBetween(fromNode, toNode);
+        if (!conn) {
+          this._log(`Path validation failed: no connection between (${fromNode.gx},${fromNode.gy}) and (${toNode.gx},${toNode.gy}) at waypoint ${i}`);
+          return null;
+        }
+      }
+      return path;
     }
 
     _findConnectionBetween(fromNode, toNode) {
       const allConnections = [
         ...fromNode.connections,
         ...fromNode.portalConnections,
-        ...(fromNode.ladderConnections || []),
       ];
       for (const conn of allConnections) {
         if (conn.target === toNode) return conn;
@@ -2381,7 +2485,11 @@ export default function (parentClass) {
         }
       }
 
+      const _fmtPath = (p) => p.map((wp, i) => `${i}:(${wp.node ? wp.node.gx : '?'},${wp.node ? wp.node.gy : '?'})${wp.action}`).join(' → ');
       this._log(`Combined path: cost=${Math.round(bestCost)} (fwd=${Math.round(forwardCost)}, rev=${Math.round(reverseCost)}, strategy=${this.pathStrategy})`);
+      this._log(`  Forward path:  ${_fmtPath(forwardPath)}`);
+      this._log(`  Reversed path: ${_fmtPath(reversedPath)}`);
+      this._log(`  Selected path: ${_fmtPath(bestPath)}`);
       return bestPath;
     }
 
@@ -2394,6 +2502,8 @@ export default function (parentClass) {
           node: current,
           action: current.parentAction || "start",
           portalId: current.parentPortalId || null,
+          speed: current.parentSpeed || 0,
+          peakHeight: current.parentPeakHeight || 0,
           x: current.x,
           y: current.y,
         });
@@ -2569,6 +2679,22 @@ export default function (parentClass) {
         return;
       }
 
+      // Portal state machine — block path advancement during portal execution
+      if (this.portalState !== "none") {
+        if (this.portalState === "paused") {
+          this.portalPauseTimer = (this.portalPauseTimer || 0) + dt;
+          if (this.portalPauseTimer > 5 && !this.portalPauseWarned) {
+            this.portalPauseWarned = true;
+            this._warn("Portal paused for 5+ seconds. Call 'Resume portal' or 'Complete portal' to continue pathfinding.");
+          }
+          return;
+        }
+        if (this.portalState === "traversing") {
+          this._updatePortalTraverse();
+        }
+        return;
+      }
+
       const waypoint = this.currentPath[this.currentWaypoint];
       this.timeAtWaypoint += dt;
 
@@ -2669,6 +2795,23 @@ export default function (parentClass) {
       if (this.autoControl) {
         let effectiveAction = waypoint.action;
 
+        // Convert jump to fall when the target is below and the character is on a
+        // platform edge (not an island). On islands, the character must jump.
+        if (effectiveAction === "jump" && waypoint.y > this.instance.y + this.cellSize * 0.3) {
+          const prevWpIdx = this.currentWaypoint - 1;
+          const prevWp = prevWpIdx >= 0 ? this.currentPath[prevWpIdx] : null;
+          const prevNode = prevWp ? prevWp.node : null;
+          const isOnIsland = prevNode && prevNode.isIsland;
+          if (!isOnIsland) {
+            const xDiff = waypoint.x - this.instance.x;
+            if (Math.abs(xDiff) < this.cellSize * 0.3) {
+              effectiveAction = "fall";
+            } else {
+              effectiveAction = xDiff < 0 ? "fall_left" : "fall_right";
+            }
+          }
+        }
+
         if (
           (effectiveAction === "jump" || effectiveAction === "coyote_jump" ||
            effectiveAction === "jump_toward" ||
@@ -2709,6 +2852,7 @@ export default function (parentClass) {
     }
 
     _rePath() {
+      if (this.portalState !== "none") return;
       this.rePathCooldown = this.rePathCooldownDuration;
 
       // Track distance to goal to detect re-path loops
@@ -2754,11 +2898,6 @@ export default function (parentClass) {
         return;
       }
 
-      if (action === "ladder_climb") {
-        this._executeLadderClimb(targetX, targetY, waypoint);
-        return;
-      }
-
       if (action === "fall_through") {
         this._executeFallThrough(targetX, targetY);
         return;
@@ -2768,36 +2907,92 @@ export default function (parentClass) {
     }
 
     _executePortal(targetX, targetY, waypoint) {
-      this.instance.x = targetX;
-      this.instance.y = targetY;
-      this.justUsedPortal = true;
-      this.currentPortalId = (waypoint && waypoint.portalId) || 0;
-      this._trigger("OnPortalUsed");
+      if (this.portalState === "none") {
+        this.portalPaused = false;
+        this.currentPortalId = (waypoint && waypoint.portalId) || 0;
+        this.portalCurrentWaypoint = waypoint;
+        this.portalTraverseTargetX = targetX;
+        this.portalTraverseTargetY = targetY;
+
+        this._inPortalEntryTrigger = true;
+        this._trigger("OnPortalEntry");
+        this._inPortalEntryTrigger = false;
+
+        if (this.portalPaused) {
+          this.portalState = "paused";
+          this.portalPauseTimer = 0;
+          this.portalPauseWarned = false;
+          return;
+        }
+        this._executePortalBehavior(waypoint);
+        return;
+      }
+
+      if (this.portalState === "paused") return;
+      if (this.portalState === "traversing") {
+        this._updatePortalTraverse();
+        return;
+      }
     }
 
-    _executeLadderClimb(targetX, targetY, waypoint) {
+    _executePortalBehavior(waypoint) {
+      const action = waypoint ? waypoint.action : "portal_instant";
+
+      if (action === "portal_gradual") {
+        this.portalState = "traversing";
+        this.portalTraverseStartX = this.instance.x;
+        this.portalTraverseStartY = this.instance.y;
+        this.portalTraverseProgress = 0;
+        this.portalTraverseSpeed = (waypoint && waypoint.speed) || 100;
+
+        if (this.platformBehavior) {
+          this.platformWasEnabled = this.platformBehavior.isEnabled;
+          this.platformBehavior.isEnabled = false;
+        }
+        return;
+      }
+
+      // Instant: teleport and complete
+      this.instance.x = this.portalTraverseTargetX;
+      this.instance.y = this.portalTraverseTargetY;
+      this._completePortal();
+    }
+
+    _updatePortalTraverse() {
       const dt = this.instance.dt;
+      const dx = this.portalTraverseTargetX - this.portalTraverseStartX;
+      const dy = this.portalTraverseTargetY - this.portalTraverseStartY;
+      const totalDist = Math.sqrt(dx * dx + dy * dy);
 
-      if (!this.isClimbing) {
-        this.platformBehavior.isEnabled = false;
-        this.isClimbing = true;
-        this.climbStartY = this.instance.y;
-        this.climbTargetY = targetY;
-
-        const conn = waypoint || {};
-        const ladder = this.ladders.get(conn.ladderId);
-        this.climbSpeed = ladder ? ladder.climbSpeed : 100;
+      if (totalDist === 0) {
+        this.portalTraverseProgress = 1;
+      } else {
+        this.portalTraverseProgress += (this.portalTraverseSpeed * dt) / totalDist;
       }
 
-      const direction = this.climbTargetY < this.instance.y ? -1 : 1;
-      this.instance.y += direction * this.climbSpeed * dt;
-
-      if (Math.abs(this.instance.y - this.climbTargetY) < 2) {
-        this.instance.y = this.climbTargetY;
-        this.platformBehavior.isEnabled = true;
-        this.isClimbing = false;
-        this._trigger("OnLadderClimbComplete");
+      if (this.portalTraverseProgress >= 1) {
+        this.portalTraverseProgress = 1;
+        this.instance.x = this.portalTraverseTargetX;
+        this.instance.y = this.portalTraverseTargetY;
+        if (this.platformBehavior && this.platformWasEnabled) {
+          this.platformBehavior.isEnabled = true;
+        }
+        this._completePortal();
+        return;
       }
+
+      this.instance.x = this.portalTraverseStartX + dx * this.portalTraverseProgress;
+      this.instance.y = this.portalTraverseStartY + dy * this.portalTraverseProgress;
+    }
+
+    _completePortal() {
+      this.justUsedPortal = true;
+      this.portalPauseTimer = 0;
+      this.portalPauseWarned = false;
+      this._trigger("OnPortalComplete");
+      this.portalState = "none";
+      this.portalPaused = false;
+      this.portalCurrentWaypoint = null;
     }
 
     _executeFallThrough(targetX, targetY) {
@@ -3058,13 +3253,21 @@ export default function (parentClass) {
           this.platformBehavior.simulateControl("jump");
           this.isHoldingJump = true;
           this.jumpHoldTimer = 0;
+          this.jumpStartY = this.instance.y;
           this.departureCommitted = false;
         } else if (
           this.isHoldingJump &&
           this.platformProps.jumpSustain > 0
         ) {
           this.jumpHoldTimer += dt * 1000;
-          if (this.jumpHoldTimer < this.platformProps.jumpSustain) {
+          // Release jump when we've reached the needed peak height,
+          // or when the sustain timer expires — whichever comes first.
+          const currentHeight = this.jumpStartY - this.instance.y;
+          const neededPeak = (waypoint && waypoint.peakHeight) ? waypoint.peakHeight : this.maxJumpHeight;
+
+          if (currentHeight >= neededPeak) {
+            this.isHoldingJump = false;
+          } else if (this.jumpHoldTimer < this.platformProps.jumpSustain) {
             this.platformBehavior.simulateControl("jump");
           } else {
             this.isHoldingJump = false;
@@ -3313,10 +3516,6 @@ export default function (parentClass) {
         this.timeAtWaypoint = 0;
         this.doubleJumpPhase = 0;
         this.isHoldingJump = false;
-        if (this.isClimbing) {
-          this.isClimbing = false;
-          if (this.platformBehavior) this.platformBehavior.isEnabled = true;
-        }
         this.coyoteJumpPending = false;
         this.departureCommitted = false;
 
@@ -3359,11 +3558,14 @@ export default function (parentClass) {
       this.doubleJumpPhase = 0;
       this.isHoldingJump = false;
       this.departureCommitted = false;
-      if (this.isClimbing) {
-        this.isClimbing = false;
-        if (this.platformBehavior) this.platformBehavior.isEnabled = true;
-      }
       this.coyoteJumpPending = false;
+      // Reset portal state
+      if (this.portalState === "traversing" && this.platformBehavior && this.platformWasEnabled) {
+        this.platformBehavior.isEnabled = true;
+      }
+      this.portalState = "none";
+      this.portalPaused = false;
+      this.portalCurrentWaypoint = null;
     }
 
     /** Stops movement along the current path without clearing the path data. */
@@ -3502,11 +3704,6 @@ export default function (parentClass) {
     /** Returns whether the given world position falls within a hazardous area. */
     aceIsPositionHazardous(x, y) {
       return this._isPositionHazardous(x, y);
-    }
-
-    /** Returns whether the character is currently climbing a ladder. */
-    aceIsClimbingLadder() {
-      return this.isClimbing ? 1 : 0;
     }
 
     // ============================================================================
@@ -3831,15 +4028,11 @@ export default function (parentClass) {
       return node ? node.gy : -1;
     }
 
-    /** Returns the total number of connections (walk, jump, portal, ladder) from a node at the given grid position. */
+    /** Returns the total number of connections (walk, jump, portal) from a node at the given grid position. */
     aceGetNodeConnectionCount(gx, gy) {
       const node = this.getNode(gx, gy);
       if (!node) return 0;
-      return (
-        node.connections.length +
-        node.portalConnections.length +
-        (node.ladderConnections ? node.ladderConnections.length : 0)
-      );
+      return node.connections.length + node.portalConnections.length;
     }
 
     /** Returns the world X of the target node for a specific connection from the node at (gx, gy). Returns -1 if invalid. */
@@ -3866,14 +4059,13 @@ export default function (parentClass) {
       return conn ? conn.cost : -1;
     }
 
-    /** Helper to retrieve a connection by index from a node's combined connection arrays (walk + portal + ladder). */
+    /** Helper to retrieve a connection by index from a node's combined connection arrays (walk + portal). */
     _getConnectionAtIndex(gx, gy, index) {
       const node = this.getNode(gx, gy);
       if (!node) return null;
       const all = [
         ...node.connections,
         ...node.portalConnections,
-        ...(node.ladderConnections || []),
       ];
       return index >= 0 && index < all.length ? all[index] : null;
     }
@@ -3964,11 +4156,7 @@ export default function (parentClass) {
     aceGetNodeAtIndexConnectionCount(index) {
       if (index < 0 || index >= this.nodeIndexArray.length) return 0;
       const n = this.nodeIndexArray[index];
-      return (
-        n.connections.length +
-        n.portalConnections.length +
-        (n.ladderConnections ? n.ladderConnections.length : 0)
-      );
+      return n.connections.length + n.portalConnections.length;
     }
 
     // ============================================================================
@@ -4012,17 +4200,72 @@ export default function (parentClass) {
       return this._getPortalsMap().size;
     }
 
-    // ============================================================================
-    // LADDERS - State Expressions
-    // ============================================================================
+    /** Returns the last portal ID that was added. */
+    aceGetLastPortalID() {
+      return this.lastPortalId;
+    }
 
-    /** Returns the climb progress as a 0-1 ratio (0 = bottom, 1 = top). Returns 0 if not climbing. */
-    aceGetLadderProgress() {
-      if (!this.isClimbing) return 0;
-      const total = Math.abs(this.climbTargetY - this.climbStartY);
-      if (total === 0) return 1;
-      const current = Math.abs(this.instance.y - this.climbStartY);
-      return Math.min(1, current / total);
+    /** Returns the portal ID during OnPortalEntry/OnPortalComplete triggers. */
+    aceGetCurrentPortalID() {
+      return this.currentPortalId;
+    }
+
+    /** Returns 0-1 traversal progress for gradual portals (0 if not traversing). */
+    aceGetPortalProgress() {
+      return this.portalTraverseProgress;
+    }
+
+    /** Returns exit X position of the current portal. */
+    aceGetPortalExitX() {
+      return this.portalTraverseTargetX;
+    }
+
+    /** Returns exit Y position of the current portal. */
+    aceGetPortalExitY() {
+      return this.portalTraverseTargetY;
+    }
+
+    /** Returns "instant" or "gradual" for the given portal ID. */
+    aceGetPortalType(portalId) {
+      const portalsMap = this._getPortalsMap();
+      const portal = portalsMap.get(portalId);
+      return portal ? portal.type : "";
+    }
+
+    // Portal state conditions
+    aceIsAtPortal() {
+      return this.portalState === "paused";
+    }
+
+    aceIsTraversingPortal() {
+      return this.portalState === "traversing";
+    }
+
+    // Portal control actions
+    acePauseAtPortal() {
+      if (this._inPortalEntryTrigger) {
+        this.portalPaused = true;
+      }
+    }
+
+    aceResumePortal() {
+      if (this.portalState !== "paused") return;
+      this.portalPaused = false;
+      this._executePortalBehavior(this.portalCurrentWaypoint);
+    }
+
+    aceCompletePortal() {
+      if (this.portalState !== "paused" && this.portalState !== "traversing") return;
+      if (this.portalState === "traversing" && this.platformBehavior && this.platformWasEnabled) {
+        this.platformBehavior.isEnabled = true;
+      }
+      this._completePortal();
+    }
+
+    aceTeleportToPosition(x, y) {
+      this.instance.x = x;
+      this.instance.y = y;
+      this.justUsedPortal = true;
     }
 
     // ============================================================================
@@ -4101,7 +4344,6 @@ export default function (parentClass) {
       console.log("Slope nodes:", slopeCount);
       console.log("Jump-thru nodes:", jumpThruCount);
       console.log("Portals:", this._getPortalsMap().size);
-      console.log("Ladders:", this.ladders.size);
       console.log("Hazards:", this._getHazardsMap().size);
     }
 

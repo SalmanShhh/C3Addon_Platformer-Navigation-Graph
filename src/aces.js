@@ -253,20 +253,6 @@ expression("Pathfinding", "NodeCount", {
   return this.aceGetNodeCount();
 });
 
-expression("Pathfinding", "PortalCount", {
-  returnType: "number",
-  description: "Get the total number of portals in the navigation graph. Returns 0 if no portals have been added."
-}, function() {
-  return this.aceGetPortalCount();
-});
-
-expression("Pathfinding", "LastPortalID", {
-  returnType: "number",
-  description: "Returns the ID of the most recently added portal. Use this right after 'Add portal' or 'Add portal from objects' to save the ID into a variable, so you can later remove or configure that specific portal."
-}, function() {
-  return this.aceGetLastPortalId();
-});
-
 expression("Pathfinding", "CurrentWaypointX", {
   returnType: "number",
   description: "Get the world X position of the current waypoint. Returns 0 if no path is active."
@@ -1006,10 +992,10 @@ expression("Hazards", "TileHazardSeverity", {
 // PORTAL ACTIONS
 // ============================================================================
 
-action("Portals", "AddPortal", {
-  listName: "Add portal",
-  displayText: "Add {0} portal from ({1}, {2}) to ({3}, {4}) with cost {5}",
-  description: "Add a portal connection between two positions. The AI can use this portal during pathfinding to teleport from the entry to the exit. Use 'one-way' for things like launch pads or trap doors that only send you in one direction. Use 'two-way' for doors, elevators, or teleporters that work in both directions. The portal is automatically assigned an ID — use the 'LastPortalID' expression right after this action to save it, so you can remove or configure the portal later. Portal navigation is automatically enabled.",
+action("Portals", "AddInstantPortal", {
+  listName: "Add instant portal",
+  displayText: "Add {0} instant portal from ({1}, {2}) to ({3}, {4}) [Cost: {5}]",
+  description: "Add a portal that instantly teleports the AI from the entry to the exit. Use for: teleporters, doors, warp zones, or any portal where the character disappears and reappears at the exit. Use 'On portal entry' with 'Pause at portal' to play animations before the teleport happens.",
   params: [
     { id: "direction", name: "Direction", desc: "One-way: entry to exit only. Two-way: works in both directions.", type: "combo", initialValue: "one_way",
       items: [{ one_way: "One-way" }, { two_way: "Two-way" }]
@@ -1018,32 +1004,68 @@ action("Portals", "AddPortal", {
     { id: "entryY", name: "Entry Y", desc: "Entry world Y position in pixels", type: "number", initialValue: "0" },
     { id: "exitX", name: "Exit X", desc: "Exit world X position in pixels", type: "number", initialValue: "0" },
     { id: "exitY", name: "Exit Y", desc: "Exit world Y position in pixels", type: "number", initialValue: "0" },
-    { id: "cost", name: "Cost", desc: "How much the AI 'pays' to use this portal. Default 1 = same as walking one tile. Set lower (e.g. 0.5) to make the AI prefer this portal over walking. Set higher (e.g. 10) to make the AI avoid this portal unless there's no other route. Useful for making the AI prefer shorter walking paths over convenient but lore-unfriendly teleports, or for making certain portals feel like a last resort.", type: "number", initialValue: "1" }
+    { id: "cost", name: "Cost", desc: "How much the AI 'pays' to use this portal. Default 1 = same as walking one tile. Lower = preferred, higher = avoided.", type: "number", initialValue: "1" }
   ]
 }, function(direction, entryX, entryY, exitX, exitY, cost) {
-  this.aceAddPortal(direction, entryX, entryY, exitX, exitY, cost);
+  this.aceAddInstantPortal(direction, entryX, entryY, exitX, exitY, cost);
 });
 
-action("Portals", "AddPortalFromObjects", {
-  listName: "Add portal from objects",
-  displayText: "Add {0} portal from {1} to {2} with cost {3}",
-  description: "Add a portal between two objects, using their current positions as the entry and exit points. The AI can then pathfind through this portal to teleport between them. Great for connecting doors, elevators, or teleporter sprites — just place the objects in your layout and use this action to link them. Use 'one-way' for things like launch pads. Use 'two-way' for doors that work both ways. Use the 'LastPortalID' expression to retrieve the assigned portal ID.",
+action("Portals", "AddInstantPortalFromObjects", {
+  listName: "Add instant portal from objects",
+  displayText: "Add {0} instant portal from {1} to {2} [Cost: {3}]",
+  description: "Add an instant portal using two objects as entry and exit positions. The objects' current X/Y positions are used. Use for: linking door sprites, warp pad objects, etc.",
   params: [
     { id: "direction", name: "Direction", desc: "One-way: entry to exit only. Two-way: works in both directions.", type: "combo", initialValue: "one_way",
       items: [{ one_way: "One-way" }, { two_way: "Two-way" }]
     },
-    { id: "entryObject", name: "Entry object", desc: "The object to use as the portal entry point (uses its X, Y position)", type: "object" },
-    { id: "exitObject", name: "Exit object", desc: "The object to use as the portal exit point (uses its X, Y position)", type: "object" },
-    { id: "cost", name: "Cost", desc: "How much the AI 'pays' to use this portal. Default 1 = same as walking one tile. Set lower (e.g. 0.5) to make the AI prefer this portal over walking. Set higher (e.g. 10) to make the AI avoid this portal unless there's no other route. Useful for making the AI prefer shorter walking paths over convenient but lore-unfriendly teleports, or for making certain portals feel like a last resort.", type: "number", initialValue: "1" }
+    { id: "entryObject", name: "Entry object", desc: "The object to use as the portal entry point", type: "object" },
+    { id: "exitObject", name: "Exit object", desc: "The object to use as the portal exit point", type: "object" },
+    { id: "cost", name: "Cost", desc: "Movement cost (lower = preferred, default is 1)", type: "number", initialValue: "1" }
   ]
 }, function(direction, entryObject, exitObject, cost) {
-  this.aceAddPortalFromObjects(direction, entryObject, exitObject, cost);
+  this.aceAddInstantPortalFromObjects(direction, entryObject, exitObject, cost);
+});
+
+action("Portals", "AddGradualPortal", {
+  listName: "Add gradual portal",
+  displayText: "Add {0} gradual portal from ({1}, {2}) to ({3}, {4}) [Cost: {5}] [Speed: {6}]",
+  description: "Add a portal that gradually moves the AI from entry to exit at the given speed. The character moves in a straight line (any direction — vertical, horizontal, or diagonal). Platform behavior is disabled during movement. Use for: elevators, lifts, moving platforms, ziplines. For vertical-only movement (ladders/ropes), align entry and exit X positions, or use 'Pause at portal' to implement your own custom movement via events.",
+  params: [
+    { id: "direction", name: "Direction", desc: "One-way: entry to exit only. Two-way: works in both directions.", type: "combo", initialValue: "two_way",
+      items: [{ one_way: "One-way" }, { two_way: "Two-way" }]
+    },
+    { id: "entryX", name: "Entry X", desc: "Entry world X position in pixels", type: "number", initialValue: "0" },
+    { id: "entryY", name: "Entry Y", desc: "Entry world Y position in pixels", type: "number", initialValue: "0" },
+    { id: "exitX", name: "Exit X", desc: "Exit world X position in pixels", type: "number", initialValue: "0" },
+    { id: "exitY", name: "Exit Y", desc: "Exit world Y position in pixels", type: "number", initialValue: "0" },
+    { id: "cost", name: "Cost", desc: "Movement cost. Default 1 = auto-calculated from distance and speed. Set higher to make AI avoid this portal.", type: "number", initialValue: "1" },
+    { id: "speed", name: "Speed", desc: "Movement speed in pixels per second", type: "number", initialValue: "100" }
+  ]
+}, function(direction, entryX, entryY, exitX, exitY, cost, speed) {
+  this.aceAddGradualPortal(direction, entryX, entryY, exitX, exitY, cost, speed);
+});
+
+action("Portals", "AddGradualPortalFromObjects", {
+  listName: "Add gradual portal from objects",
+  displayText: "Add {0} gradual portal from {1} to {2} [Cost: {3}] [Speed: {4}]",
+  description: "Add a gradual portal using two objects. Character moves from entry object to exit object at the given speed. Use for: linking elevator sprites, rope endpoints, etc.",
+  params: [
+    { id: "direction", name: "Direction", desc: "One-way: entry to exit only. Two-way: works in both directions.", type: "combo", initialValue: "two_way",
+      items: [{ one_way: "One-way" }, { two_way: "Two-way" }]
+    },
+    { id: "entryObject", name: "Entry object", desc: "The object to use as the portal entry point", type: "object" },
+    { id: "exitObject", name: "Exit object", desc: "The object to use as the portal exit point", type: "object" },
+    { id: "cost", name: "Cost", desc: "Movement cost (default 1 = auto-calculated)", type: "number", initialValue: "1" },
+    { id: "speed", name: "Speed", desc: "Movement speed in pixels per second", type: "number", initialValue: "100" }
+  ]
+}, function(direction, entryObject, exitObject, cost, speed) {
+  this.aceAddGradualPortalFromObjects(direction, entryObject, exitObject, cost, speed);
 });
 
 action("Portals", "RemovePortal", {
   listName: "Remove portal by ID",
   displayText: "Remove portal with ID {0}",
-  description: "Remove a portal by its ID. The portal connection is removed from the navigation graph immediately. Use 'LastPortalID' to get the ID right after adding a portal, or store it in a variable for later removal.",
+  description: "Remove a portal by its ID. The portal connection is removed from the navigation graph immediately.",
   params: [
     { id: "portalId", name: "Portal ID", desc: "The ID of the portal to remove", type: "number", initialValue: "0" }
   ]
@@ -1054,9 +1076,9 @@ action("Portals", "RemovePortal", {
 action("Portals", "RemovePortalAtObject", {
   listName: "Remove portal at object",
   displayText: "Remove portal at {0}",
-  description: "Remove the portal whose entry point is closest to this object's position. Useful when you placed portals using objects and want to remove one without tracking its ID — just reference the same entry object. If no portal is found near the object, nothing happens.",
+  description: "Remove the portal closest to this object. Works with both entry and exit positions — for two-way portals, either endpoint object can be used.",
   params: [
-    { id: "object", name: "Object", desc: "The object whose position to match against portal entry points", type: "object" }
+    { id: "object", name: "Object", desc: "The object whose position to match against portal positions", type: "object" }
   ]
 }, function(object) {
   this.aceRemovePortalAtObject(object);
@@ -1065,7 +1087,7 @@ action("Portals", "RemovePortalAtObject", {
 action("Portals", "SetPortalCost", {
   listName: "Set portal cost",
   displayText: "Set portal {0} cost to {1}",
-  description: "Change how 'expensive' a portal is for the AI to use. Lower cost means the AI prefers this portal; higher cost means it will avoid it unless there's no better route. Default cost is 1. Use this to make certain portals less desirable — for example, a dangerous teleporter could have cost 50 so the AI only uses it as a last resort.",
+  description: "Change how 'expensive' a portal is for the AI to use. Lower cost = preferred, higher cost = avoided.",
   params: [
     { id: "portalId", name: "Portal ID", desc: "The ID of the portal to configure", type: "number", initialValue: "0" },
     { id: "cost", name: "Cost", desc: "Movement cost (lower = preferred, default is 1)", type: "number", initialValue: "1" }
@@ -1074,10 +1096,22 @@ action("Portals", "SetPortalCost", {
   this.aceSetPortalCost(portalId, cost);
 });
 
+action("Portals", "SetPortalSpeed", {
+  listName: "Set portal speed",
+  displayText: "Set portal {0} speed to {1}",
+  description: "Change the movement speed of a gradual portal (pixels per second). Has no effect on instant portals.",
+  params: [
+    { id: "portalId", name: "Portal ID", desc: "The ID of the portal to configure", type: "number", initialValue: "0" },
+    { id: "speed", name: "Speed", desc: "Movement speed in pixels per second", type: "number", initialValue: "100" }
+  ]
+}, function(portalId, speed) {
+  this.aceSetPortalSpeed(portalId, speed);
+});
+
 action("Portals", "SetPortalIgnoreHazards", {
   listName: "Set portal ignore hazards",
   displayText: "Set portal {0} ignore hazards: {1}",
-  description: "Set whether a portal ignores nearby hazards when calculating its pathfinding cost. Normally, portals near hazard zones get a higher cost to discourage the AI from using them. Enable this to make the AI always consider this portal regardless of surrounding dangers — useful for escape portals near fire, or safe teleporters that bypass dangerous areas.",
+  description: "Set whether a portal ignores nearby hazards when calculating its pathfinding cost.",
   params: [
     { id: "portalId", name: "Portal ID", desc: "The ID of the portal to configure", type: "number", initialValue: "0" },
     { id: "ignoreHazards", name: "Ignore hazards", desc: "Whether this portal should ignore hazards", type: "combo", initialValue: "no",
@@ -1088,11 +1122,73 @@ action("Portals", "SetPortalIgnoreHazards", {
   this.aceSetPortalIgnoreHazards(portalId, ignoreHazards === "yes");
 });
 
+action("Portals", "PauseAtPortal", {
+  listName: "Pause at portal",
+  displayText: "Pause at portal",
+  description: "Call INSIDE 'On portal entry' to pause the AI before the portal executes. The character stops at the entry point and waits. Use this to play animations, open doors, trigger screen transitions, or run any custom events before the portal activates. Call 'Resume portal' to execute the built-in behavior, or 'Complete portal' if you moved the character yourself."
+}, function() {
+  this.acePauseAtPortal();
+});
+
+action("Portals", "ResumePortal", {
+  listName: "Resume portal",
+  displayText: "Resume portal",
+  description: "Continue portal execution after pausing with 'Pause at portal'. For instant portals: teleports the character to the exit. For gradual portals: begins moving the character toward the exit. Use this when you want the portal's built-in movement to handle the transition."
+}, function() {
+  this.aceResumePortal();
+});
+
+action("Portals", "CompletePortal", {
+  listName: "Complete portal",
+  displayText: "Complete portal",
+  description: "Finish a paused portal without executing its built-in movement. Use this when you've already moved the character yourself (e.g., custom animation, physics launch, manual position set). The AI will continue pathfinding from wherever the character is now. Also works mid-traverse to cut a gradual portal short."
+}, function() {
+  this.aceCompletePortal();
+});
+
+action("Portals", "TeleportToPosition", {
+  listName: "Teleport to position",
+  displayText: "Teleport to ({0}, {1})",
+  description: "Instantly move the character to the given position. Can be used anywhere — inside portal events, on button press, on collision, etc. Suppresses re-pathing for one tick to prevent the AI from thinking it's lost. Useful with 'Pause at portal' + 'Complete portal' for fully custom portal behavior.",
+  params: [
+    { id: "x", name: "X", desc: "Target world X position in pixels", type: "number", initialValue: "0" },
+    { id: "y", name: "Y", desc: "Target world Y position in pixels", type: "number", initialValue: "0" }
+  ]
+}, function(x, y) {
+  this.aceTeleportToPosition(x, y);
+});
+
+action("Portals", "AddElevatorStop", {
+  listName: "Add elevator stop",
+  displayText: "Add elevator stop to group {0} at ({1}, {2}) [Speed: {3}]",
+  description: "Add a stop to an elevator group. Automatically creates two-way gradual portals between this stop and all other stops in the same group. Cost is auto-calculated from distance and speed. Use a unique group name (e.g. 'elevator_A') for each elevator. Example: 3 calls with the same group creates 3 pairwise portals (Floor1-Floor2, Floor1-Floor3, Floor2-Floor3). Use PortalExitX/PortalExitY in 'On portal entry' to determine which floor the AI is heading to.",
+  params: [
+    { id: "groupId", name: "Group", desc: "Unique group name for this elevator (e.g. 'elevator_A')", type: "string", initialValue: "\"elevator_A\"" },
+    { id: "x", name: "X", desc: "World X position of this stop", type: "number", initialValue: "0" },
+    { id: "y", name: "Y", desc: "World Y position of this stop", type: "number", initialValue: "0" },
+    { id: "speed", name: "Speed", desc: "Movement speed in pixels per second", type: "number", initialValue: "100" }
+  ]
+}, function(groupId, x, y, speed) {
+  this.aceAddElevatorStop(groupId, x, y, speed);
+});
+
+action("Portals", "AddElevatorStopFromObject", {
+  listName: "Add elevator stop from object",
+  displayText: "Add elevator stop to group {0} at {1} [Speed: {2}]",
+  description: "Add an elevator stop using an object's position. Same as 'Add elevator stop' but uses the object's current X/Y. The object serves as a floor marker.",
+  params: [
+    { id: "groupId", name: "Group", desc: "Unique group name for this elevator", type: "string", initialValue: "\"elevator_A\"" },
+    { id: "object", name: "Object", desc: "The object to use as the elevator stop position", type: "object" },
+    { id: "speed", name: "Speed", desc: "Movement speed in pixels per second", type: "number", initialValue: "100" }
+  ]
+}, function(groupId, object, speed) {
+  this.aceAddElevatorStopFromObject(groupId, object, speed);
+});
+
 action("Portals", "ClearAllPortals", {
   listName: "Clear all portals",
   displayText: "Clear all portals",
-  description: "Remove all portals from the navigation graph. Useful when resetting the level or switching layouts.",
-  params: []
+  description: "Remove all portals from the navigation graph. Useful when resetting the level or switching layouts."
 }, function() {
   this.aceClearAllPortals();
 });
@@ -1101,24 +1197,96 @@ action("Portals", "ClearAllPortals", {
 // PORTAL CONDITIONS
 // ============================================================================
 
-condition("Portals", "OnPortalUsed", {
-  listName: "On portal used",
-  displayText: "On portal used",
-  description: "Triggered when the AI teleports through a portal during pathfinding. Use this to play teleport effects, sounds, or animations. Use the 'CurrentPortalID' expression to get which portal was used.",
+condition("Portals", "OnPortalEntry", {
+  listName: "On portal entry",
+  displayText: "On portal entry",
+  description: "Triggered when the AI arrives at a portal entry point, BEFORE the portal executes. Use 'Pause at portal' inside this event to delay execution and run your own events first (animations, sounds, screen effects). If you don't pause, the portal executes immediately. Use CurrentPortalID to identify which portal was reached.",
   isTrigger: true
 }, function() {
   return true;
+});
+
+condition("Portals", "OnPortalComplete", {
+  listName: "On portal complete",
+  displayText: "On portal complete",
+  description: "Triggered when portal execution finishes — after an instant teleport completes, a gradual movement reaches the exit, or 'Complete portal' is called. Use this for post-portal effects like opening doors at the exit, playing arrival animations, etc.",
+  isTrigger: true
+}, function() {
+  return true;
+});
+
+condition("Portals", "IsAtPortal", {
+  listName: "Is at portal",
+  displayText: "Is at portal",
+  description: "True when the AI is paused at a portal entry (after 'Pause at portal' was called but before 'Resume portal' or 'Complete portal'). Use to check if the character is waiting at a portal.",
+  isInvertible: true
+}, function() {
+  return this.aceIsAtPortal();
+});
+
+condition("Portals", "IsTraversingPortal", {
+  listName: "Is traversing portal",
+  displayText: "Is traversing portal",
+  description: "True when the AI is currently moving through a gradual portal (elevator, ladder, etc.). Platform behavior is disabled during traversal.",
+  isInvertible: true
+}, function() {
+  return this.aceIsTraversingPortal();
 });
 
 // ============================================================================
 // PORTAL EXPRESSIONS
 // ============================================================================
 
+expression("Portals", "PortalCount", {
+  returnType: "number",
+  description: "Get the total number of portals."
+}, function() {
+  return this.aceGetPortalCount();
+});
+
+expression("Portals", "LastPortalID", {
+  returnType: "number",
+  description: "Returns the ID of the most recently added portal. Use right after adding a portal to save the ID for later configuration or removal."
+}, function() {
+  return this.aceGetLastPortalID();
+});
+
 expression("Portals", "CurrentPortalID", {
   returnType: "number",
-  description: "Returns the ID of the portal currently being used. Only valid inside an 'On portal used' trigger. Use this to look up which portal the AI just teleported through."
+  description: "Returns the portal ID during OnPortalEntry/OnPortalComplete triggers. Use to identify which portal was reached."
 }, function() {
-  return this.aceGetCurrentPortalId();
+  return this.aceGetCurrentPortalID();
+});
+
+expression("Portals", "PortalProgress", {
+  returnType: "number",
+  description: "Get the 0-1 traversal progress for gradual portals. Returns 0 if not traversing."
+}, function() {
+  return this.aceGetPortalProgress();
+});
+
+expression("Portals", "PortalExitX", {
+  returnType: "number",
+  description: "Get the exit X position of the current portal. Valid inside OnPortalEntry/OnPortalComplete triggers."
+}, function() {
+  return this.aceGetPortalExitX();
+});
+
+expression("Portals", "PortalExitY", {
+  returnType: "number",
+  description: "Get the exit Y position of the current portal. Valid inside OnPortalEntry/OnPortalComplete triggers."
+}, function() {
+  return this.aceGetPortalExitY();
+});
+
+expression("Portals", "PortalType", {
+  returnType: "string",
+  description: "Returns 'instant' or 'gradual' for the given portal ID.",
+  params: [
+    { id: "portalId", name: "Portal ID", desc: "The portal ID to check", type: "number" }
+  ]
+}, function(portalId) {
+  return this.aceGetPortalType(portalId);
 });
 
 // ============================================================================
@@ -1420,88 +1588,6 @@ expression("MultiAgent", "NearbyAgentCount", {
   description: "Get the number of nearby AI agents within detection range. Used for multi-agent avoidance calculations. Returns 0 if multi-agent avoidance is disabled."
 }, function() {
   return this.aceGetNearbyAgentCount();
-});
-
-// ============================================================================
-// ADVANCED TUNING ACTIONS
-// ============================================================================
-
-action("AdvancedTuning", "AddLadder", {
-  listName: "Add ladder",
-  displayText: "Add ladder from ({0}, {1}) to ({2}, {3}) [Climb speed: {4}]",
-  description: "Add a ladder connection between two points. The AI can use this to climb vertically. Returns ladder ID for later reference. Note: This feature may not be fully implemented yet.",
-  params: [
-    { id: "bottomX", name: "Bottom X", desc: "Bottom world X position", type: "number", initialValue: "0" },
-    { id: "bottomY", name: "Bottom Y", desc: "Bottom world Y position", type: "number", initialValue: "0" },
-    { id: "topX", name: "Top X", desc: "Top world X position", type: "number", initialValue: "0" },
-    { id: "topY", name: "Top Y", desc: "Top world Y position", type: "number", initialValue: "0" },
-    { id: "climbSpeed", name: "Climb speed", desc: "Climbing speed in pixels per second", type: "number", initialValue: "100" }
-  ]
-}, function(bottomX, bottomY, topX, topY, climbSpeed) {
-  this.aceAddLadder(bottomX, bottomY, topX, topY, climbSpeed);
-});
-
-action("AdvancedTuning", "RemoveLadder", {
-  listName: "Remove ladder",
-  displayText: "Remove ladder {0}",
-  description: "Remove a ladder by its ID. Use when a ladder is no longer accessible or has been destroyed.",
-  params: [
-    { id: "id", name: "ID", desc: "Ladder ID to remove", type: "number", initialValue: "0" }
-  ]
-}, function(id) {
-  this.aceRemoveLadder(id);
-});
-
-action("AdvancedTuning", "SetLadderClimbSpeed", {
-  listName: "Set ladder climb speed",
-  displayText: "Set ladder {0} climb speed to {1}",
-  description: "Change the climbing speed for a specific ladder. Use to adjust ladder traversal speed dynamically.",
-  params: [
-    { id: "id", name: "ID", desc: "Ladder ID", type: "number", initialValue: "0" },
-    { id: "speed", name: "Speed", desc: "New climb speed in pixels per second", type: "number", initialValue: "100" }
-  ]
-}, function(id, speed) {
-  this.aceSetLadderClimbSpeed(id, speed);
-});
-
-// ============================================================================
-// ADVANCED TUNING CONDITIONS
-// ============================================================================
-
-condition("AdvancedTuning", "IsClimbingLadder", {
-  listName: "Is climbing ladder",
-  displayText: "Is climbing ladder",
-  description: "Check if the character is currently climbing a ladder. Returns true during ladder traversal, false otherwise.",
-  isInvertible: true
-}, function() {
-  return this.aceIsClimbingLadder();
-});
-
-condition("AdvancedTuning", "OnLadderClimbComplete", {
-  listName: "On ladder climb complete",
-  displayText: "On ladder climb complete",
-  description: "Triggered when the character finishes climbing a ladder. Use to trigger animations or next actions after ladder traversal.",
-  isTrigger: true
-}, function() {
-  return true;
-});
-
-// ============================================================================
-// ADVANCED TUNING EXPRESSIONS
-// ============================================================================
-
-expression("AdvancedTuning", "ClimbingLadder", {
-  returnType: "number",
-  description: "Check if currently climbing a ladder. Returns 1 if climbing, 0 if not."
-}, function() {
-  return this.aceIsClimbingLadder() ? 1 : 0;
-});
-
-expression("AdvancedTuning", "LadderProgress", {
-  returnType: "number",
-  description: "Get the current ladder climbing progress as a value from 0 to 1. Returns 0 if not climbing a ladder."
-}, function() {
-  return this.aceGetLadderProgress();
 });
 
 // ============================================================================

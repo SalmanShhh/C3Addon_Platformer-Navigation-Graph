@@ -5,10 +5,9 @@
     "behaviors": {
       "salmanshh_platformer_navigationgraph": {
         "name": "Platformer Navigation Graph",
-        "description": "AI pathfinding for platformers: lets characters jump, fall, and navigate complex levels. Easy presets for beginners, deep customization for advanced users. Supports auto or manual control, hazards, portals, and integrates with Platform behavior.",
+        "description": "Smart pathfinding for platformer games. Characters automatically jump across gaps, fall between platforms, and find optimal routes through complex levels. Includes instant portals (teleporters, doors) and gradual portals (elevators, ladders, ziplines) with pause/resume support for custom animations. Features hazard avoidance, multiple path strategies, coyote jumps, ledge restriction, and multi-agent support. Works with the built-in Platform behavior — just add the behavior and go.",
         "help-url": "https://www.construct.net",
         "aceCategories": {
-          "AdvancedTuning": "AdvancedTuning",
           "Configuration": "Configuration",
           "GraphData": "GraphData",
           "Hazards": "Hazards",
@@ -31,15 +30,9 @@
             "name": "Max Search Nodes",
             "desc": "Maximum pathfinding effort before giving up. Higher = finds paths in larger levels but may cause lag. Lower = faster but may fail on complex paths."
           },
-          "setup_preset": {
-            "name": "Setup Preset",
-            "desc": "Pre-configured jump/fall settings. Auto: detects from Platform behavior. Beginner: short jumps, safe falls. Intermediate: moderate mobility. Advanced: maximum jump/fall distances for complex levels.",
-            "items": {
-              "auto": "Auto (detect from Platform behavior)",
-              "beginner": "Beginner (short jumps, safe falls)",
-              "intermediate": "Intermediate (moderate mobility)",
-              "advanced": "Advanced (maximum distances)"
-            }
+          "max_fall_distance": {
+            "name": "Max Fall Distance",
+            "desc": "Maximum fall distance in pixels. 0 = auto-detect from Platform behavior. -1 = unlimited (any fall). Positive value = custom max in pixels."
           },
           "auto_control": {
             "name": "Auto-Control Movement",
@@ -97,59 +90,6 @@
           }
         },
         "actions": {
-          "AddLadder": {
-            "list-name": "Add ladder",
-            "display-text": "Add ladder from ({0}, {1}) to ({2}, {3}) [Climb speed: {4}]",
-            "description": "Add a ladder connection between two points. The AI can use this to climb vertically. Returns ladder ID for later reference. Note: This feature may not be fully implemented yet.",
-            "params": {
-              "bottomX": {
-                "name": "Bottom X",
-                "desc": "Bottom world X position"
-              },
-              "bottomY": {
-                "name": "Bottom Y",
-                "desc": "Bottom world Y position"
-              },
-              "topX": {
-                "name": "Top X",
-                "desc": "Top world X position"
-              },
-              "topY": {
-                "name": "Top Y",
-                "desc": "Top world Y position"
-              },
-              "climbSpeed": {
-                "name": "Climb speed",
-                "desc": "Climbing speed in pixels per second"
-              }
-            }
-          },
-          "RemoveLadder": {
-            "list-name": "Remove ladder",
-            "display-text": "Remove ladder {0}",
-            "description": "Remove a ladder by its ID. Use when a ladder is no longer accessible or has been destroyed.",
-            "params": {
-              "id": {
-                "name": "ID",
-                "desc": "Ladder ID to remove"
-              }
-            }
-          },
-          "SetLadderClimbSpeed": {
-            "list-name": "Set ladder climb speed",
-            "display-text": "Set ladder {0} climb speed to {1}",
-            "description": "Change the climbing speed for a specific ladder. Use to adjust ladder traversal speed dynamically.",
-            "params": {
-              "id": {
-                "name": "ID",
-                "desc": "Ladder ID"
-              },
-              "speed": {
-                "name": "Speed",
-                "desc": "New climb speed in pixels per second"
-              }
-            }
-          },
           "SetMaxFallDistance": {
             "list-name": "Set max fall distance",
             "display-text": "Set max fall distance to {0} px",
@@ -579,10 +519,52 @@
             "description": "Stop the character immediately and clear the current path. Use when you want to cancel AI navigation and regain manual control.",
             "params": {}
           },
-          "AddPortal": {
-            "list-name": "Add portal",
-            "display-text": "Add {0} portal from ({1}, {2}) to ({3}, {4}) with cost {5}",
-            "description": "Add a portal connection between two positions. The AI can use this portal during pathfinding to teleport from the entry to the exit. Use 'one-way' for things like launch pads or trap doors that only send you in one direction. Use 'two-way' for doors, elevators, or teleporters that work in both directions. The portal is automatically assigned an ID — use the 'LastPortalID' expression right after this action to save it, so you can remove or configure the portal later. Portal navigation is automatically enabled.",
+          "AddElevatorStop": {
+            "list-name": "Add elevator stop",
+            "display-text": "Add elevator stop to group {0} at ({1}, {2}) [Speed: {3}]",
+            "description": "Add a stop to an elevator group. Automatically creates two-way gradual portals between this stop and all other stops in the same group. Cost is auto-calculated from distance and speed. Use a unique group name (e.g. 'elevator_A') for each elevator. Example: 3 calls with the same group creates 3 pairwise portals (Floor1-Floor2, Floor1-Floor3, Floor2-Floor3). Use PortalExitX/PortalExitY in 'On portal entry' to determine which floor the AI is heading to.",
+            "params": {
+              "groupId": {
+                "name": "Group",
+                "desc": "Unique group name for this elevator (e.g. 'elevator_A')"
+              },
+              "x": {
+                "name": "X",
+                "desc": "World X position of this stop"
+              },
+              "y": {
+                "name": "Y",
+                "desc": "World Y position of this stop"
+              },
+              "speed": {
+                "name": "Speed",
+                "desc": "Movement speed in pixels per second"
+              }
+            }
+          },
+          "AddElevatorStopFromObject": {
+            "list-name": "Add elevator stop from object",
+            "display-text": "Add elevator stop to group {0} at {1} [Speed: {2}]",
+            "description": "Add an elevator stop using an object's position. Same as 'Add elevator stop' but uses the object's current X/Y. The object serves as a floor marker.",
+            "params": {
+              "groupId": {
+                "name": "Group",
+                "desc": "Unique group name for this elevator"
+              },
+              "object": {
+                "name": "Object",
+                "desc": "The object to use as the elevator stop position"
+              },
+              "speed": {
+                "name": "Speed",
+                "desc": "Movement speed in pixels per second"
+              }
+            }
+          },
+          "AddGradualPortal": {
+            "list-name": "Add gradual portal",
+            "display-text": "Add {0} gradual portal from ({1}, {2}) to ({3}, {4}) [Cost: {5}] [Speed: {6}]",
+            "description": "Add a portal that gradually moves the AI from entry to exit at the given speed. The character moves in a straight line (any direction — vertical, horizontal, or diagonal). Platform behavior is disabled during movement. Use for: elevators, lifts, moving platforms, ziplines. For vertical-only movement (ladders/ropes), align entry and exit X positions, or use 'Pause at portal' to implement your own custom movement via events.",
             "params": {
               "direction": {
                 "name": "Direction",
@@ -610,14 +592,18 @@
               },
               "cost": {
                 "name": "Cost",
-                "desc": "How much the AI 'pays' to use this portal. Default 1 = same as walking one tile. Set lower (e.g. 0.5) to make the AI prefer this portal over walking. Set higher (e.g. 10) to make the AI avoid this portal unless there's no other route. Useful for making the AI prefer shorter walking paths over convenient but lore-unfriendly teleports, or for making certain portals feel like a last resort."
+                "desc": "Movement cost. Default 1 = auto-calculated from distance and speed. Set higher to make AI avoid this portal."
+              },
+              "speed": {
+                "name": "Speed",
+                "desc": "Movement speed in pixels per second"
               }
             }
           },
-          "AddPortalFromObjects": {
-            "list-name": "Add portal from objects",
-            "display-text": "Add {0} portal from {1} to {2} with cost {3}",
-            "description": "Add a portal between two objects, using their current positions as the entry and exit points. The AI can then pathfind through this portal to teleport between them. Great for connecting doors, elevators, or teleporter sprites — just place the objects in your layout and use this action to link them. Use 'one-way' for things like launch pads. Use 'two-way' for doors that work both ways. Use the 'LastPortalID' expression to retrieve the assigned portal ID.",
+          "AddGradualPortalFromObjects": {
+            "list-name": "Add gradual portal from objects",
+            "display-text": "Add {0} gradual portal from {1} to {2} [Cost: {3}] [Speed: {4}]",
+            "description": "Add a gradual portal using two objects. Character moves from entry object to exit object at the given speed. Use for: linking elevator sprites, rope endpoints, etc.",
             "params": {
               "direction": {
                 "name": "Direction",
@@ -629,15 +615,81 @@
               },
               "entryObject": {
                 "name": "Entry object",
-                "desc": "The object to use as the portal entry point (uses its X, Y position)"
+                "desc": "The object to use as the portal entry point"
               },
               "exitObject": {
                 "name": "Exit object",
-                "desc": "The object to use as the portal exit point (uses its X, Y position)"
+                "desc": "The object to use as the portal exit point"
               },
               "cost": {
                 "name": "Cost",
-                "desc": "How much the AI 'pays' to use this portal. Default 1 = same as walking one tile. Set lower (e.g. 0.5) to make the AI prefer this portal over walking. Set higher (e.g. 10) to make the AI avoid this portal unless there's no other route. Useful for making the AI prefer shorter walking paths over convenient but lore-unfriendly teleports, or for making certain portals feel like a last resort."
+                "desc": "Movement cost (default 1 = auto-calculated)"
+              },
+              "speed": {
+                "name": "Speed",
+                "desc": "Movement speed in pixels per second"
+              }
+            }
+          },
+          "AddInstantPortal": {
+            "list-name": "Add instant portal",
+            "display-text": "Add {0} instant portal from ({1}, {2}) to ({3}, {4}) [Cost: {5}]",
+            "description": "Add a portal that instantly teleports the AI from the entry to the exit. Use for: teleporters, doors, warp zones, or any portal where the character disappears and reappears at the exit. Use 'On portal entry' with 'Pause at portal' to play animations before the teleport happens.",
+            "params": {
+              "direction": {
+                "name": "Direction",
+                "desc": "One-way: entry to exit only. Two-way: works in both directions.",
+                "items": {
+                  "one_way": "One-way",
+                  "two_way": "Two-way"
+                }
+              },
+              "entryX": {
+                "name": "Entry X",
+                "desc": "Entry world X position in pixels"
+              },
+              "entryY": {
+                "name": "Entry Y",
+                "desc": "Entry world Y position in pixels"
+              },
+              "exitX": {
+                "name": "Exit X",
+                "desc": "Exit world X position in pixels"
+              },
+              "exitY": {
+                "name": "Exit Y",
+                "desc": "Exit world Y position in pixels"
+              },
+              "cost": {
+                "name": "Cost",
+                "desc": "How much the AI 'pays' to use this portal. Default 1 = same as walking one tile. Lower = preferred, higher = avoided."
+              }
+            }
+          },
+          "AddInstantPortalFromObjects": {
+            "list-name": "Add instant portal from objects",
+            "display-text": "Add {0} instant portal from {1} to {2} [Cost: {3}]",
+            "description": "Add an instant portal using two objects as entry and exit positions. The objects' current X/Y positions are used. Use for: linking door sprites, warp pad objects, etc.",
+            "params": {
+              "direction": {
+                "name": "Direction",
+                "desc": "One-way: entry to exit only. Two-way: works in both directions.",
+                "items": {
+                  "one_way": "One-way",
+                  "two_way": "Two-way"
+                }
+              },
+              "entryObject": {
+                "name": "Entry object",
+                "desc": "The object to use as the portal entry point"
+              },
+              "exitObject": {
+                "name": "Exit object",
+                "desc": "The object to use as the portal exit point"
+              },
+              "cost": {
+                "name": "Cost",
+                "desc": "Movement cost (lower = preferred, default is 1)"
               }
             }
           },
@@ -647,10 +699,22 @@
             "description": "Remove all portals from the navigation graph. Useful when resetting the level or switching layouts.",
             "params": {}
           },
+          "CompletePortal": {
+            "list-name": "Complete portal",
+            "display-text": "Complete portal",
+            "description": "Finish a paused portal without executing its built-in movement. Use this when you've already moved the character yourself (e.g., custom animation, physics launch, manual position set). The AI will continue pathfinding from wherever the character is now. Also works mid-traverse to cut a gradual portal short.",
+            "params": {}
+          },
+          "PauseAtPortal": {
+            "list-name": "Pause at portal",
+            "display-text": "Pause at portal",
+            "description": "Call INSIDE 'On portal entry' to pause the AI before the portal executes. The character stops at the entry point and waits. Use this to play animations, open doors, trigger screen transitions, or run any custom events before the portal activates. Call 'Resume portal' to execute the built-in behavior, or 'Complete portal' if you moved the character yourself.",
+            "params": {}
+          },
           "RemovePortal": {
             "list-name": "Remove portal by ID",
             "display-text": "Remove portal with ID {0}",
-            "description": "Remove a portal by its ID. The portal connection is removed from the navigation graph immediately. Use 'LastPortalID' to get the ID right after adding a portal, or store it in a variable for later removal.",
+            "description": "Remove a portal by its ID. The portal connection is removed from the navigation graph immediately.",
             "params": {
               "portalId": {
                 "name": "Portal ID",
@@ -661,18 +725,24 @@
           "RemovePortalAtObject": {
             "list-name": "Remove portal at object",
             "display-text": "Remove portal at {0}",
-            "description": "Remove the portal whose entry point is closest to this object's position. Useful when you placed portals using objects and want to remove one without tracking its ID — just reference the same entry object. If no portal is found near the object, nothing happens.",
+            "description": "Remove the portal closest to this object. Works with both entry and exit positions — for two-way portals, either endpoint object can be used.",
             "params": {
               "object": {
                 "name": "Object",
-                "desc": "The object whose position to match against portal entry points"
+                "desc": "The object whose position to match against portal positions"
               }
             }
+          },
+          "ResumePortal": {
+            "list-name": "Resume portal",
+            "display-text": "Resume portal",
+            "description": "Continue portal execution after pausing with 'Pause at portal'. For instant portals: teleports the character to the exit. For gradual portals: begins moving the character toward the exit. Use this when you want the portal's built-in movement to handle the transition.",
+            "params": {}
           },
           "SetPortalCost": {
             "list-name": "Set portal cost",
             "display-text": "Set portal {0} cost to {1}",
-            "description": "Change how 'expensive' a portal is for the AI to use. Lower cost means the AI prefers this portal; higher cost means it will avoid it unless there's no better route. Default cost is 1. Use this to make certain portals less desirable — for example, a dangerous teleporter could have cost 50 so the AI only uses it as a last resort.",
+            "description": "Change how 'expensive' a portal is for the AI to use. Lower cost = preferred, higher cost = avoided.",
             "params": {
               "portalId": {
                 "name": "Portal ID",
@@ -687,7 +757,7 @@
           "SetPortalIgnoreHazards": {
             "list-name": "Set portal ignore hazards",
             "display-text": "Set portal {0} ignore hazards: {1}",
-            "description": "Set whether a portal ignores nearby hazards when calculating its pathfinding cost. Normally, portals near hazard zones get a higher cost to discourage the AI from using them. Enable this to make the AI always consider this portal regardless of surrounding dangers — useful for escape portals near fire, or safe teleporters that bypass dangerous areas.",
+            "description": "Set whether a portal ignores nearby hazards when calculating its pathfinding cost.",
             "params": {
               "portalId": {
                 "name": "Portal ID",
@@ -702,21 +772,39 @@
                 }
               }
             }
+          },
+          "SetPortalSpeed": {
+            "list-name": "Set portal speed",
+            "display-text": "Set portal {0} speed to {1}",
+            "description": "Change the movement speed of a gradual portal (pixels per second). Has no effect on instant portals.",
+            "params": {
+              "portalId": {
+                "name": "Portal ID",
+                "desc": "The ID of the portal to configure"
+              },
+              "speed": {
+                "name": "Speed",
+                "desc": "Movement speed in pixels per second"
+              }
+            }
+          },
+          "TeleportToPosition": {
+            "list-name": "Teleport to position",
+            "display-text": "Teleport to ({0}, {1})",
+            "description": "Instantly move the character to the given position. Can be used anywhere — inside portal events, on button press, on collision, etc. Suppresses re-pathing for one tick to prevent the AI from thinking it's lost. Useful with 'Pause at portal' + 'Complete portal' for fully custom portal behavior.",
+            "params": {
+              "x": {
+                "name": "X",
+                "desc": "Target world X position in pixels"
+              },
+              "y": {
+                "name": "Y",
+                "desc": "Target world Y position in pixels"
+              }
+            }
           }
         },
         "conditions": {
-          "IsClimbingLadder": {
-            "list-name": "Is climbing ladder",
-            "display-text": "Is climbing ladder",
-            "description": "Check if the character is currently climbing a ladder. Returns true during ladder traversal, false otherwise.",
-            "params": {}
-          },
-          "OnLadderClimbComplete": {
-            "list-name": "On ladder climb complete",
-            "display-text": "On ladder climb complete",
-            "description": "Triggered when the character finishes climbing a ladder. Use to trigger animations or next actions after ladder traversal.",
-            "params": {}
-          },
           "IsNodeLedge": {
             "list-name": "Is node at ledge",
             "display-text": "Is node at ({0}, {1}) a ledge",
@@ -943,24 +1031,32 @@
             "description": "Triggered when the character has been stuck at a waypoint for too long (exceeds Max Waypoint Time). The path is automatically cancelled. Use this to handle stuck situations or repath.",
             "params": {}
           },
-          "OnPortalUsed": {
-            "list-name": "On portal used",
-            "display-text": "On portal used",
-            "description": "Triggered when the AI teleports through a portal during pathfinding. Use this to play teleport effects, sounds, or animations. Use the 'CurrentPortalID' expression to get which portal was used.",
+          "IsAtPortal": {
+            "list-name": "Is at portal",
+            "display-text": "Is at portal",
+            "description": "True when the AI is paused at a portal entry (after 'Pause at portal' was called but before 'Resume portal' or 'Complete portal'). Use to check if the character is waiting at a portal.",
+            "params": {}
+          },
+          "IsTraversingPortal": {
+            "list-name": "Is traversing portal",
+            "display-text": "Is traversing portal",
+            "description": "True when the AI is currently moving through a gradual portal (elevator, ladder, etc.). Platform behavior is disabled during traversal.",
+            "params": {}
+          },
+          "OnPortalComplete": {
+            "list-name": "On portal complete",
+            "display-text": "On portal complete",
+            "description": "Triggered when portal execution finishes — after an instant teleport completes, a gradual movement reaches the exit, or 'Complete portal' is called. Use this for post-portal effects like opening doors at the exit, playing arrival animations, etc.",
+            "params": {}
+          },
+          "OnPortalEntry": {
+            "list-name": "On portal entry",
+            "display-text": "On portal entry",
+            "description": "Triggered when the AI arrives at a portal entry point, BEFORE the portal executes. Use 'Pause at portal' inside this event to delay execution and run your own events first (animations, sounds, screen effects). If you don't pause, the portal executes immediately. Use CurrentPortalID to identify which portal was reached.",
             "params": {}
           }
         },
         "expressions": {
-          "ClimbingLadder": {
-            "translated-name": "ClimbingLadder",
-            "description": "Check if currently climbing a ladder. Returns 1 if climbing, 0 if not.",
-            "params": {}
-          },
-          "LadderProgress": {
-            "translated-name": "LadderProgress",
-            "description": "Get the current ladder climbing progress as a value from 0 to 1. Returns 0 if not climbing a ladder.",
-            "params": {}
-          },
           "CalculatedJumpDistance": {
             "translated-name": "CalculatedJumpDistance",
             "description": "Get the calculated maximum horizontal jump distance in pixels based on Platform behavior settings. Used for determining reachable positions.",
@@ -1464,11 +1560,6 @@
             "description": "Get the world Y position of the jump-at target. Returns 0 if not in jump-at mode.",
             "params": {}
           },
-          "LastPortalID": {
-            "translated-name": "LastPortalID",
-            "description": "Returns the ID of the most recently added portal. Use this right after 'Add portal' or 'Add portal from objects' to save the ID into a variable, so you can later remove or configure that specific portal.",
-            "params": {}
-          },
           "LedgeLeniency": {
             "translated-name": "LedgeLeniency",
             "description": "Get the ledge leniency setting in pixels. This is how far past a ledge edge the AI can walk before stopping.",
@@ -1557,11 +1648,6 @@
               }
             }
           },
-          "PortalCount": {
-            "translated-name": "PortalCount",
-            "description": "Get the total number of portals in the navigation graph. Returns 0 if no portals have been added.",
-            "params": {}
-          },
           "StoppingDistance": {
             "translated-name": "StoppingDistance",
             "description": "Get the calculated stopping distance in pixels based on the Platform behavior's current speed. Used for waypoint arrival detection.",
@@ -1619,8 +1705,43 @@
           },
           "CurrentPortalID": {
             "translated-name": "CurrentPortalID",
-            "description": "Returns the ID of the portal currently being used. Only valid inside an 'On portal used' trigger. Use this to look up which portal the AI just teleported through.",
+            "description": "Returns the portal ID during OnPortalEntry/OnPortalComplete triggers. Use to identify which portal was reached.",
             "params": {}
+          },
+          "LastPortalID": {
+            "translated-name": "LastPortalID",
+            "description": "Returns the ID of the most recently added portal. Use right after adding a portal to save the ID for later configuration or removal.",
+            "params": {}
+          },
+          "PortalCount": {
+            "translated-name": "PortalCount",
+            "description": "Get the total number of portals.",
+            "params": {}
+          },
+          "PortalExitX": {
+            "translated-name": "PortalExitX",
+            "description": "Get the exit X position of the current portal. Valid inside OnPortalEntry/OnPortalComplete triggers.",
+            "params": {}
+          },
+          "PortalExitY": {
+            "translated-name": "PortalExitY",
+            "description": "Get the exit Y position of the current portal. Valid inside OnPortalEntry/OnPortalComplete triggers.",
+            "params": {}
+          },
+          "PortalProgress": {
+            "translated-name": "PortalProgress",
+            "description": "Get the 0-1 traversal progress for gradual portals. Returns 0 if not traversing.",
+            "params": {}
+          },
+          "PortalType": {
+            "translated-name": "PortalType",
+            "description": "Returns 'instant' or 'gradual' for the given portal ID.",
+            "params": {
+              "portalId": {
+                "name": "Portal ID",
+                "desc": "The portal ID to check"
+              }
+            }
           }
         }
       }

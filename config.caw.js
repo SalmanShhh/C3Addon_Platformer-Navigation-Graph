@@ -14,7 +14,7 @@ export const minConstructVersion = undefined;
 export const author = "SalmanShh";
 export const website = "https://www.construct.net";
 export const documentation = "https://www.construct.net";
-export const description = "AI pathfinding for platformers: lets characters jump, fall, and navigate complex levels. Easy presets for beginners, deep customization for advanced users. Supports auto or manual control, hazards, portals, and integrates with Platform behavior.";
+export const description = "Smart pathfinding for platformer games. Characters automatically jump across gaps, fall between platforms, and find optimal routes through complex levels. Includes instant portals (teleporters, doors) and gradual portals (elevators, ladders, ziplines) with pause/resume support for custom animations. Features hazard avoidance, multiple path strategies, coyote jumps, ledge restriction, and multi-agent support. Works with the built-in Platform behavior — just add the behavior and go.";
 export const category = ADDON_CATEGORY.MOVEMENTS;
 
 export const hasDomside = false;
@@ -117,19 +117,11 @@ export const properties = [
 
   // Property [3]
   {
-    type: PROPERTY_TYPE.COMBO,
-    id: "setup_preset",
-    name: "Setup Preset",
-    desc: "Pre-configured jump/fall settings. Auto: detects from Platform behavior. Beginner: short jumps, safe falls. Intermediate: moderate mobility. Advanced: maximum jump/fall distances for complex levels.",
-    options: {
-      initialValue: "auto",
-      items: [
-        { auto: "Auto (detect from Platform behavior)" },
-        { beginner: "Beginner (short jumps, safe falls)" },
-        { intermediate: "Intermediate (moderate mobility)" },
-        { advanced: "Advanced (maximum distances)" }
-      ]
-    }
+    type: PROPERTY_TYPE.INTEGER,
+    id: "max_fall_distance",
+    name: "Max Fall Distance",
+    desc: "Maximum fall distance in pixels. 0 = auto-detect from Platform behavior. -1 = unlimited (any fall). Positive value = custom max in pixels.",
+    options: { initialValue: 0 }
   },
 
   // Property [4]

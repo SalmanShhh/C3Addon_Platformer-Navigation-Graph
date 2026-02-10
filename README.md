@@ -1,6 +1,6 @@
 <img src="./src/icon.svg" width="100" /><br>
 # Platformer Navigation Graph
-<i>AI pathfinding for platformers: lets characters jump, fall, and navigate complex levels. Easy presets for beginners, deep customization for advanced users. Supports auto or manual control, hazards, portals, and integrates with Platform behavior.</i> <br>
+<i>Smart pathfinding for platformer games. Characters automatically jump across gaps, fall between platforms, and find optimal routes through complex levels. Includes instant portals (teleporters, doors) and gradual portals (elevators, ladders, ziplines) with pause/resume support for custom animations. Features hazard avoidance, multiple path strategies, coyote jumps, ledge restriction, and multi-agent support. Works with the built-in Platform behavior — just add the behavior and go.</i> <br>
 ### Version 0.3.0.0
 
 [<img src="https://placehold.co/200x50/4493f8/FFF?text=Download&font=montserrat" width="200"/>](https://github.com/SalmanShhh/Platformer-Navigation-Graph-V2/releases/download/salmanshh_platformer_navigationgraph-0.3.0.0.c3addon/salmanshh_platformer_navigationgraph-0.3.0.0.c3addon)
@@ -59,7 +59,7 @@ npm run dev
 | Enable Debug Logging | Show helpful debug messages in browser console (F12) to troubleshoot pathfinding issues. Disable for better performance in final game. | check |
 | Tile Size | Size of each grid tile in pixels. MUST match the Cell Size in your Pathfinding behavior! Smaller = more precise paths but slower performance. | integer |
 | Max Search Nodes | Maximum pathfinding effort before giving up. Higher = finds paths in larger levels but may cause lag. Lower = faster but may fail on complex paths. | integer |
-| Setup Preset | Pre-configured jump/fall settings. Auto: detects from Platform behavior. Beginner: short jumps, safe falls. Intermediate: moderate mobility. Advanced: maximum jump/fall distances for complex levels. | combo |
+| Max Fall Distance | Maximum fall distance in pixels. 0 = auto-detect from Platform behavior. -1 = unlimited (any fall). Positive value = custom max in pixels. | integer |
 | Auto-Control Movement | When enabled, AI automatically controls the character (moves left/right, jumps). When disabled, you handle movement yourself using the path data. | check |
 | Graph Mode | How navigation data is stored. Shared = all characters use same map (efficient). Per-Instance = each character has own map (rare use cases only). | combo |
 | Path Strategy | How the AI picks the best route when multiple paths exist. Balanced: weighs distance and difficulty equally, good for most platformers and adventure games. Shortest Distance: always takes the fastest route even with risky jumps, ideal for speedrunner games and time trials. Safest Route: avoids jumps and falls when possible, great for stealth games, escort missions, or fragile NPCs. Simplest Path: fewest waypoints for predictable movement, best for simple enemies and tower defense creeps. | combo |
@@ -77,9 +77,6 @@ npm run dev
 ## Actions
 | Action | Description | Params
 | --- | --- | --- |
-| Add ladder | Add a ladder connection between two points. The AI can use this to climb vertically. Returns ladder ID for later reference. Note: This feature may not be fully implemented yet. | Bottom X             *(number)* <br>Bottom Y             *(number)* <br>Top X             *(number)* <br>Top Y             *(number)* <br>Climb speed             *(number)* <br> |
-| Remove ladder | Remove a ladder by its ID. Use when a ladder is no longer accessible or has been destroyed. | ID             *(number)* <br> |
-| Set ladder climb speed | Change the climbing speed for a specific ladder. Use to adjust ladder traversal speed dynamically. | ID             *(number)* <br>Speed             *(number)* <br> |
 | Set max fall distance | Override the auto-calculated maximum fall distance. The navigation graph must be regenerated after changing this for the new value to take effect. | Distance (px)             *(number)* <br> |
 | Set max jump distance | Override the auto-calculated maximum horizontal jump distance. The navigation graph must be regenerated after changing this for the new value to take effect. | Distance (px)             *(number)* <br> |
 | Set max jump height | Override the auto-calculated maximum jump height. The navigation graph must be regenerated after changing this for the new value to take effect. | Height (px)             *(number)* <br> |
@@ -111,21 +108,28 @@ npm run dev
 | Set re-path cooldown | Set the minimum time in seconds between automatic re-path attempts. Lower values = more responsive re-pathing but more CPU usage. Default is 0.5 seconds. | Seconds             *(number)* <br> |
 | Set strict jump positioning | Toggle whether this AI character slows down and carefully positions itself before jumping or falling during pathfinding. This does NOT affect walking off edges (use 'Set ledge restriction' for that). Use this to change behavior at runtime — for example, disable when a boss enters 'rage mode' for reckless movement, or enable when an NPC needs to carefully cross a narrow bridge. Overrides the property setting for this character. | Enabled             *(combo)* <br> |
 | Stop pathfinding | Stop the character immediately and clear the current path. Use when you want to cancel AI navigation and regain manual control. |  |
-| Add portal | Add a portal connection between two positions. The AI can use this portal during pathfinding to teleport from the entry to the exit. Use 'one-way' for things like launch pads or trap doors that only send you in one direction. Use 'two-way' for doors, elevators, or teleporters that work in both directions. The portal is automatically assigned an ID — use the 'LastPortalID' expression right after this action to save it, so you can remove or configure the portal later. Portal navigation is automatically enabled. | Direction             *(combo)* <br>Entry X             *(number)* <br>Entry Y             *(number)* <br>Exit X             *(number)* <br>Exit Y             *(number)* <br>Cost             *(number)* <br> |
-| Add portal from objects | Add a portal between two objects, using their current positions as the entry and exit points. The AI can then pathfind through this portal to teleport between them. Great for connecting doors, elevators, or teleporter sprites — just place the objects in your layout and use this action to link them. Use 'one-way' for things like launch pads. Use 'two-way' for doors that work both ways. Use the 'LastPortalID' expression to retrieve the assigned portal ID. | Direction             *(combo)* <br>Entry object             *(object)* <br>Exit object             *(object)* <br>Cost             *(number)* <br> |
+| Add elevator stop | Add a stop to an elevator group. Automatically creates two-way gradual portals between this stop and all other stops in the same group. Cost is auto-calculated from distance and speed. Use a unique group name (e.g. 'elevator_A') for each elevator. Example: 3 calls with the same group creates 3 pairwise portals (Floor1-Floor2, Floor1-Floor3, Floor2-Floor3). Use PortalExitX/PortalExitY in 'On portal entry' to determine which floor the AI is heading to. | Group             *(string)* <br>X             *(number)* <br>Y             *(number)* <br>Speed             *(number)* <br> |
+| Add elevator stop from object | Add an elevator stop using an object's position. Same as 'Add elevator stop' but uses the object's current X/Y. The object serves as a floor marker. | Group             *(string)* <br>Object             *(object)* <br>Speed             *(number)* <br> |
+| Add gradual portal | Add a portal that gradually moves the AI from entry to exit at the given speed. The character moves in a straight line (any direction — vertical, horizontal, or diagonal). Platform behavior is disabled during movement. Use for: elevators, lifts, moving platforms, ziplines. For vertical-only movement (ladders/ropes), align entry and exit X positions, or use 'Pause at portal' to implement your own custom movement via events. | Direction             *(combo)* <br>Entry X             *(number)* <br>Entry Y             *(number)* <br>Exit X             *(number)* <br>Exit Y             *(number)* <br>Cost             *(number)* <br>Speed             *(number)* <br> |
+| Add gradual portal from objects | Add a gradual portal using two objects. Character moves from entry object to exit object at the given speed. Use for: linking elevator sprites, rope endpoints, etc. | Direction             *(combo)* <br>Entry object             *(object)* <br>Exit object             *(object)* <br>Cost             *(number)* <br>Speed             *(number)* <br> |
+| Add instant portal | Add a portal that instantly teleports the AI from the entry to the exit. Use for: teleporters, doors, warp zones, or any portal where the character disappears and reappears at the exit. Use 'On portal entry' with 'Pause at portal' to play animations before the teleport happens. | Direction             *(combo)* <br>Entry X             *(number)* <br>Entry Y             *(number)* <br>Exit X             *(number)* <br>Exit Y             *(number)* <br>Cost             *(number)* <br> |
+| Add instant portal from objects | Add an instant portal using two objects as entry and exit positions. The objects' current X/Y positions are used. Use for: linking door sprites, warp pad objects, etc. | Direction             *(combo)* <br>Entry object             *(object)* <br>Exit object             *(object)* <br>Cost             *(number)* <br> |
 | Clear all portals | Remove all portals from the navigation graph. Useful when resetting the level or switching layouts. |  |
-| Remove portal by ID | Remove a portal by its ID. The portal connection is removed from the navigation graph immediately. Use 'LastPortalID' to get the ID right after adding a portal, or store it in a variable for later removal. | Portal ID             *(number)* <br> |
-| Remove portal at object | Remove the portal whose entry point is closest to this object's position. Useful when you placed portals using objects and want to remove one without tracking its ID — just reference the same entry object. If no portal is found near the object, nothing happens. | Object             *(object)* <br> |
-| Set portal cost | Change how 'expensive' a portal is for the AI to use. Lower cost means the AI prefers this portal; higher cost means it will avoid it unless there's no better route. Default cost is 1. Use this to make certain portals less desirable — for example, a dangerous teleporter could have cost 50 so the AI only uses it as a last resort. | Portal ID             *(number)* <br>Cost             *(number)* <br> |
-| Set portal ignore hazards | Set whether a portal ignores nearby hazards when calculating its pathfinding cost. Normally, portals near hazard zones get a higher cost to discourage the AI from using them. Enable this to make the AI always consider this portal regardless of surrounding dangers — useful for escape portals near fire, or safe teleporters that bypass dangerous areas. | Portal ID             *(number)* <br>Ignore hazards             *(combo)* <br> |
+| Complete portal | Finish a paused portal without executing its built-in movement. Use this when you've already moved the character yourself (e.g., custom animation, physics launch, manual position set). The AI will continue pathfinding from wherever the character is now. Also works mid-traverse to cut a gradual portal short. |  |
+| Pause at portal | Call INSIDE 'On portal entry' to pause the AI before the portal executes. The character stops at the entry point and waits. Use this to play animations, open doors, trigger screen transitions, or run any custom events before the portal activates. Call 'Resume portal' to execute the built-in behavior, or 'Complete portal' if you moved the character yourself. |  |
+| Remove portal by ID | Remove a portal by its ID. The portal connection is removed from the navigation graph immediately. | Portal ID             *(number)* <br> |
+| Remove portal at object | Remove the portal closest to this object. Works with both entry and exit positions — for two-way portals, either endpoint object can be used. | Object             *(object)* <br> |
+| Resume portal | Continue portal execution after pausing with 'Pause at portal'. For instant portals: teleports the character to the exit. For gradual portals: begins moving the character toward the exit. Use this when you want the portal's built-in movement to handle the transition. |  |
+| Set portal cost | Change how 'expensive' a portal is for the AI to use. Lower cost = preferred, higher cost = avoided. | Portal ID             *(number)* <br>Cost             *(number)* <br> |
+| Set portal ignore hazards | Set whether a portal ignores nearby hazards when calculating its pathfinding cost. | Portal ID             *(number)* <br>Ignore hazards             *(combo)* <br> |
+| Set portal speed | Change the movement speed of a gradual portal (pixels per second). Has no effect on instant portals. | Portal ID             *(number)* <br>Speed             *(number)* <br> |
+| Teleport to position | Instantly move the character to the given position. Can be used anywhere — inside portal events, on button press, on collision, etc. Suppresses re-pathing for one tick to prevent the AI from thinking it's lost. Useful with 'Pause at portal' + 'Complete portal' for fully custom portal behavior. | X             *(number)* <br>Y             *(number)* <br> |
 
 
 ---
 ## Conditions
 | Condition | Description | Params
 | --- | --- | --- |
-| Is climbing ladder | Check if the character is currently climbing a ladder. Returns true during ladder traversal, false otherwise. |  |
-| On ladder climb complete | Triggered when the character finishes climbing a ladder. Use to trigger animations or next actions after ladder traversal. |  |
 | Is node at ledge | Check if a specific node is marked as a ledge (platform edge). Returns true if the node is a left or right ledge. | Grid X *(number)* <br>Grid Y *(number)* <br> |
 | Is position hazardous | Check if a specific world position is within any hazard area (circle, rect, or tile). Returns true if any hazard affects this position. | X *(number)* <br>Y *(number)* <br> |
 | Is multi-agent avoidance enabled | Check if multi-agent collision avoidance is currently enabled. Returns true if enabled, false otherwise. |  |
@@ -151,15 +155,16 @@ npm run dev
 | On re-path triggered | Triggered when automatic re-pathing occurs due to the character drifting too far from the path. Use this to monitor navigation accuracy. |  |
 | On waypoint reached | Triggered each time the character reaches a waypoint along the path. Use this to play footstep sounds, particle effects, or update animations. |  |
 | On waypoint stuck | Triggered when the character has been stuck at a waypoint for too long (exceeds Max Waypoint Time). The path is automatically cancelled. Use this to handle stuck situations or repath. |  |
-| On portal used | Triggered when the AI teleports through a portal during pathfinding. Use this to play teleport effects, sounds, or animations. Use the 'CurrentPortalID' expression to get which portal was used. |  |
+| Is at portal | True when the AI is paused at a portal entry (after 'Pause at portal' was called but before 'Resume portal' or 'Complete portal'). Use to check if the character is waiting at a portal. |  |
+| Is traversing portal | True when the AI is currently moving through a gradual portal (elevator, ladder, etc.). Platform behavior is disabled during traversal. |  |
+| On portal complete | Triggered when portal execution finishes — after an instant teleport completes, a gradual movement reaches the exit, or 'Complete portal' is called. Use this for post-portal effects like opening doors at the exit, playing arrival animations, etc. |  |
+| On portal entry | Triggered when the AI arrives at a portal entry point, BEFORE the portal executes. Use 'Pause at portal' inside this event to delay execution and run your own events first (animations, sounds, screen effects). If you don't pause, the portal executes immediately. Use CurrentPortalID to identify which portal was reached. |  |
 
 
 ---
 ## Expressions
 | Expression | Description | Return Type | Params
 | --- | --- | --- | --- |
-| ClimbingLadder | Check if currently climbing a ladder. Returns 1 if climbing, 0 if not. | number |  | 
-| LadderProgress | Get the current ladder climbing progress as a value from 0 to 1. Returns 0 if not climbing a ladder. | number |  | 
 | CalculatedJumpDistance | Get the calculated maximum horizontal jump distance in pixels based on Platform behavior settings. Used for determining reachable positions. | number |  | 
 | CalculatedJumpHeight | Get the calculated maximum jump height in pixels based on Platform behavior settings. Used for determining reachable positions. | number |  | 
 | PlatformJumpStrength | Get the jump strength from the Platform behavior. Used for internal pathfinding calculations. Returns 0 if Platform behavior not found. | number |  | 
@@ -214,7 +219,6 @@ npm run dev
 | EstimatedVelocityX | Get the estimated horizontal velocity needed to follow the current path. Returns 0 if no path is active. | number |  | 
 | JumpTowardTargetX | Get the world X position of the jump-at target. Returns 0 if not in jump-at mode. | number |  | 
 | JumpTowardTargetY | Get the world Y position of the jump-at target. Returns 0 if not in jump-at mode. | number |  | 
-| LastPortalID | Returns the ID of the most recently added portal. Use this right after 'Add portal' or 'Add portal from objects' to save the ID into a variable, so you can later remove or configure that specific portal. | number |  | 
 | LedgeLeniency | Get the ledge leniency setting in pixels. This is how far past a ledge edge the AI can walk before stopping. | number |  | 
 | LedgeRestriction | Get whether ledge restriction is enabled. Returns 1 if enabled, 0 if disabled. | number |  | 
 | NodeCount | Get the total number of navigation nodes in the generated graph. Returns 0 if no graph exists. | number |  | 
@@ -227,7 +231,6 @@ npm run dev
 | PathTargetGridY | Get the grid Y coordinate of the path target. Returns -1 if no path is active. | number |  | 
 | PathTargetX | Get the world X position of the path target. Pass 'original' for raw input or 'corrected' for ground-snapped position. | number | Type *(string)* <br> | 
 | PathTargetY | Get the world Y position of the path target. Pass 'original' for raw input or 'corrected' for ground-snapped position. | number | Type *(string)* <br> | 
-| PortalCount | Get the total number of portals in the navigation graph. Returns 0 if no portals have been added. | number |  | 
 | StoppingDistance | Get the calculated stopping distance in pixels based on the Platform behavior's current speed. Used for waypoint arrival detection. | number |  | 
 | StrictJumpPositioning | Get whether strict jump positioning is currently active for this character. Returns 1 if enabled, 0 if disabled. Useful for conditional logic — e.g. switching between careful and aggressive pathfinding modes. | number |  | 
 | WaypointCount | Get the total number of waypoints in the current path. Returns 0 if no path is active. | number |  | 
@@ -235,7 +238,13 @@ npm run dev
 | WaypointGridY | Get the grid Y coordinate of a waypoint by index. Returns -1 if index is out of bounds. | number | Index *(number)* <br> | 
 | WaypointX | Get the world X position of a waypoint by index. the waypoint position is centred within the tile. Returns 0 if index is out of bounds. | number | Index *(number)* <br> | 
 | WaypointY | Get the world Y position of a waypoint by index. the waypoint position is centred within the tile. Returns 0 if index is out of bounds. | number | Index *(number)* <br> | 
-| CurrentPortalID | Returns the ID of the portal currently being used. Only valid inside an 'On portal used' trigger. Use this to look up which portal the AI just teleported through. | number |  | 
+| CurrentPortalID | Returns the portal ID during OnPortalEntry/OnPortalComplete triggers. Use to identify which portal was reached. | number |  | 
+| LastPortalID | Returns the ID of the most recently added portal. Use right after adding a portal to save the ID for later configuration or removal. | number |  | 
+| PortalCount | Get the total number of portals. | number |  | 
+| PortalExitX | Get the exit X position of the current portal. Valid inside OnPortalEntry/OnPortalComplete triggers. | number |  | 
+| PortalExitY | Get the exit Y position of the current portal. Valid inside OnPortalEntry/OnPortalComplete triggers. | number |  | 
+| PortalProgress | Get the 0-1 traversal progress for gradual portals. Returns 0 if not traversing. | number |  | 
+| PortalType | Returns 'instant' or 'gradual' for the given portal ID. | string | Portal ID *(number)* <br> | 
 
 
 ---
