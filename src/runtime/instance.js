@@ -2174,10 +2174,14 @@ export default function (parentClass) {
       if (validForward && validReversed) {
         bestPath = this._combinePaths(validForward, validReversed);
       } else if (validForward) {
+        const _fmtPath = (p) => p.map((wp, i) => `${i}:(${wp.node ? wp.node.gx : '?'},${wp.node ? wp.node.gy : '?'})${wp.action}`).join(' → ');
         this._log(`Using forward path only (no valid reverse)`);
+        this._log(`  Path: ${_fmtPath(validForward)}`);
         bestPath = validForward;
       } else if (validReversed) {
+        const _fmtPath = (p) => p.map((wp, i) => `${i}:(${wp.node ? wp.node.gx : '?'},${wp.node ? wp.node.gy : '?'})${wp.action}`).join(' → ');
         this._log(`Using reversed path only (no valid forward)`);
+        this._log(`  Path: ${_fmtPath(validReversed)}`);
         bestPath = validReversed;
       }
 
@@ -2369,6 +2373,14 @@ export default function (parentClass) {
           this._log(`Path validation failed: no connection between (${fromNode.gx},${fromNode.gy}) and (${toNode.gx},${toNode.gy}) at waypoint ${i}`);
           return null;
         }
+        // Fix action if it doesn't match the actual connection
+        // (can happen when _combinePaths merges at a common node)
+        if (path[i + 1].action !== conn.action) {
+          path[i + 1].action = conn.action;
+          path[i + 1].portalId = conn.portalId || null;
+          path[i + 1].speed = conn.speed || 0;
+          path[i + 1].peakHeight = conn.peakHeight || 0;
+        }
       }
       return path;
     }
@@ -2467,6 +2479,18 @@ export default function (parentClass) {
           ...forwardPath.slice(0, fwdIdx),
           ...reversedPath.slice(revIdx),
         ];
+        // Fix merge point: the first waypoint of the second half carries the action
+        // from the reversed path's predecessor, not the forward path's. Look up the
+        // actual connection between the last first-half node and the merge point.
+        if (fwdIdx > 0 && hybrid1.length > fwdIdx) {
+          const conn = this._findConnectionBetween(hybrid1[fwdIdx - 1].node, hybrid1[fwdIdx].node);
+          if (conn) {
+            hybrid1[fwdIdx].action = conn.action;
+            hybrid1[fwdIdx].portalId = conn.portalId || null;
+            hybrid1[fwdIdx].speed = conn.speed || 0;
+            hybrid1[fwdIdx].peakHeight = conn.peakHeight || 0;
+          }
+        }
         const cost1 = this._strategyCost(hybrid1);
         if (cost1 < bestCost) {
           bestCost = cost1;
@@ -2478,6 +2502,16 @@ export default function (parentClass) {
           ...reversedPath.slice(0, revIdx),
           ...forwardPath.slice(fwdIdx),
         ];
+        // Fix merge point action (same issue — forward path's action is for a different predecessor)
+        if (revIdx > 0 && hybrid2.length > revIdx) {
+          const conn = this._findConnectionBetween(hybrid2[revIdx - 1].node, hybrid2[revIdx].node);
+          if (conn) {
+            hybrid2[revIdx].action = conn.action;
+            hybrid2[revIdx].portalId = conn.portalId || null;
+            hybrid2[revIdx].speed = conn.speed || 0;
+            hybrid2[revIdx].peakHeight = conn.peakHeight || 0;
+          }
+        }
         const cost2 = this._strategyCost(hybrid2);
         if (cost2 < bestCost) {
           bestCost = cost2;
@@ -2702,7 +2736,7 @@ export default function (parentClass) {
         this.hasPath = false;
         this.departureCommitted = false;
         this.timeAtWaypoint = 0;
-        this._log(`Stuck at waypoint ${this.currentWaypoint} (exceeded ${this.maxWaypointTime}s)`);
+        this._log(`Stuck at waypoint ${this.currentWaypoint} action=${waypoint.action} target=(${Math.round(waypoint.x)},${Math.round(waypoint.y)}) pos=(${Math.round(this.instance.x)},${Math.round(this.instance.y)}) (exceeded ${this.maxWaypointTime}s)`);
         this._trigger("OnWaypointStuck");
         return;
       }
@@ -2782,8 +2816,14 @@ export default function (parentClass) {
         !this.justUsedPortal
       ) {
         const expectedMaxDist = this.cellSize * this.rePathThreshold;
+        // Only trigger repath when grounded AND performing a ground-based action.
+        // During jumps/falls the character is expected to be far from the waypoint
+        // temporarily — repathing mid-air would trigger false positives.
+        const isGroundAction = waypoint.action.includes("walk") ||
+          waypoint.action === "fall_through" || waypoint.action === "start";
         if (
           dist > expectedMaxDist &&
+          isGroundAction &&
           this.platformBehavior &&
           this.platformBehavior.isOnFloor
         ) {
@@ -3216,28 +3256,74 @@ export default function (parentClass) {
       const xDist = Math.abs(targetX - this.instance.x);
       const isVerticalJump = xDist < this.cellSize * 0.5;
 
-      // Centre within the current tile before jumping.
-      // This ensures the jump arc starts from an optimal position and prevents
-      // walking off confined tiles (islands, walled tiles) before the jump fires.
+      // Detect if the character has fallen off the expected launch platform.
+      // After reaching a walk waypoint, momentum can carry the character past the
+      // edge, landing on a lower platform. Jumping from here is futile — repath.
       if (this.platformBehavior.isOnFloor) {
         const prevIdx = this.currentWaypoint - 1;
         const prevWp = prevIdx >= 0 ? this.currentPath[prevIdx] : null;
         if (prevWp && prevWp.node) {
-          const tileCenterX = prevWp.node.x;
-          const distToCenter = Math.abs(this.instance.x - tileCenterX);
-          if (distToCenter > this.cellSize * 0.15) {
-            // Walk toward tile center before jumping
-            const centerDir = tileCenterX < this.instance.x ? "left" : "right";
-            try {
-              if (!this.platformBehavior.isByWall(centerDir)) {
-                this.platformBehavior.simulateControl(centerDir);
-              }
-            } catch (e) {}
-            return; // Wait until centered
+          const expectedY = prevWp.node.y;
+          const actualY = this.instance.y;
+          if (actualY > expectedY + this.cellSize * 1.5) {
+            this._warn(`Fell off launch platform (expected y=${Math.round(expectedY)}, actual y=${Math.round(actualY)}) — repathing`);
+            this._rePath();
+            return;
           }
-          // Centering complete — commit to departure (prevents walk input on this frame)
-          if (this.currentPathStrict) {
-            this.departureCommitted = true;
+        }
+      }
+
+      // Pre-position before jumping.
+      // When ledge restriction is OFF, a wall blocks the jump direction, AND the
+      // node has a ledge on that side (overhang scenario), walk to the platform edge
+      // to get horizontal clearance before jumping.
+      // Otherwise, centre within the current tile for an optimal arc start position.
+      if (this.platformBehavior.isOnFloor) {
+        const prevIdx = this.currentWaypoint - 1;
+        const prevWp = prevIdx >= 0 ? this.currentPath[prevIdx] : null;
+        if (prevWp && prevWp.node) {
+          const jumpDir = targetX < this.instance.x ? "left" : "right";
+          let wallBlocksJump = false;
+          try { wallBlocksJump = this.platformBehavior.isByWall(jumpDir); } catch (e) {}
+
+          // Slide-off: only when ledge restriction is OFF, a wall blocks the jump,
+          // AND the node has a ledge on the jump side (overhang, not a corner).
+          // If the node is NOT a ledge on that side, the character is in a corner
+          // with solid ground — can't slide off, fall through to normal centering.
+          const node = prevWp.node;
+          const hasLedge = (jumpDir === "right" && node.isRightLedge) ||
+                           (jumpDir === "left" && node.isLeftLedge);
+
+          if (!this.ledgeRestriction && wallBlocksJump && !isVerticalJump && hasLedge) {
+            const edgeLimitX = node.x + (jumpDir === "right" ? 1 : -1) * (this.cellSize * 0.45);
+            const pastEdge = jumpDir === "right"
+              ? this.instance.x >= edgeLimitX
+              : this.instance.x <= edgeLimitX;
+            if (!pastEdge) {
+              this.platformBehavior.simulateControl(jumpDir);
+              return; // Walk toward edge before jumping
+            }
+            // At edge — commit and proceed to jump
+            if (this.currentPathStrict) {
+              this.departureCommitted = true;
+            }
+          } else {
+            const tileCenterX = node.x;
+            const distToCenter = Math.abs(this.instance.x - tileCenterX);
+            if (distToCenter > this.cellSize * 0.15) {
+              // Walk toward tile center before jumping
+              const centerDir = tileCenterX < this.instance.x ? "left" : "right";
+              try {
+                if (!this.platformBehavior.isByWall(centerDir)) {
+                  this.platformBehavior.simulateControl(centerDir);
+                }
+              } catch (e) {}
+              return; // Wait until centered
+            }
+            // Centering complete — commit to departure (prevents walk input on this frame)
+            if (this.currentPathStrict) {
+              this.departureCommitted = true;
+            }
           }
         }
       }
