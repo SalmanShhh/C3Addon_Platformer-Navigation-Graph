@@ -394,11 +394,10 @@
               },
               "mode": {
                 "name": "Mode",
-                "desc": "Path mode: 'reach' finds a complete path or fails. 'nearest' paths as close as possible and never fails. 'jump_at' paths nearby then jumps at the target (for attacks).",
+                "desc": "Path mode: 'reach' finds a complete path or fails. 'nearest' paths as close as possible and never fails.",
                 "items": {
                   "reach": "Reach (default)",
-                  "nearest": "Nearest (never fails)",
-                  "jump_at": "Jump at target (attack)"
+                  "nearest": "Nearest (never fails)"
                 }
               },
               "strict": {
@@ -1002,12 +1001,6 @@
             "list-name": "On navigation graph generated",
             "display-text": "On navigation graph generated",
             "description": "Triggered when the navigation graph has been successfully generated. Use this to start pathfinding operations after map setup.",
-            "params": {}
-          },
-          "OnJumpTowardExecuted": {
-            "list-name": "On jump toward executed",
-            "display-text": "On jump toward executed",
-            "description": "Triggered when the 'jump at target' mode executes the final jump toward the target. Use this to handle jump attacks or stomps.",
             "params": {}
           },
           "OnJumpTowardLaunched": {

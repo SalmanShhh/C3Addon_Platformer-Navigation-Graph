@@ -12,14 +12,14 @@ action("Pathfinding", "FindPath", {
     { id: "x", name: "X", desc: "Target X position in pixels", type: "number", initialValue: "0" },
     { id: "y", name: "Y", desc: "Target Y position in pixels", type: "number", initialValue: "0" },
     { id: "correctToGround", name: "Correct to ground", desc: "Snap start/target to nearest walkable ground position", type: "combo", initialValue: "no", items: [{ no: "No" }, { yes: "Yes" }] },
-    { id: "mode", name: "Mode", desc: "Path mode: 'reach' finds a complete path or fails. 'nearest' paths as close as possible and never fails. 'jump_at' paths nearby then jumps at the target (for attacks).", type: "combo", initialValue: "reach", items: [{ reach: "Reach (default)" }, { nearest: "Nearest (never fails)" }, { jump_at: "Jump at target (attack)" }] },
+    { id: "mode", name: "Mode", desc: "Path mode: 'reach' finds a complete path or fails. 'nearest' paths as close as possible and never fails.", type: "combo", initialValue: "reach", items: [{ reach: "Reach (default)" }, { nearest: "Nearest (never fails)" }] },
     { id: "strict", name: "Jump Positioning", desc: "Control how carefully the character positions itself before jumps and falls on THIS specific path. This only affects jump/fall precision during pathfinding — it does NOT affect edge walking (use Ledge Restriction for that). 'Default' uses whatever the property or SetStrictJumpPositioning action is set to. 'Strict' forces careful positioning — use for dangerous routes over pits or narrow platforms. 'Relaxed' skips positioning checks for maximum speed — use for chase sequences or when the character is fleeing and precision doesn't matter.", type: "combo", initialValue: "default", items: [{ default: "Default (use property)" }, { strict: "Strict" }, { relaxed: "Relaxed" }] }
   ]
 }, function(x, y, correctToGround, mode, strict) {
   this.aceFindPath(
     x, y,
     this._combo(correctToGround, ["no", "yes"]) === "yes",
-    this._combo(mode, ["reach", "nearest", "jump_at"]),
+    this._combo(mode, ["reach", "nearest"]),
     this._combo(strict, ["default", "strict", "relaxed"])
   );
 });
@@ -160,15 +160,6 @@ condition("Pathfinding", "OnWaypointReached", {
   listName: "On waypoint reached",
   displayText: "On waypoint reached",
   description: "Triggered each time the character reaches a waypoint along the path. Use this to play footstep sounds, particle effects, or update animations.",
-  isTrigger: true
-}, function() {
-  return true;
-});
-
-condition("Pathfinding", "OnJumpTowardExecuted", {
-  listName: "On jump toward executed",
-  displayText: "On jump toward executed",
-  description: "Triggered when the 'jump at target' mode executes the final jump toward the target. Use this to handle jump attacks or stomps.",
   isTrigger: true
 }, function() {
   return true;
@@ -1663,6 +1654,7 @@ action("Configuration", "SetMaxJumpHeight", {
   ]
 }, function(value) {
   this.maxJumpHeight = value;
+  this.singleJumpHeight = value;
 });
 
 action("Configuration", "SetMaxJumpDistance", {
@@ -1674,6 +1666,7 @@ action("Configuration", "SetMaxJumpDistance", {
   ]
 }, function(value) {
   this.maxJumpDistance = value;
+  this.singleJumpDistance = value;
 });
 
 action("Configuration", "SetMaxFallDistance", {

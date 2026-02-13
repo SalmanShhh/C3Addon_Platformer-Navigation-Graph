@@ -11,6 +11,7 @@ export default function (parentClass) {
       this.subscribers = new Map();
     }
 
+    /** Returns (or creates) the shared navigation graph Map for a given layout. */
     getSharedGraph(layoutUID) {
       if (!this.sharedGraphs.has(layoutUID)) {
         this.sharedGraphs.set(layoutUID, new Map());
@@ -18,6 +19,7 @@ export default function (parentClass) {
       return this.sharedGraphs.get(layoutUID);
     }
 
+    /** Registers an instance as a subscriber to the shared graph for its layout. */
     subscribe(layoutUID, instance) {
       if (!this.subscribers.has(layoutUID)) {
         this.subscribers.set(layoutUID, new Set());
@@ -25,6 +27,7 @@ export default function (parentClass) {
       this.subscribers.get(layoutUID).add(instance);
     }
 
+    /** Removes an instance from the shared graph subscribers; cleans up the graph when no subscribers remain. */
     unsubscribe(layoutUID, instance) {
       const subs = this.subscribers.get(layoutUID);
       if (subs) {
@@ -36,6 +39,7 @@ export default function (parentClass) {
       }
     }
 
+    /** Sets graphGenerated=true on all subscriber instances for a layout. */
     markGraphAsGenerated(layoutUID) {
       const subs = this.subscribers.get(layoutUID);
       if (subs) {
@@ -45,6 +49,7 @@ export default function (parentClass) {
       }
     }
 
+    /** Returns true if any subscriber for this layout has not yet generated its graph. */
     needsRegeneration(layoutUID) {
       const subs = this.subscribers.get(layoutUID);
       if (!subs || subs.size === 0) return false;
@@ -54,6 +59,7 @@ export default function (parentClass) {
       return false;
     }
 
+    /** Collects world positions of all other path-following instances (for multi-agent avoidance). */
     getOtherInstancePositions(layoutUID, excludeInstance) {
       const positions = [];
       const subs = this.subscribers.get(layoutUID);
@@ -105,6 +111,8 @@ export default function (parentClass) {
       // Auto-calculated from Platform behavior (or overridden via ACEs)
       this.maxJumpHeight = 128;
       this.maxJumpDistance = 192;
+      this.singleJumpHeight = 128;
+      this.singleJumpDistance = 192;
       this.maxFallDistance = 256;
 
       this.useSharedGraph = this.graphMode === "shared";
@@ -122,6 +130,7 @@ export default function (parentClass) {
       this._setTicking(true);
     }
 
+    /** Resets all runtime state (graph, path, portals, hazards, movement flags) to defaults. */
     _initializeState() {
       this.navGraph = new Map();
       this.graphGenerated = false;
@@ -180,6 +189,8 @@ export default function (parentClass) {
       this.lastInstanceX = 0;
       this.jumpStartTime = 0;
       this.doubleJumpPhase = 0;
+      this._doubleJumpLastY = 0;
+      this._doubleJumpGrace = 0;
       this.isHoldingJump = false;
       this.jumpHoldTimer = 0;
       this.jumpStartY = 0;
@@ -240,13 +251,14 @@ export default function (parentClass) {
         this.layoutUID = this.instance.layout.uid;
         this.characterHeight = Math.abs(this.instance.height);
         this.characterWidth = Math.abs(this.instance.width);
-        console.log(`[NavGraph] Character dimensions: ${this.characterWidth}x${this.characterHeight}px (instance: ${this.instance.width}x${this.instance.height})`);
+        this._log(`Character dimensions: ${this.characterWidth}x${this.characterHeight}px (instance: ${this.instance.width}x${this.instance.height})`);
         this._initializeGraphMode();
         this.platformBehavior = this._getPlatformBehavior();
         this.pathfindingBehavior = this._getPathfindingBehavior();
         if (this.platformBehavior) {
           this._readPlatformProperties();
           this._calculateJumpParametersFromPlatform();
+          this._log(`Double jump: ${this.platformProps.isDoubleJumpEnabled ? "ENABLED" : "disabled"} | Jump sustain: ${this.platformProps.jumpSustain}ms`);
         }
       }
 
@@ -256,6 +268,7 @@ export default function (parentClass) {
         if (this.platformBehavior) {
             this._readPlatformProperties();
             this._calculateJumpParametersFromPlatform();
+            this._log(`Double jump: ${this.platformProps.isDoubleJumpEnabled ? "ENABLED" : "disabled"} | Jump sustain: ${this.platformProps.jumpSustain}ms`);
         }
     }
 
@@ -352,6 +365,8 @@ export default function (parentClass) {
         maxFallDistanceSetting: this.maxFallDistanceSetting,
         maxJumpHeight: this.maxJumpHeight,
         maxJumpDistance: this.maxJumpDistance,
+        singleJumpHeight: this.singleJumpHeight,
+        singleJumpDistance: this.singleJumpDistance,
         maxFallDistance: this.maxFallDistance,
         autoControl: this.autoControl,
         graphMode: this.graphMode,
@@ -375,6 +390,7 @@ export default function (parentClass) {
           portalId: wp.portalId || null,
           speed: wp.speed || 0,
           peakHeight: wp.peakHeight || 0,
+          requiresDoubleJump: wp.requiresDoubleJump || false,
           gx: wp.node ? wp.node.gx : -1,
           gy: wp.node ? wp.node.gy : -1,
         })),
@@ -435,6 +451,8 @@ export default function (parentClass) {
       this.maxFallDistanceSetting = o.maxFallDistanceSetting || 0;
       this.maxJumpHeight = o.maxJumpHeight;
       this.maxJumpDistance = o.maxJumpDistance;
+      this.singleJumpHeight = o.singleJumpHeight || o.maxJumpHeight;
+      this.singleJumpDistance = o.singleJumpDistance || o.maxJumpDistance;
       this.maxFallDistance = o.maxFallDistance;
       this.autoControl = o.autoControl;
       this.graphMode = o.graphMode;
@@ -540,6 +558,7 @@ export default function (parentClass) {
             portalId: wp.portalId || null,
             speed: wp.speed || 0,
             peakHeight: wp.peakHeight || 0,
+            requiresDoubleJump: wp.requiresDoubleJump || false,
             node: node,
           };
         });
@@ -602,10 +621,12 @@ export default function (parentClass) {
       }];
     }
 
+    /** Finds and returns the Platform behavior instance on this object. */
     _getPlatformBehavior() {
       return this._GetBehaviorByType("Platform");
     }
 
+    /** Finds and returns the Pathfinding behavior instance on this object. */
     _getPathfindingBehavior() {
       return this._GetBehaviorByType("Pathfinding");
     }
@@ -629,6 +650,7 @@ export default function (parentClass) {
         return null;
     }
 
+    /** Reads speed, jump, gravity, and double-jump settings from the Platform behavior into platformProps. */
     _readPlatformProperties() {
       if (!this.platformBehavior) return;
 
@@ -660,6 +682,7 @@ export default function (parentClass) {
       }
     }
 
+    /** Derives maxJumpHeight, maxJumpDistance, singleJumpHeight/Distance, and maxFallDistance from Platform behavior physics. */
     _calculateJumpParametersFromPlatform() {
       const {
         jumpStrength,
@@ -683,6 +706,8 @@ export default function (parentClass) {
       const totalJumpTime = timeToApex * 2;
       let maxJumpDist = maxSpeed * totalJumpTime * 0.8;
 
+      this.singleJumpHeight = singleJumpHeight;
+      this.singleJumpDistance = maxJumpDist;
       this.maxJumpHeight = singleJumpHeight;
       this.maxJumpDistance = maxJumpDist;
 
@@ -712,54 +737,60 @@ export default function (parentClass) {
       this._log(`Jump params: maxJumpHeight=${Math.round(this.maxJumpHeight)}px, maxJumpDistance=${Math.round(this.maxJumpDistance)}px, maxFallDistance=${Math.round(this.maxFallDistance)}px (${Math.ceil(this.maxFallDistance / this.cellSize)} tiles), maxFallSpeed=${this.platformProps.maxFallSpeed}, gravity=${this.platformProps.gravity}`);
     }
 
+    /** Converts a C3 combo parameter (numeric index) to its string key. */
     _combo(value, keys) {
       if (typeof value === "number") return keys[value] || keys[0];
       return value || keys[0];
     }
 
+    /** Logs a debug message to the console (only when debug mode is enabled). */
     _log(...args) {
       if (this.enableDebug) {
         console.log(`[${name}]`, ...args);
       }
     }
 
+    /** Logs a warning to the console (only when debug mode is enabled). */
     _warn(...args) {
       if (this.enableDebug) {
         console.warn(`[${name}]`, ...args);
       }
     }
 
+    /** Logs an error to the console (only when debug mode is enabled). */
     _error(...args) {
       if (this.enableDebug) {
         console.error(`[${name}]`, ...args);
       }
     }
 
-    // find behavior by plugin type (e.g. "Platform", "Pathfinding"), ensures it works even if the behavior is renamed in the editor
-    
-
+    /** Converts world pixel coordinates to grid cell coordinates. */
     worldToGrid(x, y) {
       const gx = Math.floor(x / this.cellSize);
       const gy = Math.floor(y / this.cellSize);
       return { gx, gy };
     }
 
+    /** Converts grid cell coordinates to world pixel coordinates (center of cell). */
     gridToWorld(gx, gy) {
       const x = gx * this.cellSize + this.cellSize / 2;
       const y = gy * this.cellSize + this.cellSize / 2;
       return { x, y };
     }
 
+    /** Returns a string key "gx,gy" for use as a Map key in the navigation graph. */
     gridKey(gx, gy) {
       return `${gx},${gy}`;
     }
 
+    /** Returns the Euclidean distance between two points. */
     distance(x1, y1, x2, y2) {
       const dx = x2 - x1;
       const dy = y2 - y1;
       return Math.sqrt(dx * dx + dy * dy);
     }
 
+    /** Returns the active navigation graph (shared across instances or per-instance, based on graph mode). */
     _getNavigationGraph() {
       if (this.useSharedGraph) {
         return globalNavManager.getSharedGraph(this.layoutUID);
@@ -767,6 +798,7 @@ export default function (parentClass) {
       return this.navGraph;
     }
 
+    /** Returns the portals Map (shared or per-instance). */
     _getPortalsMap() {
       if (this.useSharedGraph) {
         const subs = globalNavManager.subscribers.get(this.layoutUID);
@@ -777,6 +809,7 @@ export default function (parentClass) {
       return this.portals;
     }
 
+    /** Returns the hazards Map (shared or per-instance). */
     _getHazardsMap() {
       if (this.useSharedGraph) {
         const subs = globalNavManager.subscribers.get(this.layoutUID);
@@ -787,6 +820,7 @@ export default function (parentClass) {
       return this.hazards;
     }
 
+    /** Returns true if the navigation graph needs to be regenerated. */
     _needsGraphRegeneration() {
       if (this.useSharedGraph) {
         return globalNavManager.needsRegeneration(this.layoutUID);
@@ -794,6 +828,7 @@ export default function (parentClass) {
       return !this.graphGenerated;
     }
 
+    /** Marks the graph as generated for this instance (or all shared subscribers). */
     _markGraphAsGenerated() {
       if (this.useSharedGraph) {
         globalNavManager.markGraphAsGenerated(this.layoutUID);
@@ -802,12 +837,14 @@ export default function (parentClass) {
       }
     }
 
+    /** Subscribes this instance to the shared graph manager if using shared mode. */
     _initializeGraphMode() {
       if (this.useSharedGraph) {
         globalNavManager.subscribe(this.layoutUID, this);
       }
     }
 
+    /** Attempts to copy the obstacle map from the Pathfinding behavior, or starts polling if not ready. */
     _scanObstacles() {
       if (this.obstacleMapSource === "custom") {
         return;
@@ -826,6 +863,7 @@ export default function (parentClass) {
       }
     }
 
+    /** Polls each tick to check if the Pathfinding behavior's obstacle map is ready; triggers graph generation when it is. */
     _checkPathfindingMapReady() {
       this.waitTickCount++;
       if (this.waitTickCount >= this.maxWaitTicks) {
@@ -865,6 +903,7 @@ export default function (parentClass) {
       }
     }
 
+    /** Copies the cell-by-cell obstacle data from the C3 Pathfinding behavior's map into our obstacleMap array. */
     _copyObstacleMapFromPathfinding() {
       if (!this.pathfindingBehavior) return false;
 
@@ -1066,6 +1105,7 @@ export default function (parentClass) {
       if (this.hazardMap) this.hazardMap.fill(0);
     }
 
+    /** Returns true if a cell is impassable (solid or jump-thru). Out-of-bounds counts as blocked. */
     isCellBlocked(gx, gy) {
       if (
         gx < 0 ||
@@ -1081,6 +1121,7 @@ export default function (parentClass) {
       return val === 1 || val === 2;
     }
 
+    /** Returns true if a cell is solid (obstacle value 1). Out-of-bounds counts as solid. */
     isCellSolid(gx, gy) {
       if (
         gx < 0 ||
@@ -1095,6 +1136,7 @@ export default function (parentClass) {
       return this.obstacleMap[index] === 1;
     }
 
+    /** Returns true if a cell is a jump-thru platform (obstacle value 2). */
     isCellJumpThru(gx, gy) {
       if (
         gx < 0 ||
@@ -1109,6 +1151,7 @@ export default function (parentClass) {
       return this.obstacleMap[index] === 2;
     }
 
+    /** Returns true if a cell is marked as "avoid" (obstacle value 3). */
     isCellAvoid(gx, gy) {
       if (
         gx < 0 ||
@@ -1123,6 +1166,7 @@ export default function (parentClass) {
       return this.obstacleMap[index] === 3;
     }
 
+    /** Returns true if a cell is clear (value 0) with solid or jump-thru ground directly below it. */
     _isWalkable(gx, gy) {
       if (
         gx < 0 ||
@@ -1144,12 +1188,14 @@ export default function (parentClass) {
       return belowVal === 1 || belowVal === 2;
     }
 
+    /** Returns true if a cell is a walkable slope tile (has a non-zero slopeMap value). */
     _isSlopeWalkable(gx, gy) {
       if (!this.slopeMap) return false;
       const index = gy * this.gridWidth + gx;
       return this.slopeMap[index] > 0;
     }
 
+    /** Scans the obstacle map and creates a navigation node for every walkable/slope cell. */
     _generateNodes() {
       let nodeCount = 0;
       const graph = this._getNavigationGraph();
@@ -1169,6 +1215,7 @@ export default function (parentClass) {
       this._log(`Generated ${nodeCount} nodes`);
     }
 
+    /** Creates a navigation node with ledge flags, slope info, hazard multiplier, and A* bookkeeping fields. */
     _createNode(x, y, gx, gy) {
       const leftBelowBlocked = this._isGroundAt(gx - 1, gy + 1);
       const rightBelowBlocked = this._isGroundAt(gx + 1, gy + 1);
@@ -1216,9 +1263,11 @@ export default function (parentClass) {
         parentPortalId: null,
         parentSpeed: null,
         parentPeakHeight: null,
+        parentRequiresDoubleJump: false,
       };
     }
 
+    /** Returns true if a cell contains ground (solid or jump-thru). Used for ledge detection. */
     _isGroundAt(gx, gy) {
       if (
         gx < 0 ||
@@ -1234,11 +1283,13 @@ export default function (parentClass) {
       return val === 1 || val === 2;
     }
 
+    /** Looks up a navigation node by grid coordinates; returns undefined if no node exists there. */
     getNode(gx, gy) {
       const graph = this._getNavigationGraph();
       return graph.get(this.gridKey(gx, gy));
     }
 
+    /** Creates walk_left/walk_right connections between horizontally adjacent nodes with sufficient headroom. */
     _connectWalk() {
       let count = 0;
       const graph = this._getNavigationGraph();
@@ -1291,10 +1342,14 @@ export default function (parentClass) {
       this._log(`Created ${count} walk connections`);
     }
 
+    /** Creates jump connections between nodes reachable via single-jump arcs, then adds double-jump connections for targets beyond single-jump range. */
     _connectJump() {
-      const maxHeightCells = Math.ceil(this.maxJumpHeight / this.cellSize);
+      // Use single-jump limits for the first loop; double-jump connections are added separately below
+      const singleHeight = this.platformProps.isDoubleJumpEnabled ? this.singleJumpHeight : this.maxJumpHeight;
+      const singleDist = this.platformProps.isDoubleJumpEnabled ? this.singleJumpDistance : this.maxJumpDistance;
+      const maxHeightCells = Math.ceil(singleHeight / this.cellSize);
       const maxFallCells = Math.ceil(this.maxFallDistance / this.cellSize);
-      const maxDistCells = Math.ceil(this.maxJumpDistance / this.cellSize);
+      const maxDistCells = Math.ceil(singleDist / this.cellSize);
       // Cap downward range: a jump arc goes UP peakHeight then descends back.
       // From launch, you land at most ~maxHeightCells below via the arc itself.
       // Targets further below should use fall connections from ledge nodes.
@@ -1318,7 +1373,7 @@ export default function (parentClass) {
               const targetGy = node.gy - height;
               const target = this.getNode(targetGx, targetGy);
 
-              const peakHeight = target ? this._canJump(node, target) : 0;
+              const peakHeight = target ? this._canJump(node, target, singleHeight, singleDist) : 0;
               if (peakHeight > 0) {
                 const distance = this.distance(node.x, node.y, target.x, target.y);
                 node.connections.push({
@@ -1355,9 +1410,13 @@ export default function (parentClass) {
                 const targetGy = node.gy - height;
                 const target = this.getNode(targetGx, targetGy);
 
-                const dblPeakHeight = target ? this._canJump(node, target) : 0;
+                const dblPeakHeight = target ? this._canDoubleJump(node, target) : 0;
                 if (dblPeakHeight > 0) {
-                  if (height > maxHeightCells || dist > maxDistCells) {
+                  // Check if this connection already exists as a single jump
+                  const alreadyConnected = node.connections.some(
+                    c => c.target === target && c.action === "jump" && !c.requiresDoubleJump
+                  );
+                  if (!alreadyConnected) {
                     const distance = this.distance(
                       node.x,
                       node.y,
@@ -1380,22 +1439,78 @@ export default function (parentClass) {
         }
       }
 
-      this._log(`Created ${count} jump connections (up=${upCount}, down=${downCount}, level=${levelCount}, maxDownCells=${maxDownCells}, maxHeightCells=${maxHeightCells}, maxDistCells=${maxDistCells})`);
+      this._log(`Created ${count} jump connections (up=${upCount}, down=${downCount}, level=${levelCount}, maxDownCells=${maxDownCells}, singleHeightCells=${maxHeightCells}, singleDistCells=${maxDistCells}, doubleJump=${this.platformProps.isDoubleJumpEnabled})`);
     }
 
+    /** Returns half the character width in cells, used for width-based collision checks during falls. */
     _getWidthCells() {
       return Math.ceil(this.characterWidth / this.cellSize / 2);
+    }
+
+    /** Validates a double jump as two separate arcs: first arc goes vertically up by singleJumpHeight, second arc is a Bezier from that apex to the target. Returns the second arc's peakHeight (>0) if both arcs are clear, or 0 if blocked. */
+    _canDoubleJump(from, to) {
+      const cs = this.cellSize;
+      const headCells = Math.max(0, Math.ceil(this.characterHeight / cs) - 1);
+
+      // First arc: vertical column check from 'from' upward by singleJumpHeight
+      const apexGy = from.gy - Math.floor(this.singleJumpHeight / cs);
+      const minCheckGy = Math.max(0, apexGy);
+      for (let gy = from.gy - 1; gy >= minCheckGy; gy--) {
+        for (let h = 0; h <= headCells; h++) {
+          const checkGy = gy - h;
+          if (checkGy < 0) continue;
+          if (checkGy >= this.gridHeight) continue;
+          const index = checkGy * this.gridWidth + from.gx;
+          if (from.gx < 0 || from.gx >= this.gridWidth) return 0;
+          const cellVal = this.obstacleMap ? this.obstacleMap[index] : 0;
+          if (h === 0) {
+            if (cellVal === 1 || cellVal === 3) return 0;
+          } else {
+            if (cellVal === 1 && this.platformProps.ceilingCollisionMode === "stop") return 0;
+            if (cellVal === 3) return 0;
+          }
+        }
+      }
+
+      // Compute apex position (first jump is vertical, no horizontal drift)
+      const apexX = from.x;
+      const apexY = from.y - this.singleJumpHeight;
+      const apexGridGx = from.gx;
+      const apexGridGy = Math.round(apexY / cs);
+
+      // Horizontal clearance at apex: the character starts horizontal movement
+      // from the apex position. Check the first adjacent cell in the target
+      // direction at the apex height to ensure the character won't immediately
+      // slam into a wall. The Bezier arc check handles the rest of the path.
+      const hDir = to.gx > from.gx ? 1 : -1;
+      const clampedApexGy = Math.max(0, apexGridGy);
+      const adjacentGx = from.gx + hDir;
+      if (adjacentGx >= 0 && adjacentGx < this.gridWidth) {
+        for (let h = 0; h <= headCells; h++) {
+          const checkGy = clampedApexGy - h;
+          if (checkGy < 0) continue;
+          if (checkGy >= this.gridHeight) continue;
+          const cellVal = this.obstacleMap ? this.obstacleMap[checkGy * this.gridWidth + adjacentGx] : 0;
+          if (cellVal === 1 || cellVal === 3) return 0;
+        }
+      }
+
+      // Second arc: Bezier check from apex to target using single-jump limits
+      const apexVirtual = { x: apexX, y: apexY, gx: apexGridGx, gy: apexGridGy };
+      return this._canJump(apexVirtual, to, this.singleJumpHeight, this.singleJumpDistance);
     }
 
     // Returns the minimum viable peak height in pixels (>0) if jump is possible,
     // or 0 if the jump is blocked. The peak height is stored in connections and
     // used by the movement code to release the jump button at the right time.
-    _canJump(from, to) {
+    _canJump(from, to, maxHeight, maxDist) {
+      maxHeight = maxHeight || this.maxJumpHeight;
+      maxDist = maxDist || this.maxJumpDistance;
       const dx = to.x - from.x;
       const dy = to.y - from.y;
 
-      if (Math.abs(dx) > this.maxJumpDistance) return 0;
-      if (-dy > this.maxJumpHeight) return 0;
+      if (Math.abs(dx) > maxDist) return 0;
+      if (-dy > maxHeight) return 0;
 
       const headCells = Math.max(0, Math.ceil(this.characterHeight / this.cellSize) - 1);
 
@@ -1419,13 +1534,13 @@ export default function (parentClass) {
             }
           }
         }
-        return this.maxJumpHeight; // Vertical jumps use full sustain
+        return maxHeight; // Vertical jumps use full sustain
       }
 
       // Horizontal jump: use Bezier arc check
-      // Adaptive arc: peak just high enough for the jump, capped at maxJumpHeight
+      // Adaptive arc: peak just high enough for the jump, capped at maxHeight
       const neededPeakHeight = Math.max(-dy, 0) + this.cellSize;
-      const actualPeakHeight = Math.min(this.maxJumpHeight, neededPeakHeight);
+      const actualPeakHeight = Math.min(maxHeight, neededPeakHeight);
       const peakY = from.y - actualPeakHeight;
       const controlY = 2 * peakY - (from.y + to.y) / 2;
 
@@ -1475,6 +1590,7 @@ export default function (parentClass) {
       return actualPeakHeight;
     }
 
+    /** Creates straight-down and diagonal fall connections from nodes to lower platforms within maxFallDistance. */
     _connectFall() {
       const maxFallCells = Math.ceil(this.maxFallDistance / this.cellSize);
       let count = 0;
@@ -1508,6 +1624,7 @@ export default function (parentClass) {
       this._log(`Created ${count} straight fall + ${diagCount} diagonal fall connections (maxFallCells=${maxFallCells})`);
     }
 
+    /** Returns true if a straight vertical fall from one node to another is unobstructed. */
     _canFall(from, to) {
       if (to.y <= from.y) return false;
       const widthCells = this._getWidthCells();
@@ -1523,6 +1640,7 @@ export default function (parentClass) {
       return true;
     }
 
+    /** Adds diagonal fall_left/fall_right connections from a ledge node, based on gravity and max horizontal drift. */
     _addDiagonalFall(node, direction, maxFallCells) {
       const gravity = this.platformProps.gravity;
       const maxSpeed = this.platformProps.maxSpeed;
@@ -1554,6 +1672,7 @@ export default function (parentClass) {
       return added;
     }
 
+    /** Returns true if a diagonal fall path (parabolic approximation) is unobstructed, checking character width. */
     _canDiagonalFall(from, to, direction) {
       const steps = 10;
       const dx = to.x - from.x;
@@ -1581,6 +1700,7 @@ export default function (parentClass) {
       return hasWalk ? 0.7 : 1.0;
     }
 
+    /** Creates coyote jump connections from ledge nodes — jumps that start after stepping off the edge during the coyote time window. */
     _connectCoyoteJump() {
       if (this.coyoteTime <= 0) return;
 
@@ -1634,6 +1754,7 @@ export default function (parentClass) {
       this._log(`Created ${count} coyote jump connections`);
     }
 
+    /** Creates fall-through connections from nodes standing on jump-thru platforms to nodes below. */
     _connectFallThrough() {
       const graph = this._getNavigationGraph();
       let count = 0;
@@ -1660,6 +1781,7 @@ export default function (parentClass) {
       this._log(`Created ${count} fall-through connections`);
     }
 
+    /** Creates walk connections along slope tiles, linking diagonally adjacent slope/flat nodes based on slope direction. */
     _connectSlope() {
       if (!this.slopeMap) return;
 
@@ -1754,6 +1876,7 @@ export default function (parentClass) {
       hazardsMap.clear();
     }
 
+    /** Returns true if a world position falls within any registered circle or rect hazard. */
     _isPositionHazardous(x, y) {
       if (!this.enableHazards) return false;
 
@@ -1771,6 +1894,7 @@ export default function (parentClass) {
       return false;
     }
 
+    /** Returns the maximum hazard severity at a world position (1.0 = no hazard, higher = more dangerous). */
     _getHazardSeverity(x, y) {
       if (!this.enableHazards) return 1.0;
 
@@ -1795,6 +1919,7 @@ export default function (parentClass) {
       return maxSeverity;
     }
 
+    /** Recalculates the hazardMultiplier on every node in the graph based on current hazard zones and tile hazards. */
     _updateHazardCosts() {
       if (!this.enableHazards) return;
 
@@ -1895,6 +2020,7 @@ export default function (parentClass) {
       portalsMap.clear();
     }
 
+    /** Adds portal connections from the nearest entry node to the nearest exit node (and reverse if two-way). */
     _connectPortalToGraph(portal) {
       const entryNode = this._findNearestNode(portal.entryX, portal.entryY);
       const exitNode = this._findNearestNode(portal.exitX, portal.exitY);
@@ -1935,6 +2061,7 @@ export default function (parentClass) {
       }
     }
 
+    /** Connects all registered portals to the navigation graph after node generation. */
     _connectAllPortals() {
       if (!this.enablePortals) return;
 
@@ -2042,6 +2169,7 @@ export default function (parentClass) {
       this.aceAddElevatorStop(groupId, inst.x, inst.y, speed);
     }
 
+    /** Removes all portal connections for a specific portal ID from graph nodes. */
     _removePortalConnections(portalId, portal) {
       const entryNode = this._findNearestNode(portal.entryX, portal.entryY);
       if (entryNode) {
@@ -2067,6 +2195,7 @@ export default function (parentClass) {
       return this.currentPortalId;
     }
 
+    /** Finds the closest navigation node to a world position (checks the exact cell first, then searches nearby cells). */
     _findNearestNode(x, y) {
       // Use the same resolution logic as findPath to ensure consistency
       const grid = this.worldToGrid(x, y);
@@ -2089,6 +2218,7 @@ export default function (parentClass) {
       return null;
     }
 
+    /** Full graph generation pipeline: scans obstacles, generates nodes, then creates walk/jump/fall/coyote/slope/portal connections. */
     _generateGraph() {
       if (this.isWaitingForPathfindingMap) return;
 
@@ -2118,6 +2248,7 @@ export default function (parentClass) {
       this._trigger("OnGraphGenerated");
     }
 
+    /** Runs bidirectional A* (forward + reverse) and returns the best combined path between two world positions. */
     findPath(startX, startY, goalX, goalY) {
       let startGrid = this.worldToGrid(startX, startY);
       let goalGrid = this.worldToGrid(goalX, goalY);
@@ -2207,12 +2338,12 @@ export default function (parentClass) {
       if (validForward && validReversed) {
         bestPath = this._combinePaths(validForward, validReversed);
       } else if (validForward) {
-        const _fmtPath = (p) => p.map((wp, i) => `${i}:(${wp.node ? wp.node.gx : '?'},${wp.node ? wp.node.gy : '?'})${wp.action}`).join(' → ');
+        const _fmtPath = (p) => p.map((wp, i) => `${i}:(${wp.node ? wp.node.gx : '?'},${wp.node ? wp.node.gy : '?'})${wp.action}${wp.requiresDoubleJump ? '[dbl]' : ''}`).join(' → ');
         this._log(`Using forward path only (no valid reverse)`);
         this._log(`  Path: ${_fmtPath(validForward)}`);
         bestPath = validForward;
       } else if (validReversed) {
-        const _fmtPath = (p) => p.map((wp, i) => `${i}:(${wp.node ? wp.node.gx : '?'},${wp.node ? wp.node.gy : '?'})${wp.action}`).join(' → ');
+        const _fmtPath = (p) => p.map((wp, i) => `${i}:(${wp.node ? wp.node.gx : '?'},${wp.node ? wp.node.gy : '?'})${wp.action}${wp.requiresDoubleJump ? '[dbl]' : ''}`).join(' → ');
         this._log(`Using reversed path only (no valid forward)`);
         this._log(`  Path: ${_fmtPath(validReversed)}`);
         bestPath = validReversed;
@@ -2248,6 +2379,7 @@ export default function (parentClass) {
       return null;
     }
 
+    /** Runs A* search from startNode to goalNode; returns the reconstructed path or null if unreachable. */
     _runAStar(startNode, goalNode) {
       const graph = this._getNavigationGraph();
       for (const [key, node] of graph) {
@@ -2303,6 +2435,11 @@ export default function (parentClass) {
           const neighbor = conn.target;
           if (closedSet.has(neighbor)) continue;
 
+          // Skip double-jump connections if this instance can't double jump.
+          // The graph is shared (SPOT), so connections built by a double-jump
+          // instance must not be traversed by non-double-jump instances.
+          if (conn.requiresDoubleJump && !this.platformProps.isDoubleJumpEnabled) continue;
+
           const hazardMultiplier = conn.ignoreHazards
             ? 1.0
             : this.enableHazards
@@ -2335,6 +2472,7 @@ export default function (parentClass) {
             neighbor.parentPortalId = conn.portalId || null;
             neighbor.parentSpeed = conn.speed || 0;
             neighbor.parentPeakHeight = conn.peakHeight || 0;
+            neighbor.parentRequiresDoubleJump = conn.requiresDoubleJump || false;
             neighbor.gScore = tentativeG;
             neighbor.hScore = this.distance(
               neighbor.x,
@@ -2360,6 +2498,7 @@ export default function (parentClass) {
       return null;
     }
 
+    /** Reverses an A* path (goal→start becomes start→goal) and fixes each waypoint's action using actual graph connections. */
     _reversePathDirection(path) {
       // The path was found goal→start, so waypoints are [goal, ..., start].
       // Reverse order to get [start, ..., goal].
@@ -2372,6 +2511,7 @@ export default function (parentClass) {
           action: "start",
           portalId: null,
           speed: 0,
+          requiresDoubleJump: false,
         });
       }
       // Fix actions: each waypoint needs the action to reach the NEXT waypoint
@@ -2387,6 +2527,7 @@ export default function (parentClass) {
         reversed[i + 1].portalId = conn.portalId || null;
         reversed[i + 1].speed = conn.speed || 0;
         reversed[i + 1].peakHeight = conn.peakHeight || 0;
+        reversed[i + 1].requiresDoubleJump = conn.requiresDoubleJump || false;
       }
       reversed[0].action = "start";
       return reversed;
@@ -2413,11 +2554,13 @@ export default function (parentClass) {
           path[i + 1].portalId = conn.portalId || null;
           path[i + 1].speed = conn.speed || 0;
           path[i + 1].peakHeight = conn.peakHeight || 0;
+          path[i + 1].requiresDoubleJump = conn.requiresDoubleJump || false;
         }
       }
       return path;
     }
 
+    /** Returns the first graph connection (walk, jump, fall, or portal) from one node to another, or null. */
     _findConnectionBetween(fromNode, toNode) {
       const allConnections = [
         ...fromNode.connections,
@@ -2429,6 +2572,7 @@ export default function (parentClass) {
       return null;
     }
 
+    /** Sums up the Euclidean distance cost of all segments in a path. */
     _pathCost(path) {
       let cost = 0;
       for (let i = 1; i < path.length; i++) {
@@ -2437,6 +2581,7 @@ export default function (parentClass) {
       return cost;
     }
 
+    /** Evaluates a path's cost using the active strategy (balanced, shortest, safest, or simplest). */
     _strategyCost(path) {
       switch (this.pathStrategy) {
         case "shortest":
@@ -2447,7 +2592,7 @@ export default function (parentClass) {
           for (let i = 1; i < path.length; i++) {
             const dist = this.distance(path[i - 1].x, path[i - 1].y, path[i].x, path[i].y);
             const action = path[i].action;
-            if (action === "jump" || action === "coyote_jump" || action === "jump_toward")
+            if (action === "jump" || action === "coyote_jump")
               cost += dist * 2.5;
             else if (action.includes("fall"))
               cost += dist * 1.5;
@@ -2466,7 +2611,7 @@ export default function (parentClass) {
           for (let i = 1; i < path.length; i++) {
             const dist = this.distance(path[i - 1].x, path[i - 1].y, path[i].x, path[i].y);
             const action = path[i].action;
-            if (action === "jump" || action === "coyote_jump" || action === "jump_toward")
+            if (action === "jump" || action === "coyote_jump")
               cost += dist * 1.5;
             else if (action.includes("fall"))
               cost += dist * 1.2;
@@ -2478,6 +2623,7 @@ export default function (parentClass) {
       }
     }
 
+    /** Selects the best path from forward, reversed, and hybrid combinations through common intermediate nodes. */
     _combinePaths(forwardPath, reversedPath) {
       const forwardCost = this._strategyCost(forwardPath);
       const reverseCost = this._strategyCost(reversedPath);
@@ -2522,6 +2668,7 @@ export default function (parentClass) {
             hybrid1[fwdIdx].portalId = conn.portalId || null;
             hybrid1[fwdIdx].speed = conn.speed || 0;
             hybrid1[fwdIdx].peakHeight = conn.peakHeight || 0;
+            hybrid1[fwdIdx].requiresDoubleJump = conn.requiresDoubleJump || false;
           }
         }
         const cost1 = this._strategyCost(hybrid1);
@@ -2543,6 +2690,7 @@ export default function (parentClass) {
             hybrid2[revIdx].portalId = conn.portalId || null;
             hybrid2[revIdx].speed = conn.speed || 0;
             hybrid2[revIdx].peakHeight = conn.peakHeight || 0;
+            hybrid2[revIdx].requiresDoubleJump = conn.requiresDoubleJump || false;
           }
         }
         const cost2 = this._strategyCost(hybrid2);
@@ -2552,7 +2700,7 @@ export default function (parentClass) {
         }
       }
 
-      const _fmtPath = (p) => p.map((wp, i) => `${i}:(${wp.node ? wp.node.gx : '?'},${wp.node ? wp.node.gy : '?'})${wp.action}`).join(' → ');
+      const _fmtPath = (p) => p.map((wp, i) => `${i}:(${wp.node ? wp.node.gx : '?'},${wp.node ? wp.node.gy : '?'})${wp.action}${wp.requiresDoubleJump ? '[dbl]' : ''}`).join(' → ');
       this._log(`Combined path: cost=${Math.round(bestCost)} (fwd=${Math.round(forwardCost)}, rev=${Math.round(reverseCost)}, strategy=${this.pathStrategy})`);
       this._log(`  Forward path:  ${_fmtPath(forwardPath)}`);
       this._log(`  Reversed path: ${_fmtPath(reversedPath)}`);
@@ -2560,6 +2708,7 @@ export default function (parentClass) {
       return bestPath;
     }
 
+    /** Traces parent pointers from the goal back to the start, building a waypoint array with actions and metadata. */
     _reconstructPath(goalNode) {
       const path = [];
       let current = goalNode;
@@ -2571,6 +2720,7 @@ export default function (parentClass) {
           portalId: current.parentPortalId || null,
           speed: current.parentSpeed || 0,
           peakHeight: current.parentPeakHeight || 0,
+          requiresDoubleJump: current.parentRequiresDoubleJump || false,
           x: current.x,
           y: current.y,
         });
@@ -2580,6 +2730,7 @@ export default function (parentClass) {
       return path;
     }
 
+    /** Removes redundant walk waypoints by skipping intermediate nodes that can be walked directly (line-of-sight). */
     _smoothPath(path) {
       if (path.length <= 2) return path;
 
@@ -2604,6 +2755,7 @@ export default function (parentClass) {
       return smoothed;
     }
 
+    /** Returns true if a character can walk directly from waypointA to waypointB without obstacles or gaps. */
     _canSkipTo(waypointA, waypointB) {
       if (
         !waypointA.action.includes("walk") ||
@@ -2638,6 +2790,7 @@ export default function (parentClass) {
       return true;
     }
 
+    /** For "nearest" mode: finds the closest node to the goal that is actually reachable from the start. */
     _findNearestReachableNode(startX, startY, goalX, goalY) {
       const goalGrid = this.worldToGrid(goalX, goalY);
       const graph = this._getNavigationGraph();
@@ -2667,39 +2820,7 @@ export default function (parentClass) {
       return bestNode;
     }
 
-    _findBestLaunchNode(startX, startY, targetX, targetY) {
-      const targetGrid = this.worldToGrid(targetX, targetY);
-      const maxDistCells = Math.ceil(this.maxJumpDistance / this.cellSize);
-      const maxHeightCells = Math.ceil(this.maxJumpHeight / this.cellSize);
-      let bestNode = null;
-      let bestDist = Infinity;
-
-      const maxR = Math.max(maxDistCells, maxHeightCells);
-      for (let r = 1; r <= maxR; r++) {
-        for (let dx = -r; dx <= r; dx++) {
-          for (let dy = -r; dy <= r; dy++) {
-            if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
-            if (Math.abs(dx) > maxDistCells) continue;
-            // Only allow nodes above the target up to jump height
-            if (dy < 0 && Math.abs(dy) > maxHeightCells) continue;
-            const node = this.getNode(targetGrid.gx + dx, targetGrid.gy + dy);
-            if (!node) continue;
-            const dist = this.distance(node.x, node.y, targetX, targetY);
-            if (dist < bestDist) {
-              const testPath = this.findPath(startX, startY, node.x, node.y);
-              if (testPath) {
-                bestNode = node;
-                bestDist = dist;
-              }
-            }
-          }
-        }
-        if (bestNode) break;
-      }
-
-      return bestNode;
-    }
-
+    /** Snaps a world position downward to the nearest walkable ground node (used for path target correction). */
     _correctToGround(x, y) {
       const grid = this.worldToGrid(x, y);
       const searchRadius = 10;
@@ -2720,6 +2841,7 @@ export default function (parentClass) {
       return { x, y };
     }
 
+    /** Main path-following loop: checks waypoint arrival, handles stuck detection, converts actions, and dispatches movement. */
     _followPath(dt) {
       if (this.currentWaypoint >= this.currentPath.length) {
         // Centre within the final tile before completing the path
@@ -2798,7 +2920,7 @@ export default function (parentClass) {
           const nextWp = nextIdx < this.currentPath.length ? this.currentPath[nextIdx] : null;
           const nextIsDeparture = nextWp && (
             nextWp.action === "jump" || nextWp.action === "coyote_jump" ||
-            nextWp.action === "jump_toward" || nextWp.action === "fall" ||
+            nextWp.action === "fall" ||
             nextWp.action === "fall_left" || nextWp.action === "fall_right"
           );
           arrivalThreshold = nextIsDeparture ? this.cellSize * 0.15 : this.cellSize * 0.3;
@@ -2825,7 +2947,7 @@ export default function (parentClass) {
         const nextWp = nextIdx < this.currentPath.length ? this.currentPath[nextIdx] : null;
         if (nextWp && this.platformBehavior) {
           const nextNeedsGround = nextWp.action === "jump" || nextWp.action === "coyote_jump" ||
-            nextWp.action === "jump_toward" || nextWp.action === "fall" ||
+            nextWp.action === "fall" ||
             nextWp.action === "fall_left" || nextWp.action === "fall_right" ||
             nextWp.action === "fall_through";
           try {
@@ -2923,6 +3045,7 @@ export default function (parentClass) {
       }
     }
 
+    /** Re-calculates the path to the current target; detects re-path loops and triggers OnWaypointStuck if stuck. */
     _rePath() {
       if (this.portalState !== "none") return;
       this.rePathCooldown = this.rePathCooldownDuration;
@@ -2961,6 +3084,7 @@ export default function (parentClass) {
       this._trigger("OnRePathTriggered");
     }
 
+    /** Top-level action dispatcher: routes portal, fall-through, and physics-based actions to their handlers. */
     _executeAction(action, targetX, targetY, waypoint) {
       if (!this.platformBehavior) return;
       if (!this.platformBehavior.isEnabled) return;
@@ -2978,6 +3102,7 @@ export default function (parentClass) {
       this._executePhysicsAware(action, targetX, targetY, waypoint);
     }
 
+    /** Handles portal waypoint execution: triggers OnPortalEntry, applies pause if requested, or executes the portal behavior. */
     _executePortal(targetX, targetY, waypoint) {
       if (this.portalState === "none") {
         this.portalPaused = false;
@@ -3007,6 +3132,7 @@ export default function (parentClass) {
       }
     }
 
+    /** Starts the portal behavior: instant portals teleport immediately; gradual portals begin linear movement and disable Platform. */
     _executePortalBehavior(waypoint) {
       const action = waypoint ? waypoint.action : "portal_instant";
 
@@ -3030,6 +3156,7 @@ export default function (parentClass) {
       this._completePortal();
     }
 
+    /** Tick update for gradual portal traversal: linearly interpolates position toward exit at the portal's speed. */
     _updatePortalTraverse() {
       const dt = this.instance.dt;
       const dx = this.portalTraverseTargetX - this.portalTraverseStartX;
@@ -3057,6 +3184,7 @@ export default function (parentClass) {
       this.instance.y = this.portalTraverseStartY + dy * this.portalTraverseProgress;
     }
 
+    /** Finalizes portal traversal: resets portal state, advances waypoint, and triggers OnPortalComplete. */
     _completePortal() {
       this.justUsedPortal = true;
       this.portalPauseTimer = 0;
@@ -3067,6 +3195,7 @@ export default function (parentClass) {
       this.portalCurrentWaypoint = null;
     }
 
+    /** Simulates pressing "down" to fall through a jump-thru platform. */
     _executeFallThrough(targetX, targetY) {
       if (this.platformBehavior.isOnFloor) {
         this.platformBehavior.fallThrough();
@@ -3078,6 +3207,7 @@ export default function (parentClass) {
       }
     }
 
+    /** Routes physics-based actions (walk, jump, coyote_jump, fall) to their specific movement handlers. */
     _executePhysicsAware(action, targetX, targetY, waypoint) {
       const speed =
         this.platformBehavior.speed || Math.abs(this.estimatedVelocityX);
@@ -3131,11 +3261,6 @@ export default function (parentClass) {
         return;
       }
 
-      if (action === "jump_toward") {
-        this._handleJumpTowardAction(targetX, targetY);
-        return;
-      }
-
       if (
         action === "fall" ||
         action === "fall_left" ||
@@ -3167,6 +3292,7 @@ export default function (parentClass) {
       }
     }
 
+    /** Applies horizontal simulateControl toward a walk waypoint; handles ledge restriction and arrival centering. */
     _handleWalkAction(targetX, direction, waypoint) {
       const speed =
         this.platformBehavior.speed || Math.abs(this.estimatedVelocityX);
@@ -3185,8 +3311,7 @@ export default function (parentClass) {
           const nextNeedsDeparture = nextWaypoint && (
             nextWaypoint.action === "fall" || nextWaypoint.action === "fall_left" ||
             nextWaypoint.action === "fall_right" || nextWaypoint.action === "jump" ||
-            nextWaypoint.action === "coyote_jump" || nextWaypoint.action === "jump_toward"
-          );
+            nextWaypoint.action === "coyote_jump"          );
 
           if (!nextNeedsDeparture) {
             const edgeX =
@@ -3223,7 +3348,7 @@ export default function (parentClass) {
           const nextWp = nextIdx < this.currentPath.length ? this.currentPath[nextIdx] : null;
           if (nextWp && (
             nextWp.action === "jump" || nextWp.action === "coyote_jump" ||
-            nextWp.action === "jump_toward" || nextWp.action === "fall" ||
+            nextWp.action === "fall" ||
             nextWp.action === "fall_left" || nextWp.action === "fall_right"
           )) {
             const maxDepartureSpeed = Math.sqrt(2 * decel * (this.cellSize * 0.35));
@@ -3237,19 +3362,47 @@ export default function (parentClass) {
       }
     }
 
+    /** Checks if the cell adjacent to the character (in the given direction) is clear at the current height, accounting for character head cells. Used per-frame during double jump to gate horizontal input. */
+    _isDoubleJumpHorizontalClear(dir) {
+      const cs = this.cellSize;
+      const headCells = Math.max(0, Math.ceil(this.characterHeight / cs) - 1);
+      const grid = this.worldToGrid(this.instance.x, this.instance.y);
+      const checkGx = grid.gx + (dir === "right" ? 1 : -1);
+      if (checkGx < 0 || checkGx >= this.gridWidth) return false;
+
+      for (let h = 0; h <= headCells; h++) {
+        const checkGy = grid.gy - h;
+        if (checkGy < 0 || checkGy >= this.gridHeight) continue;
+        const val = this.obstacleMap[checkGy * this.gridWidth + checkGx];
+        if (val === 1 || val === 3) return false;
+      }
+      return true;
+    }
+
+    /** Handles jump execution: double-jump state machine (5 phases with release frame), pre-positioning (center or slide-off), and variable jump hold. */
     _handleJumpAction(targetX, targetY, waypoint) {
       const dt = this.instance.dt;
 
       if (waypoint && waypoint.requiresDoubleJump) {
+        const dir = targetX < this.instance.x ? "left" : "right";
+        const atOrAboveTarget = this.instance.y <= targetY + this.cellSize;
+        // Phase 0-1 (first jump): only horizontal when at/above target — gain height first.
+        // Phase 2-4 (second jump): horizontal when at/above target OR adjacent cell clear —
+        // move toward target during second jump and landing.
+        const firstJumpHorizontal = atOrAboveTarget;
+        const secondJumpHorizontal = atOrAboveTarget || this._isDoubleJumpHorizontalClear(dir);
+
         if (this.doubleJumpPhase === 0) {
-          const dir = targetX < this.instance.x ? "left" : "right";
-          this.platformBehavior.simulateControl(dir);
+          // Phase 0: Initiate first jump from the ground
+          this._log(`Double jump initiated toward (${Math.round(targetX)}, ${Math.round(targetY)})`);
+          if (firstJumpHorizontal) this.platformBehavior.simulateControl(dir);
           this.platformBehavior.simulateControl("jump");
           this.doubleJumpPhase = 1;
           this.jumpStartTime = 0;
+          this._doubleJumpGrace = 0.1; // 100ms grace before checking isFalling
         } else if (this.doubleJumpPhase === 1) {
-          const dir = targetX < this.instance.x ? "left" : "right";
-          this.platformBehavior.simulateControl(dir);
+          // Phase 1: Sustain first jump, wait for isFalling (apex reached)
+          if (firstJumpHorizontal) this.platformBehavior.simulateControl(dir);
 
           if (this.platformProps.jumpSustain > 0) {
             this.jumpStartTime += dt * 1000;
@@ -3258,22 +3411,36 @@ export default function (parentClass) {
             }
           }
 
-          try {
-            if (!this.platformBehavior.isRising) {
+          // Wait for grace period, then detect apex
+          this._doubleJumpGrace -= dt;
+          if (this._doubleJumpGrace <= 0) {
+            // If character fell back to floor, first jump failed entirely — repath
+            if (this.platformBehavior.isOnFloor && !this.platformBehavior.isJumping) {
+              this._warn(`Double jump: back on floor before second jump — repathing`);
+              this.doubleJumpPhase = 0;
+              this._rePath();
+              return;
+            }
+            // Once falling (past apex), proceed to second jump
+            if (this.platformBehavior.isFalling) {
               this.doubleJumpPhase = 2;
             }
-          } catch (e) {
-            this.doubleJumpPhase = 2;
           }
         } else if (this.doubleJumpPhase === 2) {
-          const dir = targetX < this.instance.x ? "left" : "right";
-          this.platformBehavior.simulateControl(dir);
-          this.platformBehavior.simulateControl("jump");
+          // Phase 2: Release frame — no jump input so Platform behavior sees a "release"
+          this._log(`Double jump: release frame`);
+          if (secondJumpHorizontal) this.platformBehavior.simulateControl(dir);
           this.doubleJumpPhase = 3;
-          this.jumpStartTime = 0;
         } else if (this.doubleJumpPhase === 3) {
-          const dir = targetX < this.instance.x ? "left" : "right";
-          this.platformBehavior.simulateControl(dir);
+          // Phase 3: Fire second jump (fresh press after release)
+          this._log(`Double jump: second jump fired`);
+          if (secondJumpHorizontal) this.platformBehavior.simulateControl(dir);
+          this.platformBehavior.simulateControl("jump");
+          this.doubleJumpPhase = 4;
+          this.jumpStartTime = 0;
+        } else if (this.doubleJumpPhase === 4) {
+          // Phase 4: Sustain second jump
+          if (secondJumpHorizontal) this.platformBehavior.simulateControl(dir);
 
           if (this.platformProps.jumpSustain > 0) {
             this.jumpStartTime += dt * 1000;
@@ -3281,6 +3448,30 @@ export default function (parentClass) {
               this.platformBehavior.simulateControl("jump");
             }
           }
+        }
+
+        // Wall collision detection for phases 2-4: if moving horizontally and
+        // hitting a wall, the character can't reach the target — repath immediately
+        // instead of waiting for the 5s waypoint timeout.
+        if (this.doubleJumpPhase >= 2) {
+          let hitWall = false;
+          try { hitWall = this.platformBehavior.isByWall(dir); } catch (e) {}
+          if (hitWall) {
+            this._warn(`Double jump: hit wall during phase ${this.doubleJumpPhase} — repathing`);
+            this.doubleJumpPhase = 0;
+            this._rePath();
+            return;
+          }
+        }
+
+        // Floor landing detection for phases 3-4: if the character has landed
+        // after the second jump, the double jump is complete (success or fail).
+        // Normal waypoint arrival handles success; this catches failures where
+        // the character landed but didn't reach the target.
+        if (this.doubleJumpPhase >= 3 && this.platformBehavior.isOnFloor && !this.platformBehavior.isJumping) {
+          this.doubleJumpPhase = 0;
+          // Don't repath here — let normal waypoint arrival check handle it.
+          // The character may have landed close enough to the target.
         }
         return;
       }
@@ -3322,11 +3513,14 @@ export default function (parentClass) {
           // AND the node has a ledge on the jump side (overhang, not a corner).
           // If the node is NOT a ledge on that side, the character is in a corner
           // with solid ground — can't slide off, fall through to normal centering.
+          // Skip slide-off for primarily upward jumps — centering gives a cleaner arc
+          // and avoids hitting the underside of adjacent blocks.
           const node = prevWp.node;
           const hasLedge = (jumpDir === "right" && node.isRightLedge) ||
                            (jumpDir === "left" && node.isLeftLedge);
+          const targetSignificantlyAbove = targetY < this.instance.y - this.cellSize * 1.5;
 
-          if (!this.ledgeRestriction && wallBlocksJump && !isVerticalJump && hasLedge) {
+          if (!this.ledgeRestriction && wallBlocksJump && !isVerticalJump && hasLedge && !targetSignificantlyAbove) {
             const edgeLimitX = node.x + (jumpDir === "right" ? 1 : -1) * (this.cellSize * 0.45);
             const pastEdge = jumpDir === "right"
               ? this.instance.x >= edgeLimitX
@@ -3396,6 +3590,7 @@ export default function (parentClass) {
       }
     }
 
+    /** Handles coyote jump: walks off the ledge edge, then jumps during the coyote time window while applying horizontal input. */
     _handleCoyoteJumpAction(targetX, targetY, waypoint) {
       const xDist = Math.abs(targetX - this.instance.x);
       const isVerticalJump = xDist < this.cellSize * 0.5;
@@ -3445,41 +3640,7 @@ export default function (parentClass) {
       } catch (e) {}
     }
 
-    _handleJumpTowardAction(targetX, targetY) {
-      const xDist = Math.abs(targetX - this.instance.x);
-      const dir = targetX < this.instance.x ? "left" : "right";
-
-      if (xDist >= this.cellSize * 0.5) {
-        try {
-          if (!this.platformBehavior.isByWall(dir)) {
-            this.platformBehavior.simulateControl(dir);
-          }
-        } catch (e) {
-          this.platformBehavior.simulateControl(dir);
-        }
-      }
-      this.platformBehavior.simulateControl("jump");
-
-      if (this.platformProps.isDoubleJumpEnabled) {
-        try {
-          if (
-            !this.platformBehavior.isRising &&
-            !this.platformBehavior.isOnFloor
-          ) {
-            this.platformBehavior.simulateControl("jump");
-          }
-        } catch (e) {}
-      }
-
-      if (this.platformProps.jumpSustain > 0) {
-        this.platformBehavior.simulateControl("jump");
-      }
-
-      this.jumpTowardTargetX = targetX;
-      this.jumpTowardTargetY = targetY;
-      this._trigger("OnJumpTowardExecuted");
-    }
-
+    /** Handles fall/fall_left/fall_right by applying directional input to drift toward the landing target. */
     _handleFallAction(targetX, action) {
       if (action === "fall_left") {
         this.platformBehavior.simulateControl("left");
@@ -3503,6 +3664,7 @@ export default function (parentClass) {
       }
     }
 
+    /** Tracks the coyote timer: counts up when the character walks off a ledge, resets when grounded or jumping. */
     _updateCoyoteTime(dt) {
       if (this.coyoteTime <= 0) return;
 
@@ -3565,11 +3727,7 @@ export default function (parentClass) {
       this.pathTargetGridX = correctedGrid.gx;
       this.pathTargetGridY = correctedGrid.gy;
 
-      // "jump_at" mode skips normal pathfinding — it always needs a launch node
-      let path = null;
-      if (this.lastPathMode !== "jump_at") {
-        path = this.findPath(startX, startY, targetX, targetY);
-      }
+      let path = this.findPath(startX, startY, targetX, targetY);
 
       // "nearest" mode: if normal pathfinding fails, path to the closest reachable node
       if (!path && this.lastPathMode === "nearest") {
@@ -3581,73 +3739,6 @@ export default function (parentClass) {
         );
         if (nearest) {
           path = this.findPath(startX, startY, nearest.x, nearest.y);
-        }
-      }
-
-      // "jump_at" mode: find a launch node offset from the target, then jump at it.
-      // Used for jump attacks, stomps, or hitting targets aggressively.
-      if (this.lastPathMode === "jump_at") {
-        const launch = this._findBestLaunchNode(
-          startX,
-          startY,
-          this.pathTargetX,
-          this.pathTargetY
-        );
-        if (launch) {
-          path = this.findPath(startX, startY, launch.x, launch.y);
-          if (path) {
-            path.push({
-              node: launch,
-              action: "jump_toward",
-              x: this.pathTargetX,
-              y: this.pathTargetY,
-            });
-          }
-        }
-        // Fallback 1: nearest reachable node + jump
-        if (!path) {
-          const nearest = this._findNearestReachableNode(
-            startX,
-            startY,
-            this.pathTargetX,
-            this.pathTargetY
-          );
-          if (nearest) {
-            path = this.findPath(startX, startY, nearest.x, nearest.y);
-            if (path) {
-              path.push({
-                node: nearest,
-                action: "jump_toward",
-                x: this.pathTargetX,
-                y: this.pathTargetY,
-              });
-            }
-          }
-        }
-        // Fallback 2: jump from current position (guarantees jump_at always produces a path)
-        if (!path) {
-          const startGrid = this.worldToGrid(startX, startY);
-          const startNode = this.getNode(startGrid.gx, startGrid.gy);
-          if (startNode) {
-            path = [{
-              node: startNode,
-              action: "start",
-              x: startNode.x,
-              y: startNode.y,
-              portalId: null,
-              speed: 0,
-              peakHeight: 0,
-            }, {
-              node: startNode,
-              action: "jump_toward",
-              x: this.pathTargetX,
-              y: this.pathTargetY,
-              portalId: null,
-              speed: 0,
-              peakHeight: 0,
-            }];
-            this._log("jump_at: using current position as launch point (both finders failed)");
-          }
         }
       }
 
@@ -4521,11 +4612,13 @@ export default function (parentClass) {
       console.log("Hazards:", this._getHazardsMap().size);
     }
 
+    /** Fires a C3 trigger condition and dispatches the corresponding custom event. Called internally to notify both event sheets and JS listeners. */
     _trigger(method) {
       this.dispatch(method);
       super._trigger(self.C3[AddonTypeMap[addonType]][id].Cnds[method]);
     }
 
+    /** Registers a JavaScript callback for a named event tag. Supports options like {once: true} for one-shot listeners and {params: [...]} for conditional filtering. */
     on(tag, callback, options) {
       if (!this.events[tag]) {
         this.events[tag] = [];
@@ -4533,6 +4626,7 @@ export default function (parentClass) {
       this.events[tag].push({ callback, options });
     }
 
+    /** Removes a previously registered JavaScript callback for a named event tag. */
     off(tag, callback) {
       if (this.events[tag]) {
         this.events[tag] = this.events[tag].filter(
@@ -4541,6 +4635,7 @@ export default function (parentClass) {
       }
     }
 
+    /** Invokes all registered callbacks for a named event tag. If a listener has params, the corresponding C3 condition is checked first — callbacks are skipped if the condition returns false. One-shot listeners are automatically removed after firing. */
     dispatch(tag) {
       if (this.events[tag]) {
         this.events[tag].forEach((event) => {
