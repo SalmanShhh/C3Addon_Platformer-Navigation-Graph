@@ -32,6 +32,18 @@ action("Pathfinding", "StopPathfinding", {
   this.aceStopPathfinding();
 });
 
+action("Pathfinding", "JumpTowardPosition", {
+  listName: "Jump toward position",
+  displayText: "Jump toward ({0}, {1})",
+  description: "Immediately jump toward a target position. The character jumps from its current position with full strength, moving horizontally toward the target. No pathfinding is involved — the character simply lunges at the target. Use for: jump attacks, stomps, lunges. Triggers 'On jump toward executed' when the jump starts. The character must be on the floor to jump.",
+  params: [
+    { id: "x", name: "X", desc: "Target X position in pixels", type: "number", initialValue: "0" },
+    { id: "y", name: "Y", desc: "Target Y position in pixels", type: "number", initialValue: "0" }
+  ]
+}, function(x, y) {
+  this.aceJumpTowardPosition(x, y);
+});
+
 action("Pathfinding", "RegenerateGraph", {
   listName: "Regenerate navigation graph",
   displayText: "Regenerate navigation graph",
@@ -157,6 +169,15 @@ condition("Pathfinding", "OnJumpTowardExecuted", {
   listName: "On jump toward executed",
   displayText: "On jump toward executed",
   description: "Triggered when the 'jump at target' mode executes the final jump toward the target. Use this to handle jump attacks or stomps.",
+  isTrigger: true
+}, function() {
+  return true;
+});
+
+condition("Pathfinding", "OnJumpTowardLaunched", {
+  listName: "On jump toward launched",
+  displayText: "On jump toward launched",
+  description: "Triggered when the 'Jump toward position' action launches the character. Use this to play attack animations, spawn effects, or apply damage. The target position is available via JumpTowardTargetX/Y expressions.",
   isTrigger: true
 }, function() {
   return true;

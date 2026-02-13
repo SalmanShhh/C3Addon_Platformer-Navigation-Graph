@@ -150,6 +150,8 @@ export default function (parentClass) {
 
       this.jumpTowardTargetX = 0;
       this.jumpTowardTargetY = 0;
+      this._jumpTowardActive = false;
+      this._jumpTowardGrace = 0;
 
       this.platformProps = {
         maxSpeed: 200,
@@ -288,6 +290,30 @@ export default function (parentClass) {
         this.rePathCooldown -= dt;
       }
 
+      // Standalone jump-toward: keep pushing horizontally while airborne
+      if (this._jumpTowardActive && this.platformBehavior) {
+        // Grace period: skip the landing check for a few ticks after launch,
+        // because isOnFloor is still true on the frame the jump is initiated
+        if (this._jumpTowardGrace > 0) {
+          this._jumpTowardGrace -= dt;
+        }
+        const hasLanded = this._jumpTowardGrace <= 0 && this.platformBehavior.isOnFloor;
+        if (hasLanded) {
+          this._jumpTowardActive = false;
+        } else {
+          // Push horizontally toward target
+          const xDist = Math.abs(this.jumpTowardTargetX - this.instance.x);
+          if (xDist >= this.cellSize * 0.5) {
+            const dir = this.jumpTowardTargetX < this.instance.x ? "left" : "right";
+            this.platformBehavior.simulateControl(dir);
+          }
+          // Sustain jump while rising
+          if (this.platformProps.jumpSustain > 0 && this.platformBehavior.isRising) {
+            this.platformBehavior.simulateControl("jump");
+          }
+        }
+      }
+
       if (this.hasPath) {
         this._followPath(dt);
       }
@@ -366,6 +392,7 @@ export default function (parentClass) {
         pathTargetGridY: this.pathTargetGridY,
         jumpTowardTargetX: this.jumpTowardTargetX,
         jumpTowardTargetY: this.jumpTowardTargetY,
+        _jumpTowardActive: this._jumpTowardActive,
         platformProps: this.platformProps,
         graphGenerated: this.graphGenerated,
         obstacleMap: this.obstacleMap,
@@ -438,6 +465,7 @@ export default function (parentClass) {
       this.pathTargetGridY = o.pathTargetGridY;
       this.jumpTowardTargetX = o.jumpTowardTargetX;
       this.jumpTowardTargetY = o.jumpTowardTargetY;
+      this._jumpTowardActive = o._jumpTowardActive || false;
       this.platformProps = o.platformProps;
       this.graphGenerated = o.graphGenerated;
       this.obstacleMap = o.obstacleMap;
@@ -3693,6 +3721,37 @@ export default function (parentClass) {
     aceStopPathfinding() {
       this.aceClearPath();
       this.aceStopMovement();
+    }
+
+    /** Immediately jump toward a target position from the current position. No pathfinding involved. */
+    aceJumpTowardPosition(targetX, targetY) {
+      if (!this.platformBehavior) return;
+
+      const onFloor = this.platformBehavior.isOnFloor;
+      const canDoubleJump = !onFloor && this.platformProps.isDoubleJumpEnabled;
+
+      // Must be on the floor OR able to double jump
+      if (!onFloor && !canDoubleJump) return;
+
+      this.hasPath = false;
+      this.currentPath = [];
+      this.currentWaypoint = 0;
+      this.jumpTowardTargetX = targetX;
+      this.jumpTowardTargetY = targetY;
+      this._jumpTowardActive = true;
+      this._jumpTowardGrace = 0.1; // 100ms grace before checking isOnFloor (jump hasn't left ground yet)
+
+      // Initial horizontal push + jump on the launch frame
+      const xDist = Math.abs(targetX - this.instance.x);
+      const dir = targetX < this.instance.x ? "left" : "right";
+      if (xDist >= this.cellSize * 0.5) {
+        this.platformBehavior.simulateControl(dir);
+      }
+      this.platformBehavior.simulateControl("jump");
+      if (this.platformProps.jumpSustain > 0) {
+        this.platformBehavior.simulateControl("jump");
+      }
+      this._trigger("OnJumpTowardLaunched");
     }
 
     /** Marks the navigation graph as needing regeneration on the next tick. */

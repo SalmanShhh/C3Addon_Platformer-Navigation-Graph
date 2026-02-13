@@ -412,6 +412,21 @@
               }
             }
           },
+          "JumpTowardPosition": {
+            "list-name": "Jump toward position",
+            "display-text": "Jump toward ({0}, {1})",
+            "description": "Immediately jump toward a target position. The character jumps from its current position with full strength, moving horizontally toward the target. No pathfinding is involved — the character simply lunges at the target. Use for: jump attacks, stomps, lunges. Triggers 'On jump toward executed' when the jump starts. The character must be on the floor to jump.",
+            "params": {
+              "x": {
+                "name": "X",
+                "desc": "Target X position in pixels"
+              },
+              "y": {
+                "name": "Y",
+                "desc": "Target Y position in pixels"
+              }
+            }
+          },
           "RegenerateGraph": {
             "list-name": "Regenerate navigation graph",
             "display-text": "Regenerate navigation graph",
@@ -993,6 +1008,12 @@
             "list-name": "On jump toward executed",
             "display-text": "On jump toward executed",
             "description": "Triggered when the 'jump at target' mode executes the final jump toward the target. Use this to handle jump attacks or stomps.",
+            "params": {}
+          },
+          "OnJumpTowardLaunched": {
+            "list-name": "On jump toward launched",
+            "display-text": "On jump toward launched",
+            "description": "Triggered when the 'Jump toward position' action launches the character. Use this to play attack animations, spawn effects, or apply damage. The target position is available via JumpTowardTargetX/Y expressions.",
             "params": {}
           },
           "OnPathComplete": {
