@@ -684,6 +684,11 @@ export default function (parentClass) {
       this._log(`Jump params: maxJumpHeight=${Math.round(this.maxJumpHeight)}px, maxJumpDistance=${Math.round(this.maxJumpDistance)}px, maxFallDistance=${Math.round(this.maxFallDistance)}px (${Math.ceil(this.maxFallDistance / this.cellSize)} tiles), maxFallSpeed=${this.platformProps.maxFallSpeed}, gravity=${this.platformProps.gravity}`);
     }
 
+    _combo(value, keys) {
+      if (typeof value === "number") return keys[value] || keys[0];
+      return value || keys[0];
+    }
+
     _log(...args) {
       if (this.enableDebug) {
         console.log(`[${name}]`, ...args);
@@ -985,17 +990,17 @@ export default function (parentClass) {
       } else if (state === "clear") {
         this.obstacleMap[index] = 0;
         if (this.slopeMap) this.slopeMap[index] = 0;
-      } else if (state === "jump-thru") {
+      } else if (state === "jump_thru") {
         this.obstacleMap[index] = 2;
       } else if (state === "avoid") {
         this.obstacleMap[index] = 3;
-      } else if (state === "slope-left") {
+      } else if (state === "slope_left") {
         this.obstacleMap[index] = 0;
         if (!this.slopeMap) {
           this.slopeMap = new Uint8Array(this.gridWidth * this.gridHeight);
         }
         this.slopeMap[index] = 1;
-      } else if (state === "slope-right") {
+      } else if (state === "slope_right") {
         this.obstacleMap[index] = 0;
         if (!this.slopeMap) {
           this.slopeMap = new Uint8Array(this.gridWidth * this.gridHeight);
@@ -2854,7 +2859,6 @@ export default function (parentClass) {
 
         if (
           (effectiveAction === "jump" || effectiveAction === "coyote_jump" ||
-           effectiveAction === "jump_toward" ||
            effectiveAction === "fall" || effectiveAction === "fall_left" ||
            effectiveAction === "fall_right") &&
           this.platformBehavior?.isOnFloor
@@ -3572,7 +3576,7 @@ export default function (parentClass) {
             });
           }
         }
-        // Fallback: nearest reachable node + jump
+        // Fallback 1: nearest reachable node + jump
         if (!path) {
           const nearest = this._findNearestReachableNode(
             startX,
@@ -3590,6 +3594,31 @@ export default function (parentClass) {
                 y: this.pathTargetY,
               });
             }
+          }
+        }
+        // Fallback 2: jump from current position (guarantees jump_at always produces a path)
+        if (!path) {
+          const startGrid = this.worldToGrid(startX, startY);
+          const startNode = this.getNode(startGrid.gx, startGrid.gy);
+          if (startNode) {
+            path = [{
+              node: startNode,
+              action: "start",
+              x: startNode.x,
+              y: startNode.y,
+              portalId: null,
+              speed: 0,
+              peakHeight: 0,
+            }, {
+              node: startNode,
+              action: "jump_toward",
+              x: this.pathTargetX,
+              y: this.pathTargetY,
+              portalId: null,
+              speed: 0,
+              peakHeight: 0,
+            }];
+            this._log("jump_at: using current position as launch point (both finders failed)");
           }
         }
       }
@@ -4012,7 +4041,7 @@ export default function (parentClass) {
       return Math.floor(y / this.cellSize);
     }
 
-    /** Returns the tile state at grid coordinates as a string: "solid", "clear", "slope", "jump-thru", or "avoid". */
+    /** Returns the tile state at grid coordinates as a string: "solid", "clear", "slope", "jump_thru", or "avoid". */
     aceGetTileState(gx, gy) {
       if (
         gx < 0 ||
@@ -4032,7 +4061,7 @@ export default function (parentClass) {
         return "clear";
       }
       if (val === 1) return "solid";
-      if (val === 2) return "jump-thru";
+      if (val === 2) return "jump_thru";
       if (val === 3) return "avoid";
       return "clear";
     }

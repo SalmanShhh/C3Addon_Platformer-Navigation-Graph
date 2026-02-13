@@ -321,10 +321,10 @@
                 "items": {
                   "solid": "Solid",
                   "clear": "Clear",
-                  "jump-thru": "Jump-thru",
+                  "jump_thru": "Jump-thru",
                   "avoid": "Avoid",
-                  "slope-left": "Slope left",
-                  "slope-right": "Slope right"
+                  "slope_left": "Slope left",
+                  "slope_right": "Slope right"
                 }
               }
             }
@@ -348,10 +348,10 @@
                 "items": {
                   "solid": "Solid",
                   "clear": "Clear",
-                  "jump-thru": "Jump-thru",
+                  "jump_thru": "Jump-thru",
                   "avoid": "Avoid",
-                  "slope-left": "Slope left",
-                  "slope-right": "Slope right"
+                  "slope_left": "Slope left",
+                  "slope_right": "Slope right"
                 }
               }
             }
@@ -896,7 +896,7 @@
                 "items": {
                   "solid": "Solid",
                   "clear": "Clear",
-                  "jump-thru": "Jump-thru",
+                  "jump_thru": "Jump-thru",
                   "avoid": "Avoid",
                   "slope": "Slope (any direction)"
                 }
@@ -922,7 +922,7 @@
                 "items": {
                   "solid": "Solid",
                   "clear": "Clear",
-                  "jump-thru": "Jump-thru",
+                  "jump_thru": "Jump-thru",
                   "avoid": "Avoid",
                   "slope": "Slope (any direction)"
                 }

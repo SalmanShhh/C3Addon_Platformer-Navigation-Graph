@@ -16,7 +16,12 @@ action("Pathfinding", "FindPath", {
     { id: "strict", name: "Jump Positioning", desc: "Control how carefully the character positions itself before jumps and falls on THIS specific path. This only affects jump/fall precision during pathfinding — it does NOT affect edge walking (use Ledge Restriction for that). 'Default' uses whatever the property or SetStrictJumpPositioning action is set to. 'Strict' forces careful positioning — use for dangerous routes over pits or narrow platforms. 'Relaxed' skips positioning checks for maximum speed — use for chase sequences or when the character is fleeing and precision doesn't matter.", type: "combo", initialValue: "default", items: [{ default: "Default (use property)" }, { strict: "Strict" }, { relaxed: "Relaxed" }] }
   ]
 }, function(x, y, correctToGround, mode, strict) {
-  this.aceFindPath(x, y, correctToGround === "yes", mode, strict);
+  this.aceFindPath(
+    x, y,
+    this._combo(correctToGround, ["no", "yes"]) === "yes",
+    this._combo(mode, ["reach", "nearest", "jump_at"]),
+    this._combo(strict, ["default", "strict", "relaxed"])
+  );
 });
 
 action("Pathfinding", "StopPathfinding", {
@@ -43,7 +48,7 @@ action("Pathfinding", "SetAutoControl", {
     { id: "enabled", name: "Enabled", desc: "Enable or disable auto-control", type: "combo", initialValue: "yes", items: [{ yes: "Enabled" }, { no: "Disabled" }] }
   ]
 }, function(enabled) {
-  this.aceSetAutoControl(enabled === "yes");
+  this.aceSetAutoControl(this._combo(enabled, ["yes", "no"]) === "yes");
 });
 
 action("Pathfinding", "SetCoyoteTime", {
@@ -65,7 +70,7 @@ action("Pathfinding", "SetStrictJumpPositioning", {
     { id: "enabled", name: "Enabled", desc: "Enable or disable strict jump positioning", type: "combo", initialValue: "yes", items: [{ yes: "Enabled" }, { no: "Disabled" }] }
   ]
 }, function(enabled) {
-  this.aceSetStrictJumpPositioning(enabled === "yes");
+  this.aceSetStrictJumpPositioning(this._combo(enabled, ["yes", "no"]) === "yes");
 });
 
 action("Pathfinding", "SetLedgeRestriction", {
@@ -76,7 +81,7 @@ action("Pathfinding", "SetLedgeRestriction", {
     { id: "enabled", name: "Enabled", desc: "Enable or disable ledge restriction", type: "combo", initialValue: "yes", items: [{ yes: "Enabled" }, { no: "Disabled" }] }
   ]
 }, function(enabled) {
-  this.aceSetLedgeRestriction(enabled === "yes");
+  this.aceSetLedgeRestriction(this._combo(enabled, ["yes", "no"]) === "yes");
 });
 
 action("Pathfinding", "SetLedgeLeniency", {
@@ -498,15 +503,15 @@ action("ObstacleMap", "SetTileState", {
       items: [
         { solid: "Solid" },
         { clear: "Clear" },
-        { "jump-thru": "Jump-thru" },
+        { jump_thru: "Jump-thru" },
         { avoid: "Avoid" },
-        { "slope-left": "Slope left" },
-        { "slope-right": "Slope right" }
+        { slope_left: "Slope left" },
+        { slope_right: "Slope right" }
       ]
     }
   ]
 }, function(gx, gy, state) {
-  this.aceSetTileState(gx, gy, state);
+  this.aceSetTileState(gx, gy, this._combo(state, ["solid", "clear", "jump_thru", "avoid", "slope_left", "slope_right"]));
 });
 
 action("ObstacleMap", "SetTileStateWorld", {
@@ -520,15 +525,15 @@ action("ObstacleMap", "SetTileStateWorld", {
       items: [
         { solid: "Solid" },
         { clear: "Clear" },
-        { "jump-thru": "Jump-thru" },
+        { jump_thru: "Jump-thru" },
         { avoid: "Avoid" },
-        { "slope-left": "Slope left" },
-        { "slope-right": "Slope right" }
+        { slope_left: "Slope left" },
+        { slope_right: "Slope right" }
       ]
     }
   ]
 }, function(x, y, state) {
-  this.aceSetTileStateWorld(x, y, state);
+  this.aceSetTileStateWorld(x, y, this._combo(state, ["solid", "clear", "jump_thru", "avoid", "slope_left", "slope_right"]));
 });
 
 action("ObstacleMap", "SetTileHazard", {
@@ -581,7 +586,7 @@ action("ObstacleMap", "UsePathfindingObstacleMap", {
     }
   ]
 }, function(autoRegen) {
-  this.aceUsePathfindingObstacleMap(autoRegen === "yes");
+  this.aceUsePathfindingObstacleMap(this._combo(autoRegen, ["yes", "no"]) === "yes");
 });
 
 action("ObstacleMap", "ClearAllSlopes", {
@@ -634,7 +639,7 @@ action("Pathfinding", "SetPathStrategy", {
     }
   ]
 }, function(strategy) {
-  this.aceSetPathStrategy(strategy);
+  this.aceSetPathStrategy(this._combo(strategy, ["balanced", "shortest", "safest", "simplest"]));
 });
 
 action("ObstacleMap", "SetHazardRadius", {
@@ -718,18 +723,19 @@ condition("ObstacleMap", "TileHasState", {
       items: [
         { solid: "Solid" },
         { clear: "Clear" },
-        { "jump-thru": "Jump-thru" },
+        { jump_thru: "Jump-thru" },
         { avoid: "Avoid" },
         { slope: "Slope (any direction)" }
       ]
     }
   ]
 }, function(gx, gy, state) {
+  const s = this._combo(state, ["solid", "clear", "jump_thru", "avoid", "slope"]);
   const tileState = this.aceGetTileState(gx, gy);
-  if (state === "slope") {
-    return tileState === "slope-left" || tileState === "slope-right";
+  if (s === "slope") {
+    return tileState === "slope";
   }
-  return tileState === state;
+  return tileState === s;
 });
 
 condition("ObstacleMap", "TileHasStateWorld", {
@@ -744,18 +750,19 @@ condition("ObstacleMap", "TileHasStateWorld", {
       items: [
         { solid: "Solid" },
         { clear: "Clear" },
-        { "jump-thru": "Jump-thru" },
+        { jump_thru: "Jump-thru" },
         { avoid: "Avoid" },
         { slope: "Slope (any direction)" }
       ]
     }
   ]
 }, function(x, y, state) {
+  const s = this._combo(state, ["solid", "clear", "jump_thru", "avoid", "slope"]);
   const tileState = this.aceGetTileStateWorld(x, y);
-  if (state === "slope") {
-    return tileState === "slope-left" || tileState === "slope-right";
+  if (s === "slope") {
+    return tileState === "slope";
   }
-  return tileState === state;
+  return tileState === s;
 });
 
 // ============================================================================
@@ -1007,7 +1014,7 @@ action("Portals", "AddInstantPortal", {
     { id: "cost", name: "Cost", desc: "How much the AI 'pays' to use this portal. Default 1 = same as walking one tile. Lower = preferred, higher = avoided.", type: "number", initialValue: "1" }
   ]
 }, function(direction, entryX, entryY, exitX, exitY, cost) {
-  this.aceAddInstantPortal(direction, entryX, entryY, exitX, exitY, cost);
+  this.aceAddInstantPortal(this._combo(direction, ["one_way", "two_way"]), entryX, entryY, exitX, exitY, cost);
 });
 
 action("Portals", "AddInstantPortalFromObjects", {
@@ -1023,7 +1030,7 @@ action("Portals", "AddInstantPortalFromObjects", {
     { id: "cost", name: "Cost", desc: "Movement cost (lower = preferred, default is 1)", type: "number", initialValue: "1" }
   ]
 }, function(direction, entryObject, exitObject, cost) {
-  this.aceAddInstantPortalFromObjects(direction, entryObject, exitObject, cost);
+  this.aceAddInstantPortalFromObjects(this._combo(direction, ["one_way", "two_way"]), entryObject, exitObject, cost);
 });
 
 action("Portals", "AddGradualPortal", {
@@ -1042,7 +1049,7 @@ action("Portals", "AddGradualPortal", {
     { id: "speed", name: "Speed", desc: "Movement speed in pixels per second", type: "number", initialValue: "100" }
   ]
 }, function(direction, entryX, entryY, exitX, exitY, cost, speed) {
-  this.aceAddGradualPortal(direction, entryX, entryY, exitX, exitY, cost, speed);
+  this.aceAddGradualPortal(this._combo(direction, ["one_way", "two_way"]), entryX, entryY, exitX, exitY, cost, speed);
 });
 
 action("Portals", "AddGradualPortalFromObjects", {
@@ -1059,7 +1066,7 @@ action("Portals", "AddGradualPortalFromObjects", {
     { id: "speed", name: "Speed", desc: "Movement speed in pixels per second", type: "number", initialValue: "100" }
   ]
 }, function(direction, entryObject, exitObject, cost, speed) {
-  this.aceAddGradualPortalFromObjects(direction, entryObject, exitObject, cost, speed);
+  this.aceAddGradualPortalFromObjects(this._combo(direction, ["one_way", "two_way"]), entryObject, exitObject, cost, speed);
 });
 
 action("Portals", "RemovePortal", {
@@ -1119,7 +1126,7 @@ action("Portals", "SetPortalIgnoreHazards", {
     }
   ]
 }, function(portalId, ignoreHazards) {
-  this.aceSetPortalIgnoreHazards(portalId, ignoreHazards === "yes");
+  this.aceSetPortalIgnoreHazards(portalId, this._combo(ignoreHazards, ["yes", "no"]) === "yes");
 });
 
 action("Portals", "PauseAtPortal", {
@@ -1563,7 +1570,7 @@ action("MultiAgent", "SetMultiAgentAvoidance", {
     }
   ]
 }, function(enabled) {
-  this.aceSetMultiAgentAvoidance(enabled === "yes");
+  this.aceSetMultiAgentAvoidance(this._combo(enabled, ["yes", "no"]) === "yes");
 });
 
 // ============================================================================
