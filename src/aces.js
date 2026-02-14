@@ -1572,10 +1572,10 @@ expression("GraphData", "IsTileJumpThru", {
 // MULTI-AGENT ACTIONS
 // ============================================================================
 
-action("MultiAgent", "SetMultiAgentAvoidance", {
+action("SharedNavigation", "SetMultiAgentAvoidance", {
   listName: "Set multi-agent avoidance",
   displayText: "Set multi-agent avoidance: {0}",
-  description: "Enable or disable multi-agent collision avoidance. When enabled, AI agents will attempt to avoid colliding with each other during pathfinding. Note: This feature may not be fully implemented yet.",
+  description: "Enable or disable multi-agent collision avoidance. When enabled, AI agents will attempt to avoid paths occupied by other agents. Shared Navigation graph mode only — requires graph mode set to 'shared'.",
   params: [
     { id: "enabled", name: "Enabled", desc: "Enable or disable multi-agent avoidance", type: "combo", initialValue: "yes",
       items: [{ yes: "Enabled" }, { no: "Disabled" }]
@@ -1586,25 +1586,25 @@ action("MultiAgent", "SetMultiAgentAvoidance", {
 });
 
 // ============================================================================
-// MULTI-AGENT CONDITIONS
+// SHARED NAVIGATION CONDITIONS
 // ============================================================================
 
-condition("MultiAgent", "IsMultiAgentAvoidanceEnabled", {
+condition("SharedNavigation", "IsMultiAgentAvoidanceEnabled", {
   listName: "Is multi-agent avoidance enabled",
   displayText: "Multi-agent avoidance is enabled",
-  description: "Check if multi-agent collision avoidance is currently enabled. Returns true if enabled, false otherwise.",
+  description: "Check if multi-agent collision avoidance is currently enabled. Shared Navigation graph mode only — requires graph mode set to 'shared'.",
   isInvertible: true
 }, function() {
   return this.aceIsMultiAgentAvoidanceEnabled();
 });
 
 // ============================================================================
-// MULTI-AGENT EXPRESSIONS
+// SHARED NAVIGATION EXPRESSIONS
 // ============================================================================
 
-expression("MultiAgent", "NearbyAgentCount", {
+expression("SharedNavigation", "NearbyAgentCount", {
   returnType: "number",
-  description: "Get the number of nearby AI agents within detection range. Used for multi-agent avoidance calculations. Returns 0 if multi-agent avoidance is disabled."
+  description: "Get the number of nearby AI agents within detection range. Used for multi-agent avoidance calculations. Returns 0 if multi-agent avoidance is disabled. Shared Navigation graph mode only — requires graph mode set to 'shared'."
 }, function() {
   return this.aceGetNearbyAgentCount();
 });
@@ -1655,6 +1655,7 @@ action("Configuration", "SetMaxJumpHeight", {
 }, function(value) {
   this.maxJumpHeight = value;
   this.singleJumpHeight = value;
+  this._jumpParamsOverridden = true;
 });
 
 action("Configuration", "SetMaxJumpDistance", {
@@ -1667,6 +1668,7 @@ action("Configuration", "SetMaxJumpDistance", {
 }, function(value) {
   this.maxJumpDistance = value;
   this.singleJumpDistance = value;
+  this._jumpParamsOverridden = true;
 });
 
 action("Configuration", "SetMaxFallDistance", {
@@ -1678,5 +1680,52 @@ action("Configuration", "SetMaxFallDistance", {
   ]
 }, function(value) {
   this.maxFallDistance = value;
+  this._jumpParamsOverridden = true;
+});
+
+// ============================================================================
+// PERFORMANCE ACTIONS
+// ============================================================================
+
+action("Performance", "SetMaxPathsPerTick", {
+  listName: "Set max paths per tick",
+  displayText: "Set max paths per tick to {0}",
+  description: "Limit path calculations per tick to prevent frame drops with many agents. 0 = unlimited (default). Re-paths always run immediately regardless of this limit.",
+  params: [
+    { id: "count", name: "Max paths", desc: "Maximum path calculations per tick (0 = unlimited)", type: "number", initialValue: "0" }
+  ]
+}, function(count) {
+  this.aceSetMaxPathsPerTick(count);
+});
+
+// ============================================================================
+// PERFORMANCE CONDITIONS
+// ============================================================================
+
+condition("Performance", "IsPathPending", {
+  listName: "Is path pending",
+  displayText: "Path is pending",
+  description: "True when a path request is queued and waiting to be processed (time-slicing is active and the per-tick budget was reached).",
+  isInvertible: true
+}, function() {
+  return this.pathPending;
+});
+
+// ============================================================================
+// PERFORMANCE EXPRESSIONS
+// ============================================================================
+
+expression("Performance", "MaxPathsPerTick", {
+  returnType: "number",
+  description: "Current max paths per tick limit (0 = unlimited)."
+}, function() {
+  return this.aceGetMaxPathsPerTick();
+});
+
+expression("Performance", "PathQueueSize", {
+  returnType: "number",
+  description: "Number of path requests currently waiting in the queue."
+}, function() {
+  return this.aceGetPathQueueSize();
 });
 

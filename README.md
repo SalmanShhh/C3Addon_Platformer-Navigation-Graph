@@ -86,7 +86,6 @@ npm run dev
 | Clear all hazards | Remove all circular and rectangular hazards. This does NOT clear tile-based hazards. Use when resetting a level or clearing all dynamic dangers. |  |
 | Clear all tile hazards | Reset all tile hazard severities to 0. This does NOT remove circle/rect hazards. Use when you want to clear static tile dangers. |  |
 | Remove hazard | Remove a hazard by its ID. Use this when a danger zone is no longer active. The graph will be regenerated if needed. | ID             *(number)* <br> |
-| Set multi-agent avoidance | Enable or disable multi-agent collision avoidance. When enabled, AI agents will attempt to avoid colliding with each other during pathfinding. Note: This feature may not be fully implemented yet. | Enabled             *(combo)* <br> |
 | Clear all slope markings | Remove all slope markings from the obstacle map. Slopes will be treated as regular solid tiles. Use this to reset slope data. |  |
 | Clear obstacle map | Remove the obstacle map and all associated data. Use this when switching levels or resetting the navigation system. |  |
 | Create custom obstacle map | Create a custom obstacle map with the specified dimensions in tiles. All tiles are initialized to 'clear' state. Use this when not using the Pathfinding behavior's obstacle map. | Width             *(number)* <br>Height             *(number)* <br> |
@@ -109,6 +108,7 @@ npm run dev
 | Set re-path cooldown | Set the minimum time in seconds between automatic re-path attempts. Lower values = more responsive re-pathing but more CPU usage. Default is 0.5 seconds. | Seconds             *(number)* <br> |
 | Set strict jump positioning | Toggle whether this AI character slows down and carefully positions itself before jumping or falling during pathfinding. This does NOT affect walking off edges (use 'Set ledge restriction' for that). Use this to change behavior at runtime — for example, disable when a boss enters 'rage mode' for reckless movement, or enable when an NPC needs to carefully cross a narrow bridge. Overrides the property setting for this character. | Enabled             *(combo)* <br> |
 | Stop pathfinding | Stop the character immediately and clear the current path. Use when you want to cancel AI navigation and regain manual control. |  |
+| Set max paths per tick | Limit path calculations per tick to prevent frame drops with many agents. 0 = unlimited (default). Re-paths always run immediately regardless of this limit. | Max paths             *(number)* <br> |
 | Add elevator stop | Add a stop to an elevator group. Automatically creates two-way gradual portals between this stop and all other stops in the same group. Cost is auto-calculated from distance and speed. Use a unique group name (e.g. 'elevator_A') for each elevator. Example: 3 calls with the same group creates 3 pairwise portals (Floor1-Floor2, Floor1-Floor3, Floor2-Floor3). Use PortalExitX/PortalExitY in 'On portal entry' to determine which floor the AI is heading to. | Group             *(string)* <br>X             *(number)* <br>Y             *(number)* <br>Speed             *(number)* <br> |
 | Add elevator stop from object | Add an elevator stop using an object's position. Same as 'Add elevator stop' but uses the object's current X/Y. The object serves as a floor marker. | Group             *(string)* <br>Object             *(object)* <br>Speed             *(number)* <br> |
 | Add gradual portal | Add a portal that gradually moves the AI from entry to exit at the given speed. The character moves in a straight line (any direction — vertical, horizontal, or diagonal). Platform behavior is disabled during movement. Use for: elevators, lifts, moving platforms, ziplines. For vertical-only movement (ladders/ropes), align entry and exit X positions, or use 'Pause at portal' to implement your own custom movement via events. | Direction             *(combo)* <br>Entry X             *(number)* <br>Entry Y             *(number)* <br>Exit X             *(number)* <br>Exit Y             *(number)* <br>Cost             *(number)* <br>Speed             *(number)* <br> |
@@ -125,6 +125,7 @@ npm run dev
 | Set portal ignore hazards | Set whether a portal ignores nearby hazards when calculating its pathfinding cost. | Portal ID             *(number)* <br>Ignore hazards             *(combo)* <br> |
 | Set portal speed | Change the movement speed of a gradual portal (pixels per second). Has no effect on instant portals. | Portal ID             *(number)* <br>Speed             *(number)* <br> |
 | Teleport to position | Instantly move the character to the given position. Can be used anywhere — inside portal events, on button press, on collision, etc. Suppresses re-pathing for one tick to prevent the AI from thinking it's lost. Useful with 'Pause at portal' + 'Complete portal' for fully custom portal behavior. | X             *(number)* <br>Y             *(number)* <br> |
+| Set multi-agent avoidance | Enable or disable multi-agent collision avoidance. When enabled, AI agents will attempt to avoid paths occupied by other agents. Shared Navigation graph mode only — requires graph mode set to 'shared'. | Enabled             *(combo)* <br> |
 
 
 ---
@@ -133,7 +134,6 @@ npm run dev
 | --- | --- | --- |
 | Is node at ledge | Check if a specific node is marked as a ledge (platform edge). Returns true if the node is a left or right ledge. | Grid X *(number)* <br>Grid Y *(number)* <br> |
 | Is position hazardous | Check if a specific world position is within any hazard area (circle, rect, or tile). Returns true if any hazard affects this position. | X *(number)* <br>Y *(number)* <br> |
-| Is multi-agent avoidance enabled | Check if multi-agent collision avoidance is currently enabled. Returns true if enabled, false otherwise. |  |
 | Is setting up Pathfinding | Check if the behavior is currently waiting for the Pathfinding obstacle map to initialize. Returns true during async setup. |  |
 | On obstacle map created | Triggered when a custom obstacle map is successfully created. Use this to start configuring tiles after map creation. |  |
 | On obstacle map removed | Triggered when the obstacle map is cleared or removed. Use this to clean up related data or reset systems. |  |
@@ -156,10 +156,12 @@ npm run dev
 | On re-path triggered | Triggered when automatic re-pathing occurs due to the character drifting too far from the path. Use this to monitor navigation accuracy. |  |
 | On waypoint reached | Triggered each time the character reaches a waypoint along the path. Use this to play footstep sounds, particle effects, or update animations. |  |
 | On waypoint stuck | Triggered when the character has been stuck at a waypoint for too long (exceeds Max Waypoint Time). The path is automatically cancelled. Use this to handle stuck situations or repath. |  |
+| Is path pending | True when a path request is queued and waiting to be processed (time-slicing is active and the per-tick budget was reached). |  |
 | Is at portal | True when the AI is paused at a portal entry (after 'Pause at portal' was called but before 'Resume portal' or 'Complete portal'). Use to check if the character is waiting at a portal. |  |
 | Is traversing portal | True when the AI is currently moving through a gradual portal (elevator, ladder, etc.). Platform behavior is disabled during traversal. |  |
 | On portal complete | Triggered when portal execution finishes — after an instant teleport completes, a gradual movement reaches the exit, or 'Complete portal' is called. Use this for post-portal effects like opening doors at the exit, playing arrival animations, etc. |  |
 | On portal entry | Triggered when the AI arrives at a portal entry point, BEFORE the portal executes. Use 'Pause at portal' inside this event to delay execution and run your own events first (animations, sounds, screen effects). If you don't pause, the portal executes immediately. Use CurrentPortalID to identify which portal was reached. |  |
+| Is multi-agent avoidance enabled | Check if multi-agent collision avoidance is currently enabled. Shared Navigation graph mode only — requires graph mode set to 'shared'. |  |
 
 
 ---
@@ -195,7 +197,6 @@ npm run dev
 | HazardSeverity | Get the total hazard severity at a world position from all sources (circles, rects, tiles). Higher values = more dangerous. | number | X *(number)* <br>Y *(number)* <br> | 
 | PositionIsHazardous | Check if a world position is hazardous. Returns 1 if hazardous, 0 if safe. | number | X *(number)* <br>Y *(number)* <br> | 
 | TileHazardSeverity | Get the hazard severity of a specific tile. Returns 0 if no hazard. Only checks tile-based hazards, not circles/rects. | number | Grid X *(number)* <br>Grid Y *(number)* <br> | 
-| NearbyAgentCount | Get the number of nearby AI agents within detection range. Used for multi-agent avoidance calculations. Returns 0 if multi-agent avoidance is disabled. | number |  | 
 | GridHeight | Get the height of the obstacle map in tiles. Returns 0 if no map exists. | number |  | 
 | GridTileSize | Get the tile size in pixels. Returns 0 if no map exists. | number |  | 
 | GridWidth | Get the width of the obstacle map in tiles. Returns 0 if no map exists. | number |  | 
@@ -239,6 +240,8 @@ npm run dev
 | WaypointGridY | Get the grid Y coordinate of a waypoint by index. Returns -1 if index is out of bounds. | number | Index *(number)* <br> | 
 | WaypointX | Get the world X position of a waypoint by index. the waypoint position is centred within the tile. Returns 0 if index is out of bounds. | number | Index *(number)* <br> | 
 | WaypointY | Get the world Y position of a waypoint by index. the waypoint position is centred within the tile. Returns 0 if index is out of bounds. | number | Index *(number)* <br> | 
+| MaxPathsPerTick | Current max paths per tick limit (0 = unlimited). | number |  | 
+| PathQueueSize | Number of path requests currently waiting in the queue. | number |  | 
 | CurrentPortalID | Returns the portal ID during OnPortalEntry/OnPortalComplete triggers. Use to identify which portal was reached. | number |  | 
 | LastPortalID | Returns the ID of the most recently added portal. Use right after adding a portal to save the ID for later configuration or removal. | number |  | 
 | PortalCount | Get the total number of portals. | number |  | 
@@ -246,6 +249,7 @@ npm run dev
 | PortalExitY | Get the exit Y position of the current portal. Valid inside OnPortalEntry/OnPortalComplete triggers. | number |  | 
 | PortalProgress | Get the 0-1 traversal progress for gradual portals. Returns 0 if not traversing. | number |  | 
 | PortalType | Returns 'instant' or 'gradual' for the given portal ID. | string | Portal ID *(number)* <br> | 
+| NearbyAgentCount | Get the number of nearby AI agents within detection range. Used for multi-agent avoidance calculations. Returns 0 if multi-agent avoidance is disabled. Shared Navigation graph mode only — requires graph mode set to 'shared'. | number |  | 
 
 
 ---

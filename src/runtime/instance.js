@@ -3,12 +3,111 @@ import AddonTypeMap from "../../template/addonTypeMap.js";
 
 export default function (parentClass) {
   // ===========================
+  // BinaryHeap (min-heap by fScore)
+  // ===========================
+  class BinaryHeap {
+    constructor() {
+      this._data = [];
+      this._set = new Set();
+    }
+    get size() { return this._data.length; }
+    push(node) {
+      this._data.push(node);
+      this._set.add(node);
+      this._bubbleUp(this._data.length - 1);
+    }
+    pop() {
+      const min = this._data[0];
+      const last = this._data.pop();
+      this._set.delete(min);
+      if (this._data.length > 0) {
+        this._data[0] = last;
+        this._sinkDown(0);
+      }
+      return min;
+    }
+    contains(node) { return this._set.has(node); }
+    update(node) {
+      const idx = this._data.indexOf(node);
+      if (idx !== -1) this._bubbleUp(idx);
+    }
+    _bubbleUp(idx) {
+      while (idx > 0) {
+        const parentIdx = (idx - 1) >> 1;
+        if (this._data[idx].fScore >= this._data[parentIdx].fScore) break;
+        [this._data[idx], this._data[parentIdx]] = [this._data[parentIdx], this._data[idx]];
+        idx = parentIdx;
+      }
+    }
+    _sinkDown(idx) {
+      const length = this._data.length;
+      while (true) {
+        let smallest = idx;
+        const left = 2 * idx + 1;
+        const right = 2 * idx + 2;
+        if (left < length && this._data[left].fScore < this._data[smallest].fScore) smallest = left;
+        if (right < length && this._data[right].fScore < this._data[smallest].fScore) smallest = right;
+        if (smallest === idx) break;
+        [this._data[idx], this._data[smallest]] = [this._data[smallest], this._data[idx]];
+        idx = smallest;
+      }
+    }
+  }
+
+  // ===========================
+  // SpatialHash (grid-based spatial partitioning for multi-agent avoidance)
+  // ===========================
+  class SpatialHash {
+    constructor(cellSize) {
+      this._cellSize = cellSize;
+      this._cells = new Map();
+    }
+    clear() { this._cells.clear(); }
+    _key(x, y) {
+      return ((x / this._cellSize) | 0) + "," + ((y / this._cellSize) | 0);
+    }
+    insert(x, y) {
+      const key = this._key(x, y);
+      if (!this._cells.has(key)) this._cells.set(key, []);
+      this._cells.get(key).push({ x, y });
+    }
+    query(x, y, radius) {
+      const results = [];
+      const minGx = ((x - radius) / this._cellSize) | 0;
+      const maxGx = ((x + radius) / this._cellSize) | 0;
+      const minGy = ((y - radius) / this._cellSize) | 0;
+      const maxGy = ((y + radius) / this._cellSize) | 0;
+      for (let gx = minGx; gx <= maxGx; gx++) {
+        for (let gy = minGy; gy <= maxGy; gy++) {
+          const cell = this._cells.get(gx + "," + gy);
+          if (cell) for (const pos of cell) results.push(pos);
+        }
+      }
+      return results;
+    }
+  }
+
+  // ===========================
   // NavigationManager Singleton
   // ===========================
   class NavigationManager {
     constructor() {
       this.sharedGraphs = new Map();
       this.subscribers = new Map();
+      this.graphCapabilities = new Map(); // per-layout: { doubleJump: bool }
+
+      // Time-sliced path queue
+      this.pathQueue = [];
+      this.maxPathsPerTick = 0; // 0 = unlimited (backward-compatible)
+      this._pathsThisTick = 0;
+      this._lastResetTime = 0;
+
+      // Spatial hash for multi-agent avoidance
+      this._agentSpatialHash = null;
+      this._agentHashLastBuild = 0;
+
+      // Graph Manager: shared agent params
+      this.sharedAgentParams = new Map(); // layoutUID → { maxJumpHeight, ... }
     }
 
     /** Returns (or creates) the shared navigation graph Map for a given layout. */
@@ -35,8 +134,20 @@ export default function (parentClass) {
         if (subs.size === 0) {
           this.subscribers.delete(layoutUID);
           this.sharedGraphs.delete(layoutUID);
+          this.graphCapabilities.delete(layoutUID);
+          this.sharedAgentParams.delete(layoutUID);
         }
       }
+    }
+
+    /** Records the capabilities the graph was built with (e.g. double jump). */
+    setGraphCapabilities(layoutUID, capabilities) {
+      this.graphCapabilities.set(layoutUID, { ...capabilities });
+    }
+
+    /** Returns the capabilities the graph was built with, or null if not yet built. */
+    getGraphCapabilities(layoutUID) {
+      return this.graphCapabilities.get(layoutUID) || null;
     }
 
     /** Sets graphGenerated=true on all subscriber instances for a layout. */
@@ -57,6 +168,85 @@ export default function (parentClass) {
         if (!inst.graphGenerated) return true;
       }
       return false;
+    }
+
+    /** Queues a path request for time-sliced processing. Replaces any existing request for the same instance. */
+    queuePathRequest(instance, params) {
+      // Remove existing request from same instance (edge case #1, #5)
+      this.pathQueue = this.pathQueue.filter(r => r.instance !== instance);
+      // Cap queue at 200, drop oldest with warning (edge case #10)
+      if (this.pathQueue.length >= 200) {
+        const dropped = this.pathQueue.shift();
+        dropped.instance.pathPending = false;
+        console.warn("[NavGraph] Path queue full (200), dropping oldest request");
+      }
+      this.pathQueue.push({ instance, params });
+      instance.pathPending = true;
+    }
+
+    /** Processes queued path requests up to the per-tick budget. */
+    processPathQueue() {
+      if (this.pathQueue.length === 0) return;
+      const now = performance.now();
+      if (now - this._lastResetTime > 1) {
+        this._pathsThisTick = 0;
+        this._lastResetTime = now;
+      }
+      while (this.pathQueue.length > 0 && (this.maxPathsPerTick === 0 || this._pathsThisTick < this.maxPathsPerTick)) {
+        const req = this.pathQueue.shift();
+        // Skip destroyed instances (edge case #2)
+        if (!req.instance.instance || req.instance.instance.isDestroyed) {
+          req.instance.pathPending = false;
+          continue;
+        }
+        req.instance.pathPending = false;
+        this._pathsThisTick++;
+        req.instance.aceFindPath(req.params.targetX, req.params.targetY, req.params.correctToGround, req.params.mode, req.params.strict, true);
+      }
+    }
+
+    /** Removes a queued path request for a specific instance. */
+    removeQueuedRequest(instance) {
+      this.pathQueue = this.pathQueue.filter(r => r.instance !== instance);
+      instance.pathPending = false;
+    }
+
+    /** Clears all queued path requests (called on graph rebuild). */
+    clearQueue() {
+      for (const req of this.pathQueue) {
+        req.instance.pathPending = false;
+      }
+      this.pathQueue = [];
+    }
+
+    /** Builds a spatial hash of agent positions once per frame (lazy, on first A* query). */
+    getAgentSpatialHash(layoutUID, cellSize) {
+      const now = performance.now();
+      if (!this._agentSpatialHash || now - this._agentHashLastBuild > 1) {
+        const hash = new SpatialHash(cellSize * 2);
+        const subs = this.subscribers.get(layoutUID);
+        if (subs) {
+          for (const inst of subs) {
+            if (inst.hasPath) hash.insert(inst.instance.x, inst.instance.y);
+          }
+        }
+        this._agentSpatialHash = hash;
+        this._agentHashLastBuild = now;
+      }
+      return this._agentSpatialHash;
+    }
+
+    /** Registers agent parameters (jump/fall/dimensions) from a Platform-bearing instance. */
+    registerAgentParams(layoutUID, params) {
+      const existing = this.sharedAgentParams.get(layoutUID);
+      if (!existing || params.maxJumpHeight > existing.maxJumpHeight) {
+        this.sharedAgentParams.set(layoutUID, { ...params });
+      }
+    }
+
+    /** Returns registered agent parameters for a layout, or null if none registered. */
+    getAgentParams(layoutUID) {
+      return this.sharedAgentParams.get(layoutUID) || null;
     }
 
     /** Collects world positions of all other path-following instances (for multi-agent avoidance). */
@@ -222,6 +412,8 @@ export default function (parentClass) {
       this.elevatorGroups = new Map();
 
       this.multiAgentAvoidance = false;
+      this.pathPending = false;
+      this._jumpParamsOverridden = false;
 
       this.isWaitingForPathfindingMap = false;
       this.waitTickCount = 0;
@@ -259,6 +451,19 @@ export default function (parentClass) {
           this._readPlatformProperties();
           this._calculateJumpParametersFromPlatform();
           this._log(`Double jump: ${this.platformProps.isDoubleJumpEnabled ? "ENABLED" : "disabled"} | Jump sustain: ${this.platformProps.jumpSustain}ms`);
+          // Register agent params for Graph Manager support (SPOT-only)
+          if (this.useSharedGraph) {
+            globalNavManager.registerAgentParams(this.layoutUID, {
+              maxJumpHeight: this.maxJumpHeight,
+              maxJumpDistance: this.maxJumpDistance,
+              maxFallDistance: this.maxFallDistance,
+              singleJumpHeight: this.singleJumpHeight,
+              singleJumpDistance: this.singleJumpDistance,
+              characterHeight: this.characterHeight,
+              characterWidth: this.characterWidth,
+              platformProps: { ...this.platformProps }
+            });
+          }
         }
       }
 
@@ -327,7 +532,10 @@ export default function (parentClass) {
         }
       }
 
-      if (this.hasPath) {
+      // Process queued path requests (time-slicing)
+      globalNavManager.processPathQueue();
+
+      if (this.hasPath && !this.pathPending) {
         this._followPath(dt);
       }
 
@@ -342,6 +550,7 @@ export default function (parentClass) {
 
     _release() {
       super._release();
+      globalNavManager.removeQueuedRequest(this);
       if (this.useSharedGraph && this.layoutUID !== null) {
         globalNavManager.unsubscribe(this.layoutUID, this);
       }
@@ -411,7 +620,7 @@ export default function (parentClass) {
         _jumpTowardActive: this._jumpTowardActive,
         platformProps: this.platformProps,
         graphGenerated: this.graphGenerated,
-        obstacleMap: this.obstacleMap,
+        obstacleMap: this.obstacleMap ? Array.from(this.obstacleMap) : null,
         obstacleMapSource: this.obstacleMapSource,
         gridWidth: this.gridWidth,
         gridHeight: this.gridHeight,
@@ -437,6 +646,8 @@ export default function (parentClass) {
         isHoldingJump: this.isHoldingJump,
         jumpHoldTimer: this.jumpHoldTimer,
         jumpStartY: this.jumpStartY,
+        pathPending: false, // Queue doesn't persist across save/load
+        _jumpParamsOverridden: this._jumpParamsOverridden,
       };
     }
 
@@ -486,7 +697,7 @@ export default function (parentClass) {
       this._jumpTowardActive = o._jumpTowardActive || false;
       this.platformProps = o.platformProps;
       this.graphGenerated = o.graphGenerated;
-      this.obstacleMap = o.obstacleMap;
+      this.obstacleMap = o.obstacleMap ? new Uint8Array(o.obstacleMap) : null;
       this.obstacleMapSource = o.obstacleMapSource;
       this.gridWidth = o.gridWidth;
       this.gridHeight = o.gridHeight;
@@ -499,6 +710,8 @@ export default function (parentClass) {
       this.isHoldingJump = o.isHoldingJump;
       this.jumpHoldTimer = o.jumpHoldTimer;
       this.jumpStartY = o.jumpStartY || 0;
+      this.pathPending = false; // Queue doesn't persist
+      this._jumpParamsOverridden = o._jumpParamsOverridden || false;
 
       this.hazards.clear();
       this.nextHazardId = 1;
@@ -778,9 +991,9 @@ export default function (parentClass) {
       return { x, y };
     }
 
-    /** Returns a string key "gx,gy" for use as a Map key in the navigation graph. */
+    /** Returns a numeric key for use as a Map key in the navigation graph. */
     gridKey(gx, gy) {
-      return `${gx},${gy}`;
+      return gy * this.gridWidth + gx;
     }
 
     /** Returns the Euclidean distance between two points. */
@@ -823,7 +1036,26 @@ export default function (parentClass) {
     /** Returns true if the navigation graph needs to be regenerated. */
     _needsGraphRegeneration() {
       if (this.useSharedGraph) {
-        return globalNavManager.needsRegeneration(this.layoutUID);
+        // Graph Manager without Platform: delay until agent params are available
+        if (!this.platformBehavior && !this._jumpParamsOverridden) {
+          const params = globalNavManager.getAgentParams(this.layoutUID);
+          if (!params) return false; // Wait for a Platform agent to register
+        }
+
+        if (globalNavManager.needsRegeneration(this.layoutUID)) return true;
+
+        // Check capability mismatch: if this instance has double jump but the
+        // shared graph was built without it, the graph is missing double-jump
+        // connections and needs rebuilding.
+        if (this.platformProps.isDoubleJumpEnabled) {
+          const caps = globalNavManager.getGraphCapabilities(this.layoutUID);
+          if (caps && !caps.doubleJump) {
+            this._log("Shared graph missing double-jump connections — rebuilding");
+            return true;
+          }
+        }
+
+        return false;
       }
       return !this.graphGenerated;
     }
@@ -926,7 +1158,7 @@ export default function (parentClass) {
         this.gridHeight = h;
 
         const cellCount = w * h;
-        this.obstacleMap = new Array(cellCount).fill(0);
+        this.obstacleMap = new Uint8Array(cellCount);
 
         for (let gy = 0; gy < h; gy++) {
           for (let gx = 0; gx < w; gx++) {
@@ -964,7 +1196,7 @@ export default function (parentClass) {
       this.gridWidth = Math.ceil(widthInTiles);
       this.gridHeight = Math.ceil(heightInTiles);
       const cellCount = this.gridWidth * this.gridHeight;
-      this.obstacleMap = new Array(cellCount).fill(0);
+      this.obstacleMap = new Uint8Array(cellCount);
       this.obstacleMapSource = "custom";
       this._trigger("OnObstacleMapCreated");
     }
@@ -2222,6 +2454,29 @@ export default function (parentClass) {
     _generateGraph() {
       if (this.isWaitingForPathfindingMap) return;
 
+      // Graph Manager (SPOT, no Platform): inherit jump params from first Platform agent
+      if (!this.platformBehavior && this.useSharedGraph) {
+        const params = globalNavManager.getAgentParams(this.layoutUID);
+        if (params) {
+          if (!this._jumpParamsOverridden) {
+            this.maxJumpHeight = params.maxJumpHeight;
+            this.maxJumpDistance = params.maxJumpDistance;
+            this.maxFallDistance = params.maxFallDistance;
+            this.singleJumpHeight = params.singleJumpHeight;
+            this.singleJumpDistance = params.singleJumpDistance;
+            this.platformProps = { ...params.platformProps };
+          }
+          this.characterHeight = params.characterHeight;
+          this.characterWidth = params.characterWidth;
+        } else if (!this._jumpParamsOverridden) {
+          this._log("Graph Manager: waiting for Platform agent to register params");
+          return; // Delay graph build
+        }
+      }
+
+      // Clear queued path requests — graph is being rebuilt (edge case #3)
+      globalNavManager.clearQueue();
+
       const startTime = performance.now();
       const graph = this._getNavigationGraph();
       graph.clear();
@@ -2240,6 +2495,14 @@ export default function (parentClass) {
       this._updateHazardCosts();
 
       this._markGraphAsGenerated();
+
+      // Record what capabilities this graph was built with so late-joining
+      // instances with different capabilities can trigger a rebuild.
+      if (this.useSharedGraph) {
+        globalNavManager.setGraphCapabilities(this.layoutUID, {
+          doubleJump: this.platformProps.isDoubleJumpEnabled,
+        });
+      }
 
       const endTime = performance.now();
       this._log(`Graph generated in ${(endTime - startTime).toFixed(2)}ms`);
@@ -2298,6 +2561,33 @@ export default function (parentClass) {
           this._warn(`Goal node not found at grid (${goalGrid.gx},${goalGrid.gy}) even after ground correction`);
         }
         return null;
+      }
+
+      // Early exit: same ground level, continuous walkable ground, no gaps/walls
+      const sameLevel = Math.abs(startGrid.gy - goalGrid.gy) <= 1;
+      if (sameLevel && startNode && goalNode) {
+        const walkDir = goalGrid.gx > startGrid.gx ? 1 : -1;
+        let canDirectWalk = true;
+        const checkGy = startGrid.gy;
+        for (let gx = startGrid.gx; gx !== goalGrid.gx + walkDir; gx += walkDir) {
+          if (!this._isGroundAt(gx, checkGy + 1) && !this._isSlopeWalkable(gx, checkGy)) {
+            canDirectWalk = false;
+            break;
+          }
+          const cellVal = this.obstacleMap[checkGy * this.gridWidth + gx];
+          if (cellVal === 1 || cellVal === 3) {
+            canDirectWalk = false;
+            break;
+          }
+        }
+        if (canDirectWalk) {
+          const action = walkDir > 0 ? "walk_right" : "walk_left";
+          this._log(`Early exit: direct walk ${action}`);
+          return [
+            { x: startNode.x, y: startNode.y, node: startNode, action: "start", requiresDoubleJump: false, peakHeight: 0 },
+            { x: goalNode.x, y: goalNode.y, node: goalNode, action, requiresDoubleJump: false, peakHeight: 0 }
+          ];
+        }
       }
 
       // Log start/goal node connection summary
@@ -2401,23 +2691,22 @@ export default function (parentClass) {
       );
       startNode.fScore = startNode.hScore;
 
-      const openSet = [startNode];
+      const openSet = new BinaryHeap();
+      openSet.push(startNode);
       const closedSet = new Set();
 
       let nodesExplored = 0;
 
-      const otherAgents = this.multiAgentAvoidance
-        ? globalNavManager.getOtherInstancePositions(this.layoutUID, this)
-        : [];
+      const agentHash = this.multiAgentAvoidance
+        ? globalNavManager.getAgentSpatialHash(this.layoutUID, this.cellSize) : null;
 
-      while (openSet.length > 0) {
+      while (openSet.size > 0) {
         if (nodesExplored >= this.maxSearchNodes) {
           this._lastAStarFailDetail = `search_exhausted (explored ${nodesExplored}/${this.maxSearchNodes} nodes)`;
           return null;
         }
 
-        openSet.sort((a, b) => a.fScore - b.fScore);
-        const current = openSet.shift();
+        const current = openSet.pop();
         nodesExplored++;
 
         if (current === goalNode) {
@@ -2447,8 +2736,9 @@ export default function (parentClass) {
             : 1.0;
 
           let agentAvoidanceCost = 1.0;
-          if (this.multiAgentAvoidance && otherAgents.length > 0) {
-            for (const agent of otherAgents) {
+          if (agentHash) {
+            const nearby = agentHash.query(neighbor.x, neighbor.y, this.cellSize * 2);
+            for (const agent of nearby) {
               const dist = this.distance(
                 neighbor.x,
                 neighbor.y,
@@ -2482,8 +2772,10 @@ export default function (parentClass) {
             );
             neighbor.fScore = neighbor.gScore + neighbor.hScore;
 
-            if (!openSet.includes(neighbor)) {
+            if (!openSet.contains(neighbor)) {
               openSet.push(neighbor);
+            } else {
+              openSet.update(neighbor);
             }
           }
         }
@@ -3048,6 +3340,8 @@ export default function (parentClass) {
     /** Re-calculates the path to the current target; detects re-path loops and triggers OnWaypointStuck if stuck. */
     _rePath() {
       if (this.portalState !== "none") return;
+      // Remove any queued request — re-paths always run immediately (edge case #4)
+      globalNavManager.removeQueuedRequest(this);
       this.rePathCooldown = this.rePathCooldownDuration;
 
       // Track distance to goal to detect re-path loops
@@ -3079,7 +3373,9 @@ export default function (parentClass) {
         this.pathTargetX,
         this.pathTargetY,
         true,
-        this.lastPathMode
+        this.lastPathMode,
+        undefined,
+        true // isRePath — always immediate, bypass queue
       );
       this._trigger("OnRePathTriggered");
     }
@@ -3695,7 +3991,21 @@ export default function (parentClass) {
     // ============================================================================
 
     /** Calculates a path from the character's current position to the target coordinates. Supports ground correction and jump-toward mode. */
-    aceFindPath(targetX, targetY, correctToGround, mode, strict) {
+    aceFindPath(targetX, targetY, correctToGround, mode, strict, isRePath) {
+      // Time-slicing: queue if budget exhausted (unless this is a re-path, which always runs immediately)
+      if (globalNavManager.maxPathsPerTick > 0 && !isRePath) {
+        const now = performance.now();
+        if (now - globalNavManager._lastResetTime > 1) {
+          globalNavManager._pathsThisTick = 0;
+          globalNavManager._lastResetTime = now;
+        }
+        if (globalNavManager._pathsThisTick >= globalNavManager.maxPathsPerTick) {
+          globalNavManager.queuePathRequest(this, { targetX, targetY, correctToGround, mode, strict });
+          return;
+        }
+        globalNavManager._pathsThisTick++;
+      }
+
       this._log(`FindPath to (${Math.round(targetX)},${Math.round(targetY)}) mode=${mode || "reach"} groundCorrect=${correctToGround} strict=${strict || "default"}`);
       this.lastPathFailReason = "";
 
@@ -3810,6 +4120,7 @@ export default function (parentClass) {
 
     /** Stops pathfinding entirely by clearing the path and stopping movement. */
     aceStopPathfinding() {
+      globalNavManager.removeQueuedRequest(this);
       this.aceClearPath();
       this.aceStopMovement();
     }
@@ -3903,6 +4214,21 @@ export default function (parentClass) {
       this.multiAgentAvoidance = enabled;
     }
 
+    /** Sets the maximum number of path calculations per tick (0 = unlimited). */
+    aceSetMaxPathsPerTick(count) {
+      globalNavManager.maxPathsPerTick = Math.max(0, Math.floor(count));
+    }
+
+    /** Returns the current max paths per tick limit. */
+    aceGetMaxPathsPerTick() {
+      return globalNavManager.maxPathsPerTick;
+    }
+
+    /** Returns the number of path requests waiting in the queue. */
+    aceGetPathQueueSize() {
+      return globalNavManager.pathQueue.length;
+    }
+
     // ============================================================================
     // PATHFINDING - State Queries (Conditions)
     // ============================================================================
@@ -3956,7 +4282,7 @@ export default function (parentClass) {
     /** Returns whether the node at the given grid coordinates is a ledge (left or right edge). */
     aceIsNodeLedge(gx, gy) {
       const graph = this._getNavigationGraph();
-      const node = graph.get(`${gx},${gy}`);
+      const node = graph.get(this.gridKey(gx, gy));
       if (!node) return false;
       return node.isLeftLedge || node.isRightLedge;
     }
@@ -4258,14 +4584,14 @@ export default function (parentClass) {
     /** Returns the world X position of the node at the given grid coordinates. Returns 0 if not found. */
     aceGetNodeWorldX(gx, gy) {
       const graph = this._getNavigationGraph();
-      const node = graph.get(`${gx},${gy}`);
+      const node = graph.get(this.gridKey(gx, gy));
       return node ? node.x : 0;
     }
 
     /** Returns the world Y position of the node at the given grid coordinates. Returns 0 if not found. */
     aceGetNodeWorldY(gx, gy) {
       const graph = this._getNavigationGraph();
-      const node = graph.get(`${gx},${gy}`);
+      const node = graph.get(this.gridKey(gx, gy));
       return node ? node.y : 0;
     }
 

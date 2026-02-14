@@ -32,7 +32,7 @@ Moving platforms change position at runtime, making static graph nodes invalid.
 2. `_tick()`: Update attached node positions each tick
 3. Connection invalidation: Check connections when platform moves
 4. ACEs: `AttachTilesToPlatform(platformUID, gx, gy, width, height)`
-5. SPOT pattern: Moving platform node updates must propagate to all subscribers
+5. Shared graph mode: Moving platform node updates must propagate to all subscribers
 
 ---
 
@@ -43,10 +43,10 @@ Real-time avoidance of moving objects (enemies, projectiles) during path executi
 ### Considerations
 - **Detection layer**: Object tagging system (tag C3 object types as "dynamic obstacles" or making use of C3's Instance Tags feature) + configurable detection radius around the AI character
 - **Reaction approach**: Local steering (temporary path deviation without recalculating) vs full re-path with temporary cost inflation vs hybrid (local for small deviations, re-path if blocked too long)
-- **Performance**: Checking distances to all dynamic obstacles every tick for every AI instance is O(n*m) — needs spatial partitioning (grid-based bucketing) for levels with many agents/obstacles
+- **Performance**: SpatialHash class is already implemented for multi-agent avoidance — could be reused for dynamic obstacle lookups instead of brute-force O(n*m) distance checks
 - **Interaction with re-path system**: Dynamic avoidance could trigger re-paths, needs cooldown coordination
-- **Multi-agent avoidance overlap**: Similar concept but for static positions; dynamic obstacles move continuously
-- **SPOT compatibility**: Per-instance temporary costs need a separate layer from the shared graph since dynamic obstacles are different per-instance
+- **Multi-agent avoidance overlap**: Multi-agent avoidance already handles static agent positions via spatial hash; dynamic obstacles move continuously and need per-tick updates
+- **Shared graph compatibility**: Per-instance temporary costs need a separate layer from the shared graph since dynamic obstacles are different per-instance
 - **Prediction vs reactive**: Predicting where obstacles will BE is harder but avoids walking into enemy paths
 - **Movement state machine complexity**: The physics-aware controller needs to know about avoidance (stop? reverse? jump over?)
 
@@ -152,7 +152,7 @@ Replace or supplement the tile grid with a navigation mesh (polygonal regions).
 - A* algorithm works on any graph so pathfinding core stays similar
 - All connection generation (walk, jump, fall) and collision checking need complete rewrites
 - ACE interface changes significantly (no grid coordinates, replaced with polygon IDs or world-position queries)
-- SPOT mode would need to share mesh data instead of grid arrays
+- Shared graph mode would need to share mesh data instead of grid arrays
 - Users lose the intuitive "set tile solid/clear" workflow
 
 ### Recommendation
@@ -174,7 +174,7 @@ Separate navigation graphs for different character types or movement capabilitie
 - Memory multiplied by number of layers
 - Graph generation time multiplied
 - Complexity in managing which instance uses which layer
-- SPOT mode becomes "shared per layer" instead of "shared per type"
+- Shared graph mode becomes "shared per layer" instead of "shared per type"
 - Users need to understand which layer to assign
 
 ### Implications
@@ -191,18 +191,21 @@ Per-instance connection filtering during A*:
 - During A*, each instance skips connections exceeding its capabilities
 - **Handles**: Different character heights, different jump strengths, different fall tolerances
 - **Does NOT handle**: Character width differences (no horizontal clearance tracking), node-level exclusion
-- **SPOT compatible**: Filtering is per-instance at query time
+- **Shared graph compatible**: Filtering is per-instance at query time
 - **Implementation effort**: Low — jump/fall connections already compute needed heights during generation; main work is adding ceiling clearance scanning to walk connections
+- **Partially implemented**: `requiresDoubleJump` flag on connections is already filtered per-instance in A* (instances without double jump skip those connections). Graph capability tracking triggers rebuild when a double-jump instance joins a shared graph built without it.
 
 ---
 
-## Time-Slicing for Expensive Operations
+## Time-Sliced Graph Generation
 
-Spread heavy computations across multiple frames to avoid frame drops.
+Spread graph generation across multiple frames to avoid frame drops on very large levels.
 
-### Candidates
+### Status
+**Pathfinding time-slicing is implemented** — `SetMaxPathsPerTick` limits path calculations per tick, with queuing, sync-first approach, and 10 edge cases handled. Graph generation itself is still synchronous.
+
+### Remaining Candidates
 - Graph generation (`_generateGraph` — node creation + all connection passes)
-- A* pathfinding (large graphs with many nodes)
 - Obstacle map scanning
 - Hazard cost recalculation
 
@@ -212,7 +215,6 @@ Use `_tick()` as the scheduling mechanism. Each tick, process N nodes/connection
 ### Implications
 - Graph generation becomes async — `OnGraphGenerated` trigger fires when complete, not immediately after the action
 - All code that assumes the graph exists after calling generate must handle the async gap
-- A* could be split across frames but introduces latency (path not available until future frame)
 - Users would need a "generating graph" state condition
 
 ### Pros
@@ -222,9 +224,9 @@ Use `_tick()` as the scheduling mechanism. Each tick, process N nodes/connection
 
 ### Cons
 - Adds complexity to the state machine
-- Introduces latency for pathfinding results
+- Introduces latency for graph availability
 - Harder to debug (results span multiple frames)
-- SPOT mode must handle partial graph updates
+- Shared graph mode must handle partial graph updates
 
 ### Priority
-Medium — only needed for large levels (1000+ nodes). Current synchronous approach is fine for typical platformer level sizes.
+Low — BinaryHeap, Uint8Array obstacle maps, and numeric grid keys already cut graph build time roughly in half. Combined with pathfinding time-slicing, this is only needed for extremely large levels (2000+ nodes).

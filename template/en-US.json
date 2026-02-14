@@ -11,10 +11,11 @@
           "Configuration": "Configuration",
           "GraphData": "GraphData",
           "Hazards": "Hazards",
-          "MultiAgent": "MultiAgent",
           "ObstacleMap": "ObstacleMap",
           "Pathfinding": "Pathfinding",
+          "Performance": "Performance",
           "Portals": "Portals",
+          "SharedNavigation": "SharedNavigation",
           "Debug": "Debug"
         },
         "properties": {
@@ -199,21 +200,6 @@
               "id": {
                 "name": "ID",
                 "desc": "Hazard ID to remove"
-              }
-            }
-          },
-          "SetMultiAgentAvoidance": {
-            "list-name": "Set multi-agent avoidance",
-            "display-text": "Set multi-agent avoidance: {0}",
-            "description": "Enable or disable multi-agent collision avoidance. When enabled, AI agents will attempt to avoid colliding with each other during pathfinding. Note: This feature may not be fully implemented yet.",
-            "params": {
-              "enabled": {
-                "name": "Enabled",
-                "desc": "Enable or disable multi-agent avoidance",
-                "items": {
-                  "yes": "Enabled",
-                  "no": "Disabled"
-                }
               }
             }
           },
@@ -533,6 +519,17 @@
             "description": "Stop the character immediately and clear the current path. Use when you want to cancel AI navigation and regain manual control.",
             "params": {}
           },
+          "SetMaxPathsPerTick": {
+            "list-name": "Set max paths per tick",
+            "display-text": "Set max paths per tick to {0}",
+            "description": "Limit path calculations per tick to prevent frame drops with many agents. 0 = unlimited (default). Re-paths always run immediately regardless of this limit.",
+            "params": {
+              "count": {
+                "name": "Max paths",
+                "desc": "Maximum path calculations per tick (0 = unlimited)"
+              }
+            }
+          },
           "AddElevatorStop": {
             "list-name": "Add elevator stop",
             "display-text": "Add elevator stop to group {0} at ({1}, {2}) [Speed: {3}]",
@@ -816,6 +813,21 @@
                 "desc": "Target world Y position in pixels"
               }
             }
+          },
+          "SetMultiAgentAvoidance": {
+            "list-name": "Set multi-agent avoidance",
+            "display-text": "Set multi-agent avoidance: {0}",
+            "description": "Enable or disable multi-agent collision avoidance. When enabled, AI agents will attempt to avoid paths occupied by other agents. Shared Navigation graph mode only — requires graph mode set to 'shared'.",
+            "params": {
+              "enabled": {
+                "name": "Enabled",
+                "desc": "Enable or disable multi-agent avoidance",
+                "items": {
+                  "yes": "Enabled",
+                  "no": "Disabled"
+                }
+              }
+            }
           }
         },
         "conditions": {
@@ -848,12 +860,6 @@
                 "desc": "World Y position in pixels"
               }
             }
-          },
-          "IsMultiAgentAvoidanceEnabled": {
-            "list-name": "Is multi-agent avoidance enabled",
-            "display-text": "Multi-agent avoidance is enabled",
-            "description": "Check if multi-agent collision avoidance is currently enabled. Returns true if enabled, false otherwise.",
-            "params": {}
           },
           "IsSettingUpPathfinding": {
             "list-name": "Is setting up Pathfinding",
@@ -1045,6 +1051,12 @@
             "description": "Triggered when the character has been stuck at a waypoint for too long (exceeds Max Waypoint Time). The path is automatically cancelled. Use this to handle stuck situations or repath.",
             "params": {}
           },
+          "IsPathPending": {
+            "list-name": "Is path pending",
+            "display-text": "Path is pending",
+            "description": "True when a path request is queued and waiting to be processed (time-slicing is active and the per-tick budget was reached).",
+            "params": {}
+          },
           "IsAtPortal": {
             "list-name": "Is at portal",
             "display-text": "Is at portal",
@@ -1067,6 +1079,12 @@
             "list-name": "On portal entry",
             "display-text": "On portal entry",
             "description": "Triggered when the AI arrives at a portal entry point, BEFORE the portal executes. Use 'Pause at portal' inside this event to delay execution and run your own events first (animations, sounds, screen effects). If you don't pause, the portal executes immediately. Use CurrentPortalID to identify which portal was reached.",
+            "params": {}
+          },
+          "IsMultiAgentAvoidanceEnabled": {
+            "list-name": "Is multi-agent avoidance enabled",
+            "display-text": "Multi-agent avoidance is enabled",
+            "description": "Check if multi-agent collision avoidance is currently enabled. Shared Navigation graph mode only — requires graph mode set to 'shared'.",
             "params": {}
           }
         },
@@ -1416,11 +1434,6 @@
               }
             }
           },
-          "NearbyAgentCount": {
-            "translated-name": "NearbyAgentCount",
-            "description": "Get the number of nearby AI agents within detection range. Used for multi-agent avoidance calculations. Returns 0 if multi-agent avoidance is disabled.",
-            "params": {}
-          },
           "GridHeight": {
             "translated-name": "GridHeight",
             "description": "Get the height of the obstacle map in tiles. Returns 0 if no map exists.",
@@ -1717,6 +1730,16 @@
               }
             }
           },
+          "MaxPathsPerTick": {
+            "translated-name": "MaxPathsPerTick",
+            "description": "Current max paths per tick limit (0 = unlimited).",
+            "params": {}
+          },
+          "PathQueueSize": {
+            "translated-name": "PathQueueSize",
+            "description": "Number of path requests currently waiting in the queue.",
+            "params": {}
+          },
           "CurrentPortalID": {
             "translated-name": "CurrentPortalID",
             "description": "Returns the portal ID during OnPortalEntry/OnPortalComplete triggers. Use to identify which portal was reached.",
@@ -1756,6 +1779,11 @@
                 "desc": "The portal ID to check"
               }
             }
+          },
+          "NearbyAgentCount": {
+            "translated-name": "NearbyAgentCount",
+            "description": "Get the number of nearby AI agents within detection range. Used for multi-agent avoidance calculations. Returns 0 if multi-agent avoidance is disabled. Shared Navigation graph mode only — requires graph mode set to 'shared'.",
+            "params": {}
           }
         }
       }
