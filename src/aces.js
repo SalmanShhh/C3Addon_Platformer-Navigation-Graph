@@ -504,6 +504,40 @@ action("ObstacleMap", "CreateCustomObstacleMap", {
   this.aceCreateCustomObstacleMap(width, height);
 });
 
+action("ObstacleMap", "BuildObstacleMapFromLayout", {
+  listName: "Build obstacle map from layout",
+  displayText: "Build obstacle map [{0}×{1} px]",
+  description: "Create an empty obstacle map grid from layout pixel dimensions. No Pathfinding behavior required. Follow with ScanSolidObjectsIntoObstacleMap and ScanJumpThruObjectsIntoObstacleMap to fill it.",
+  params: [
+    { id: "layoutWidth",  name: "Layout width (px)",  desc: "Total layout width in pixels",  type: "number", initialValue: "1280" },
+    { id: "layoutHeight", name: "Layout height (px)", desc: "Total layout height in pixels", type: "number", initialValue: "720" }
+  ]
+}, function(layoutWidth, layoutHeight) {
+  this.aceBuildObstacleMapFromLayout(layoutWidth, layoutHeight);
+});
+
+action("ObstacleMap", "ScanSolidObjectsIntoObstacleMap", {
+  listName: "Scan solid objects into obstacle map",
+  displayText: "Scan {0} (solid) into obstacle map",
+  description: "Scan solid objects into the obstacle map. Requires an existing obstacle map (call BuildObstacleMapFromLayout first). Tilemaps are scanned cell-by-cell; sprites use bounding box. Objects must have the Solid behavior enabled.",
+  params: [
+    { id: "solidObjects", name: "Solid objects", desc: "Objects with Solid behavior enabled (tilemaps or sprites)", type: "object" }
+  ]
+}, function(solidObjects) {
+  this.aceScanSolidObjectsIntoObstacleMap(solidObjects);
+});
+
+action("ObstacleMap", "ScanJumpThruObjectsIntoObstacleMap", {
+  listName: "Scan jump-thru objects into obstacle map",
+  displayText: "Scan {0} (jump-thru) into obstacle map",
+  description: "Scan one-way platform objects into the obstacle map as jump-thru cells. Requires an existing obstacle map (call BuildObstacleMapFromLayout first). Objects must have the Jump-thru behavior enabled.",
+  params: [
+    { id: "jumpThruObjects", name: "Jump-thru objects", desc: "Objects with Jump-thru behavior enabled", type: "object" }
+  ]
+}, function(jumpThruObjects) {
+  this.aceScanJumpThruObjectsIntoObstacleMap(jumpThruObjects);
+});
+
 action("ObstacleMap", "SetTileState", {
   listName: "Set tile state",
   displayText: "Set tile at ({0}, {1}) to {2}",
@@ -517,13 +551,15 @@ action("ObstacleMap", "SetTileState", {
         { clear: "Clear" },
         { jump_thru: "Jump-thru" },
         { avoid: "Avoid" },
-        { slope_left: "Slope left" },
-        { slope_right: "Slope right" }
+        { slope_left: "Slope left / (45\u00b0)" },
+        { slope_right: "Slope right \\ (45\u00b0)" },
+        { gentle_slope_left: "Gentle slope left / (22.5\u00b0)" },
+        { gentle_slope_right: "Gentle slope right \\ (22.5\u00b0)" }
       ]
     }
   ]
 }, function(gx, gy, state) {
-  this.aceSetTileState(gx, gy, this._combo(state, ["solid", "clear", "jump_thru", "avoid", "slope_left", "slope_right"]));
+  this.aceSetTileState(gx, gy, this._combo(state, ["solid", "clear", "jump_thru", "avoid", "slope_left", "slope_right", "gentle_slope_left", "gentle_slope_right"]));
 });
 
 action("ObstacleMap", "SetTileStateWorld", {
@@ -539,13 +575,52 @@ action("ObstacleMap", "SetTileStateWorld", {
         { clear: "Clear" },
         { jump_thru: "Jump-thru" },
         { avoid: "Avoid" },
-        { slope_left: "Slope left" },
-        { slope_right: "Slope right" }
+        { slope_left: "Slope left / (45\u00b0)" },
+        { slope_right: "Slope right \\ (45\u00b0)" },
+        { gentle_slope_left: "Gentle slope left / (22.5\u00b0)" },
+        { gentle_slope_right: "Gentle slope right \\ (22.5\u00b0)" }
       ]
     }
   ]
 }, function(x, y, state) {
-  this.aceSetTileStateWorld(x, y, this._combo(state, ["solid", "clear", "jump_thru", "avoid", "slope_left", "slope_right"]));
+  this.aceSetTileStateWorld(x, y, this._combo(state, ["solid", "clear", "jump_thru", "avoid", "slope_left", "slope_right", "gentle_slope_left", "gentle_slope_right"]));
+});
+
+action("ObstacleMap", "MarkSlopeRegion", {
+  listName: "Mark slope region",
+  displayText: "Mark slope from ({0},{1}) to ({2},{3}) as {4}",
+  description: "Mark a diagonal region of tiles as slope. Specify the start and end grid corners. All tiles along the diagonal will be marked as slope with the given direction.",
+  params: [
+    { id: "startGx", name: "Start X", desc: "Starting grid X", type: "number", initialValue: "0" },
+    { id: "startGy", name: "Start Y", desc: "Starting grid Y", type: "number", initialValue: "0" },
+    { id: "endGx", name: "End X", desc: "Ending grid X", type: "number", initialValue: "5" },
+    { id: "endGy", name: "End Y", desc: "Ending grid Y", type: "number", initialValue: "5" },
+    { id: "direction", name: "Direction", desc: "Slope direction", type: "combo", initialValue: "slope_left",
+      items: [
+        { slope_left: "Slope left / (45\u00b0)" },
+        { slope_right: "Slope right \\ (45\u00b0)" },
+        { gentle_slope_left: "Gentle slope left / (22.5\u00b0)" },
+        { gentle_slope_right: "Gentle slope right \\ (22.5\u00b0)" }
+      ]
+    }
+  ]
+}, function(startGx, startGy, endGx, endGy, direction) {
+  this.aceMarkSlopeRegion(startGx, startGy, endGx, endGy, this._combo(direction, ["slope_left", "slope_right", "gentle_slope_left", "gentle_slope_right"]));
+});
+
+action("ObstacleMap", "MapSlopeTilesFromTilemap", {
+  listName: "Map slope tiles from tilemap",
+  displayText: "Map slopes from {0}: left={1} right={2} gentle-left={3} gentle-right={4}",
+  description: "Scan a Tilemap and mark tiles matching the given tile IDs as slopes. Pass tile IDs as comma-separated strings (e.g. '5,6,7'). Pass empty string to skip a slope type. Requires the obstacle map to be created first.",
+  params: [
+    { id: "tilemap", name: "Tilemap", desc: "The Tilemap object to scan", type: "object" },
+    { id: "slopeLeftIds", name: "Slope left IDs", desc: "Comma-separated tile IDs for 45\u00b0 slope left (/)", type: "string", initialValue: '""' },
+    { id: "slopeRightIds", name: "Slope right IDs", desc: "Comma-separated tile IDs for 45\u00b0 slope right (\\)", type: "string", initialValue: '""' },
+    { id: "gentleLeftIds", name: "Gentle left IDs", desc: "Comma-separated tile IDs for 22.5\u00b0 gentle slope left (/)", type: "string", initialValue: '""' },
+    { id: "gentleRightIds", name: "Gentle right IDs", desc: "Comma-separated tile IDs for 22.5\u00b0 gentle slope right (\\)", type: "string", initialValue: '""' }
+  ]
+}, function(tilemap, slopeLeftIds, slopeRightIds, gentleLeftIds, gentleRightIds) {
+  this.aceMapSlopeTilesFromTilemap(tilemap, slopeLeftIds, slopeRightIds, gentleLeftIds, gentleRightIds);
 });
 
 action("ObstacleMap", "SetTileHazard", {
@@ -737,15 +812,19 @@ condition("ObstacleMap", "TileHasState", {
         { clear: "Clear" },
         { jump_thru: "Jump-thru" },
         { avoid: "Avoid" },
-        { slope: "Slope (any direction)" }
+        { slope: "Slope (any)" },
+        { gentle_slope: "Gentle slope (22.5\u00b0)" }
       ]
     }
   ]
 }, function(gx, gy, state) {
-  const s = this._combo(state, ["solid", "clear", "jump_thru", "avoid", "slope"]);
+  const s = this._combo(state, ["solid", "clear", "jump_thru", "avoid", "slope", "gentle_slope"]);
   const tileState = this.aceGetTileState(gx, gy);
   if (s === "slope") {
-    return tileState === "slope";
+    return tileState === "slope_left" || tileState === "slope_right" || tileState === "gentle_slope_left" || tileState === "gentle_slope_right";
+  }
+  if (s === "gentle_slope") {
+    return tileState === "gentle_slope_left" || tileState === "gentle_slope_right";
   }
   return tileState === s;
 });
@@ -764,15 +843,19 @@ condition("ObstacleMap", "TileHasStateWorld", {
         { clear: "Clear" },
         { jump_thru: "Jump-thru" },
         { avoid: "Avoid" },
-        { slope: "Slope (any direction)" }
+        { slope: "Slope (any)" },
+        { gentle_slope: "Gentle slope (22.5\u00b0)" }
       ]
     }
   ]
 }, function(x, y, state) {
-  const s = this._combo(state, ["solid", "clear", "jump_thru", "avoid", "slope"]);
+  const s = this._combo(state, ["solid", "clear", "jump_thru", "avoid", "slope", "gentle_slope"]);
   const tileState = this.aceGetTileStateWorld(x, y);
   if (s === "slope") {
-    return tileState === "slope";
+    return tileState === "slope_left" || tileState === "slope_right" || tileState === "gentle_slope_left" || tileState === "gentle_slope_right";
+  }
+  if (s === "gentle_slope") {
+    return tileState === "gentle_slope_left" || tileState === "gentle_slope_right";
   }
   return tileState === s;
 });

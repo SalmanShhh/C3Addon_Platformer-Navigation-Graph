@@ -428,7 +428,7 @@ export default function (parentClass) {
       this.JUMP_COST = 1.5;
       this.FALL_COST = 0.5;
       this.COYOTE_JUMP_COST = 1.6;
-      this.SLOPE_COST = 1.2;
+      this.SLOPE_COST = 1.0;
 
       this.pathStrategy = "balanced";
 
@@ -1078,8 +1078,8 @@ export default function (parentClass) {
 
     /** Attempts to copy the obstacle map from the Pathfinding behavior, or starts polling if not ready. */
     _scanObstacles() {
-      if (this.obstacleMapSource === "custom") {
-        return;
+      if (this.obstacleMapSource === "custom" || this.obstacleMapSource === "collision") {
+        return; // Obstacle map was built externally — don't overwrite with Pathfinding copy
       }
 
       if (this.pathfindingBehavior) {
@@ -1088,6 +1088,12 @@ export default function (parentClass) {
           this.isWaitingForPathfindingMap = true;
           this.waitTickCount = 0;
           this._log("Pathfinding behavior found but map not ready, starting poll...");
+        } else if (this.slopeMap) {
+          // Re-apply slope overrides: slope cells must be clear in obstacleMap
+          // (the pathfinding copy may have set them as solid)
+          for (let i = 0; i < this.slopeMap.length && i < this.obstacleMap.length; i++) {
+            if (this.slopeMap[i] > 0) this.obstacleMap[i] = 0;
+          }
         }
       } else {
         this.isWaitingForPathfindingMap = true;
@@ -1120,18 +1126,21 @@ export default function (parentClass) {
       const h = pfMap.heightInCells;
       if (!w || !h || w <= 0 || h <= 0) return;
 
-      // Map is ready
+      // Map is ready — copy obstacle data FIRST so the map is available
+      // when OnPathfindingMapReady fires (user may add slopes in that trigger)
       this.isWaitingForPathfindingMap = false;
       this.waitTickCount = 0;
+
+      const success = this._copyObstacleMapFromPathfinding();
+      if (!success) {
+        this._trigger("OnPathfindingMapFailed");
+        return;
+      }
+
       this._trigger("OnPathfindingMapReady");
 
       if (this.autoRegenOnReady) {
-        const success = this._copyObstacleMapFromPathfinding();
-        if (success) {
-          this._generateGraph();
-        } else {
-          this._trigger("OnPathfindingMapFailed");
-        }
+        this._generateGraph();
       }
     }
 
@@ -1199,6 +1208,95 @@ export default function (parentClass) {
       this.obstacleMap = new Uint8Array(cellCount);
       this.obstacleMapSource = "custom";
       this._trigger("OnObstacleMapCreated");
+    }
+
+    /** Creates an empty obstacle map grid from layout pixel dimensions.
+     *  Sets obstacleMapSource = "collision" so _scanObstacles won't overwrite it.
+     *  Follow with ScanSolidObjectsIntoObstacleMap / ScanJumpThruObjectsIntoObstacleMap. */
+    aceBuildObstacleMapFromLayout(layoutWidth, layoutHeight) {
+      const cs = this.cellSize;
+      this.gridWidth = Math.ceil(layoutWidth / cs);
+      this.gridHeight = Math.ceil(layoutHeight / cs);
+      this.obstacleMap = new Uint8Array(this.gridWidth * this.gridHeight);
+      this.obstacleMapSource = "collision";
+      this.isWaitingForPathfindingMap = false;
+      this._log(`Built obstacle map from layout: ${this.gridWidth}x${this.gridHeight} (${this.gridWidth * this.gridHeight} cells)`);
+      this._trigger("OnObstacleMapCreated");
+    }
+
+    /** Scans objects with the Solid behavior into the obstacle map as solid cells (value=1). */
+    aceScanSolidObjectsIntoObstacleMap(solidClass) {
+      this._scanObjectsIntoObstacleMap(solidClass, 1);
+    }
+
+    /** Scans objects with the Jump-thru behavior into the obstacle map as jump-thru cells (value=2). */
+    aceScanJumpThruObjectsIntoObstacleMap(jumpThruClass) {
+      this._scanObjectsIntoObstacleMap(jumpThruClass, 2);
+    }
+
+    /** Shared helper: scans instances of objClass into the obstacle map with the given cellValue.
+     *  Validates that each instance has the required C3 behavior enabled (Solid=1, Jumpthru=2).
+     *  Tilemaps are scanned cell-by-cell; sprites use bounding box rasterization. */
+    _scanObjectsIntoObstacleMap(objClass, cellValue) {
+      if (!objClass) return;
+      if (!this.obstacleMap) {
+        this._warn("ScanObjectsIntoObstacleMap: no obstacle map exists — call BuildObstacleMapFromLayout first");
+        return;
+      }
+      const requiredBehavior = cellValue === 1 ? "Solid" : "Jumpthru";
+
+      // Find an enabled behavior by plugin type name, handling editor-renamed behaviors.
+      const getEnabledBehavior = (inst, typeName) => {
+        const behaviors = inst.behaviors;
+        if (!behaviors) return null;
+        const direct = behaviors[typeName];
+        if (direct?.isEnabled) return direct;
+        for (const key in behaviors) {
+          const b = behaviors[key];
+          if (b?.behaviorType?.name === typeName && b.isEnabled) return b;
+        }
+        return null;
+      };
+
+      const gw = this.gridWidth;
+      const gh = this.gridHeight;
+      const cs = this.cellSize;
+      const fullRect = new DOMRect(0, 0, gw * cs, gh * cs);
+      const candidates = this.instance.runtime.collisions.getCollisionCandidates([objClass], fullRect);
+      const seen = new Set();
+      let count = 0;
+
+      for (const inst of candidates) {
+        if (seen.has(inst)) continue;
+        seen.add(inst);
+        if (!getEnabledBehavior(inst, requiredBehavior)) {
+          this._warn(`ScanObjectsIntoObstacleMap: "${inst.objectType?.name}" skipped — no enabled "${requiredBehavior}" behavior`);
+          continue;
+        }
+        if (typeof inst.getTileAt === "function") {
+          // Tilemap: cell-by-cell (tile size must match cellSize)
+          for (let gy = 0; gy < gh; gy++) {
+            for (let gx = 0; gx < gw; gx++) {
+              let tileId;
+              try { tileId = inst.getTileAt(gx, gy); } catch (e) { continue; }
+              if (tileId >= 0) { this.obstacleMap[gy * gw + gx] = cellValue; count++; }
+            }
+          }
+        } else {
+          // Sprite: bounding box rasterization
+          const bbox = inst.getBoundingBox();
+          const x1 = Math.floor(bbox.left / cs);
+          const y1 = Math.floor(bbox.top / cs);
+          const x2 = Math.ceil(bbox.right / cs);
+          const y2 = Math.ceil(bbox.bottom / cs);
+          for (let gy = Math.max(0, y1); gy < Math.min(gh, y2); gy++) {
+            for (let gx = Math.max(0, x1); gx < Math.min(gw, x2); gx++) {
+              this.obstacleMap[gy * gw + gx] = cellValue; count++;
+            }
+          }
+        }
+      }
+      this._log(`Scanned ${count} cells (value=${cellValue}) from "${requiredBehavior}" objects`);
     }
 
     aceClearObstacleMap() {
@@ -1305,12 +1403,157 @@ export default function (parentClass) {
           this.slopeMap = new Uint8Array(this.gridWidth * this.gridHeight);
         }
         this.slopeMap[index] = 2;
+      } else if (state === "gentle_slope_left") {
+        this.obstacleMap[index] = 0;
+        if (!this.slopeMap) {
+          this.slopeMap = new Uint8Array(this.gridWidth * this.gridHeight);
+        }
+        this.slopeMap[index] = 3;
+      } else if (state === "gentle_slope_right") {
+        this.obstacleMap[index] = 0;
+        if (!this.slopeMap) {
+          this.slopeMap = new Uint8Array(this.gridWidth * this.gridHeight);
+        }
+        this.slopeMap[index] = 4;
+      }
+      // Auto-regenerate graph when slope tiles change
+      if (state.includes("slope")) {
+        this.graphGenerated = false;
       }
     }
 
     aceSetTileStateWorld(x, y, state) {
       const grid = this.worldToGrid(x, y);
       this.aceSetTileState(grid.gx, grid.gy, state);
+    }
+
+    /** Marks a diagonal line of tiles as slope from (startGx,startGy) to (endGx,endGy). */
+    aceMarkSlopeRegion(startGx, startGy, endGx, endGy, direction) {
+      if (!this.obstacleMap) return;
+      if (!this.slopeMap) this.slopeMap = new Uint8Array(this.gridWidth * this.gridHeight);
+
+      const slopeVal = direction === "slope_left" ? 1
+        : direction === "slope_right" ? 2
+        : direction === "gentle_slope_left" ? 3
+        : direction === "gentle_slope_right" ? 4 : 0;
+      if (slopeVal === 0) return;
+
+      const isGentle = slopeVal >= 3;
+      const dx = endGx > startGx ? 1 : -1;
+      const dy = endGy > startGy ? 1 : -1;
+
+      let gx = startGx;
+      let gy = startGy;
+
+      while (true) {
+        if (gx >= 0 && gx < this.gridWidth && gy >= 0 && gy < this.gridHeight) {
+          const index = gy * this.gridWidth + gx;
+          this.obstacleMap[index] = 0;
+          this.slopeMap[index] = slopeVal;
+        }
+
+        if (gx === endGx && gy === endGy) break;
+
+        if (isGentle) {
+          // Gentle slope: mark intermediate horizontal cell too
+          gx += dx;
+          if (gx >= 0 && gx < this.gridWidth && gy >= 0 && gy < this.gridHeight) {
+            const index = gy * this.gridWidth + gx;
+            this.obstacleMap[index] = 0;
+            this.slopeMap[index] = slopeVal;
+          }
+          gx += dx;
+          gy += dy;
+        } else {
+          gx += dx;
+          gy += dy;
+        }
+
+        // Safety: prevent infinite loop
+        if (Math.abs(gx - startGx) > 500 || Math.abs(gy - startGy) > 500) break;
+      }
+      this.graphGenerated = false;
+    }
+
+    /** Scans a Tilemap and marks tiles matching the given tile IDs as slopes. */
+    aceMapSlopeTilesFromTilemap(tilemapClass, slopeLeftIds, slopeRightIds, gentleLeftIds, gentleRightIds) {
+      const tilemapInst = tilemapClass.getFirstPickedInstance();
+      if (!tilemapInst) {
+        this._warn("MapSlopeTilesFromTilemap: tilemap instance not found");
+        return;
+      }
+      if (!this.obstacleMap) {
+        this._warn("MapSlopeTilesFromTilemap: obstacle map not created yet");
+        return;
+      }
+
+      const parseIds = (str) => {
+        if (!str || str.trim() === "") return new Set();
+        return new Set(str.split(",").map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n)));
+      };
+
+      const leftSet = parseIds(slopeLeftIds);
+      const rightSet = parseIds(slopeRightIds);
+      const gentleLeftSet = parseIds(gentleLeftIds);
+      const gentleRightSet = parseIds(gentleRightIds);
+
+      if (leftSet.size === 0 && rightSet.size === 0 && gentleLeftSet.size === 0 && gentleRightSet.size === 0) return;
+
+      if (!this.slopeMap) this.slopeMap = new Uint8Array(this.gridWidth * this.gridHeight);
+
+      let count = 0;
+      // In debug mode: collect tile IDs that exist in the tilemap but aren't in any slope set.
+      // These unregistered tiles may silently allow invalid jump connections through them.
+      const unregisteredIds = this.enableDebug ? new Map() : null; // tileId → example {gx, gy}
+
+      for (let gy = 0; gy < this.gridHeight; gy++) {
+        for (let gx = 0; gx < this.gridWidth; gx++) {
+          let tileId;
+          try {
+            tileId = tilemapInst.getTileAt(gx, gy);
+          } catch (e) {
+            continue;
+          }
+          if (tileId < 0) continue;
+
+          const index = gy * this.gridWidth + gx;
+          let slopeVal = 0;
+          if (leftSet.has(tileId)) slopeVal = 1;
+          else if (rightSet.has(tileId)) slopeVal = 2;
+          else if (gentleLeftSet.has(tileId)) slopeVal = 3;
+          else if (gentleRightSet.has(tileId)) slopeVal = 4;
+
+          if (slopeVal > 0) {
+            this.obstacleMap[index] = 0;
+            this.slopeMap[index] = slopeVal;
+            count++;
+          } else if (unregisteredIds && !unregisteredIds.has(tileId)) {
+            // Record one example position per unregistered tile ID (for debug output)
+            unregisteredIds.set(tileId, { gx, gy });
+          }
+        }
+      }
+      this._log(`Mapped ${count} slope tiles from tilemap`);
+      if (unregisteredIds && unregisteredIds.size > 0) {
+        const examples = [];
+        for (const [id, pos] of unregisteredIds) {
+          examples.push(`tileId=${id} (e.g. gx=${pos.gx},gy=${pos.gy})`);
+        }
+        this._log(`[Debug] Tilemap has ${unregisteredIds.size} unregistered tile ID(s) — if any are slope tiles, add them to MapSlopesFromTilemaps: ${examples.join("; ")}`);
+      }
+      if (count > 0) {
+        if (this.graphGenerated && this.obstacleMap) {
+          // Graph was built before slopes were registered (common on scene restart when the
+          // Pathfinding map is immediately available, so GenerateGraph fires synchronously
+          // before MapSlopeTilesFromTilemap runs). Rebuild now so that any FindPath call
+          // on the same tick uses the correct slope-aware graph.
+          this._log("Slopes registered after graph was already built — rebuilding with slope data");
+          this._generateGraph();
+        } else {
+          // Graph not yet built — mark dirty so the next build picks up the slope data.
+          this.graphGenerated = false;
+        }
+      }
     }
 
     aceSetTileHazard(gx, gy, severity) {
@@ -1331,6 +1574,7 @@ export default function (parentClass) {
 
     aceClearAllSlopes() {
       if (this.slopeMap) this.slopeMap.fill(0);
+      this.graphGenerated = false;
     }
 
     aceClearAllHazardTiles() {
@@ -1449,8 +1693,16 @@ export default function (parentClass) {
 
     /** Creates a navigation node with ledge flags, slope info, hazard multiplier, and A* bookkeeping fields. */
     _createNode(x, y, gx, gy) {
-      const leftBelowBlocked = this._isGroundAt(gx - 1, gy + 1);
-      const rightBelowBlocked = this._isGroundAt(gx + 1, gy + 1);
+      // Treat slope tiles as walkable ground for ledge detection.
+      // _isGroundAt only recognizes obstacleMap 1/2 (solid/jump-thru), not slope tiles (obstacleMap=0).
+      // Two checks are needed:
+      //   1. Diagonal neighbor (gx±1, gy+1): slope tile one row below — original fix for 45° slopes.
+      //   2. Same-row neighbor (gx±1, gy): slope tile at the same height — needed for gentle slopes
+      //      where two tiles share the same gy (e.g. gentle_right (31,3) and (32,3) both at gy=3).
+      //      Without this, (31,3) sees empty space at (32,4) → spurious isRightLedge=true, creating
+      //      a phantom fall_right connection that bypasses the walkable slope at (32,3).
+      const leftBelowBlocked = this._isGroundAt(gx - 1, gy + 1) || this._isSlopeWalkable(gx - 1, gy + 1) || this._isSlopeWalkable(gx - 1, gy);
+      const rightBelowBlocked = this._isGroundAt(gx + 1, gy + 1) || this._isSlopeWalkable(gx + 1, gy + 1) || this._isSlopeWalkable(gx + 1, gy);
       const isLeftLedge = !leftBelowBlocked;
       const isRightLedge = !rightBelowBlocked;
       const isIsland = isLeftLedge && isRightLedge;
@@ -1674,9 +1926,13 @@ export default function (parentClass) {
       this._log(`Created ${count} jump connections (up=${upCount}, down=${downCount}, level=${levelCount}, maxDownCells=${maxDownCells}, singleHeightCells=${maxHeightCells}, singleDistCells=${maxDistCells}, doubleJump=${this.platformProps.isDoubleJumpEnabled})`);
     }
 
-    /** Returns half the character width in cells, used for width-based collision checks during falls. */
+    /** Returns the number of extra cells to check on each side of the character during fall arc validation.
+     *  A 16px character in 32px cells doesn't extend into adjacent cells → widthCells=0.
+     *  Old formula ceil(w/cs/2) rounded up, giving 1 for any character narrower than a cell — this
+     *  caused _canDiagonalFall to fail at slope ledge nodes because solid slope body cells one tile
+     *  over (e.g. the body below an adjacent slope tile) are within 1 cell of the ledge surface. */
     _getWidthCells() {
-      return Math.ceil(this.characterWidth / this.cellSize / 2);
+      return Math.max(0, Math.ceil(this.characterWidth / this.cellSize) - 1);
     }
 
     /** Validates a double jump as two separate arcs: first arc goes vertically up by singleJumpHeight, second arc is a Bezier from that apex to the target. Returns the second arc's peakHeight (>0) if both arcs are clear, or 0 if blocked. */
@@ -1697,6 +1953,8 @@ export default function (parentClass) {
           const cellVal = this.obstacleMap ? this.obstacleMap[index] : 0;
           if (h === 0) {
             if (cellVal === 1 || cellVal === 3) return 0;
+            // Slopes block vertical column at intermediate cells
+            if (this.slopeMap && this.slopeMap[index] > 0) return 0;
           } else {
             if (cellVal === 1 && this.platformProps.ceilingCollisionMode === "stop") return 0;
             if (cellVal === 3) return 0;
@@ -1760,6 +2018,14 @@ export default function (parentClass) {
             const cellVal = this.obstacleMap ? this.obstacleMap[index] : 0;
             if (h === 0) {
               if (cellVal === 1 || cellVal === 3) return 0;
+              // Slopes block vertical jumps at any cell except the departure.
+              // Destination slope is allowed only when jumping DOWNWARD (landing on slope from above).
+              // Jumping upward INTO a slope destination is blocked — the character can't pass
+              // through the solid slope body going upward.
+              if (this.slopeMap && this.slopeMap[index] > 0 && gy !== from.gy) {
+                const jumpingDown = from.gy < to.gy;
+                if (!jumpingDown || gy !== to.gy) return 0;
+              }
             } else {
               if (cellVal === 1 && this.platformProps.ceilingCollisionMode === "stop") return 0;
               if (cellVal === 3) return 0;
@@ -1776,8 +2042,15 @@ export default function (parentClass) {
       const peakY = from.y - actualPeakHeight;
       const controlY = 2 * peakY - (from.y + to.y) / 2;
 
-      for (let i = 0; i <= 8; i++) {
-        const t = i / 8;
+      // Adaptive sample count based on total arc travel (not straight-line distance).
+      // The Bezier can bow significantly above the start→end line (especially for
+      // double-jump second arcs with large downward drops), so use the total vertical
+      // travel (up to peak + peak down to end) plus horizontal distance.
+      const totalArcTravel = Math.abs(dx) + Math.abs(from.y - peakY) + Math.abs(peakY - to.y);
+      const numSteps = Math.max(8, Math.ceil(totalArcTravel / (this.cellSize * 0.5)));
+
+      for (let i = 0; i <= numSteps; i++) {
+        const t = i / numSteps;
         const x = from.x + dx * t;
         const oneMinusT = 1 - t;
         const arcY = from.y * oneMinusT * oneMinusT + 2 * controlY * t * oneMinusT + to.y * t * t;
@@ -1805,10 +2078,49 @@ export default function (parentClass) {
             if (cellVal === 1) return 0;
             if (cellVal === 3) return 0;
             if (cellVal === 2) {
-              const prevT = Math.max(0, (i - 1) / 8);
+              const prevT = Math.max(0, (i - 1) / numSteps);
               const prevOneMinusT = 1 - prevT;
               const prevArcY = from.y * prevOneMinusT * prevOneMinusT + 2 * controlY * prevT * prevOneMinusT + to.y * prevT * prevT;
               if (arcY > prevArcY) return 0;
+            }
+            // Slope blocking: only block arcs that pass through the SOLID BODY of a slope
+            // tile (below the slope's surface line). Arcs passing above the slope surface
+            // are in clear air and must not be blocked — e.g. a jump from (31,6) to (25,7)
+            // legitimately passes over slope tiles (30,7) and (29,7) which are walkable ground.
+            // The old "block any slope cell at i>0" approach caused 83 fewer jump connections
+            // when slopes were registered vs not registered.
+            // The destination cell is always exempt — it's the landing zone.
+            const isDestCell = (grid.gx === to.gx && grid.gy === to.gy);
+            if (i > 0 && i < numSteps && !isDestCell && this.slopeMap && this.slopeMap[index] > 0) {
+              // Calculate the slope's surface Y at the arc's X position within the cell.
+              // Block only when arcY > surfaceY (arc is inside the solid body below the surface).
+              const cs = this.cellSize;
+              const slopeType = this.slopeMap[index];
+              const localX = x - grid.gx * cs; // X offset within the tile [0, cs)
+              let surfaceY;
+              if (slopeType === 1) {
+                // slope_left (/): surface from bottom-left to top-right
+                surfaceY = (grid.gy + 1) * cs - localX;
+              } else if (slopeType === 2) {
+                // slope_right (\): surface from top-left to bottom-right
+                surfaceY = grid.gy * cs + localX;
+              } else if (slopeType === 3) {
+                // gentle_left (/): 22.5° — spans two same-row tiles.
+                // Right half if the same-row left neighbour is also gentle_left.
+                const leftIdx = grid.gy * this.gridWidth + (grid.gx - 1);
+                const isRightHalf = grid.gx > 0 && this.slopeMap[leftIdx] === 3;
+                surfaceY = isRightHalf
+                  ? (grid.gy + 0.5) * cs - localX * 0.5   // right half: mid→top-right
+                  : (grid.gy + 1) * cs - localX * 0.5;    // left half: bottom-left→mid
+              } else {
+                // gentle_right (\): 22.5° — spans two same-row tiles.
+                const leftIdx = grid.gy * this.gridWidth + (grid.gx - 1);
+                const isRightHalf = grid.gx > 0 && this.slopeMap[leftIdx] === 4;
+                surfaceY = isRightHalf
+                  ? (grid.gy + 0.5) * cs + localX * 0.5   // right half: mid→bottom-right
+                  : grid.gy * cs + localX * 0.5;           // left half: top-left→mid
+              }
+              if (arcY > surfaceY) return 0;
             }
           } else {
             if (cellVal === 1 && this.platformProps.ceilingCollisionMode === "stop") {
@@ -1830,18 +2142,22 @@ export default function (parentClass) {
       const graph = this._getNavigationGraph();
 
       for (const [key, node] of graph) {
-        for (let fall = 1; fall <= maxFallCells; fall++) {
-          const targetGy = node.gy + fall;
-          const target = this.getNode(node.gx, targetGy);
-          if (target && this._canFall(node, target)) {
-            const baseCost = Math.abs(target.y - node.y) * this.FALL_COST;
-            node.connections.push({
-              target,
-              action: "fall",
-              cost: baseCost * this._fallLandingCostMultiplier(target),
-            });
-            count++;
-            break;
+        // Slope nodes don't need straight falls: adjacent slope tiles below are
+        // connected via _connectSlope (walk), and ledge departures use diagonal falls.
+        if (!node.isSlope) {
+          for (let fall = 1; fall <= maxFallCells; fall++) {
+            const targetGy = node.gy + fall;
+            const target = this.getNode(node.gx, targetGy);
+            if (target && this._canFall(node, target)) {
+              const baseCost = Math.abs(target.y - node.y) * this.FALL_COST;
+              node.connections.push({
+                target,
+                action: "fall",
+                cost: baseCost * this._fallLandingCostMultiplier(target),
+              });
+              count++;
+              break;
+            }
           }
         }
 
@@ -1906,18 +2222,31 @@ export default function (parentClass) {
 
     /** Returns true if a diagonal fall path (parabolic approximation) is unobstructed, checking character width. */
     _canDiagonalFall(from, to, direction) {
-      const steps = 10;
       const dx = to.x - from.x;
       const dy = to.y - from.y;
+      if (dy <= 0) return false;
       const widthCells = this._getWidthCells();
+      const cs = this.cellSize;
 
-      for (let i = 0; i <= steps; i++) {
-        const t = i / steps;
-        const x = from.x + dx * t;
-        const y = from.y + dy * t * t;
-        const grid = this.worldToGrid(x, y);
-        for (let w = -widthCells; w <= widthCells; w++) {
-          if (this.isCellBlocked(grid.gx + w, grid.gy)) return false;
+      // For each row, check the full horizontal span the arc sweeps through.
+      // A single center-sample per row misses cells when the arc crosses a column
+      // boundary while still in the same gy row (e.g. the departure row where the
+      // character transitions from gx=19 into gx=18 before gy changes, but cell
+      // (18,gy) is the solid slope body of the adjacent slope tile).
+      // Parabolic path: x(t) = from.x + dx*t, y(t) = from.y + dy*t²
+      // t at top/bottom of each row: t = sqrt((rowEdgeY - from.y) / dy)
+      for (let gy = from.gy; gy <= to.gy; gy++) {
+        const tEnter = Math.sqrt(Math.max(0, (gy * cs - from.y) / dy));
+        const tExit  = Math.sqrt(Math.max(0, ((gy + 1) * cs - from.y) / dy));
+        if (tEnter > 1.0) break;
+        const xEnter = from.x + dx * Math.min(tEnter, 1.0);
+        const xExit  = from.x + dx * Math.min(tExit,  1.0);
+        const gxMin  = Math.floor(Math.min(xEnter, xExit) / cs);
+        const gxMax  = Math.floor(Math.max(xEnter, xExit) / cs);
+        for (let gx = gxMin; gx <= gxMax; gx++) {
+          for (let w = -widthCells; w <= widthCells; w++) {
+            if (this.isCellBlocked(gx + w, gy)) return false;
+          }
         }
       }
       return true;
@@ -2013,58 +2342,106 @@ export default function (parentClass) {
       this._log(`Created ${count} fall-through connections`);
     }
 
-    /** Creates walk connections along slope tiles, linking diagonally adjacent slope/flat nodes based on slope direction. */
+    /** Creates walk connections along slope tiles, linking diagonally adjacent slope/flat nodes based on slope direction. Supports 45° (1:1) and 22.5° (2:1) gentle slopes. */
     _connectSlope() {
       if (!this.slopeMap) return;
 
       const graph = this._getNavigationGraph();
       let count = 0;
 
+      const dirNames = { 1: "slope_left(/)", 2: "slope_right(\\)", 3: "gentle_left(/)", 4: "gentle_right(\\)" };
+      const dirCounts = {};
+
+      // Slope edge costs must be >= Euclidean distance so the A* heuristic stays consistent.
+      // sqrt(2)*cellSize for 45° diagonals, sqrt(5)*cellSize for gentle diagonals.
+      const slopeDiagCost = Math.SQRT2 * this.cellSize * this.SLOPE_COST;       // 45° (1:1)
+      const gentleDiagCost = Math.sqrt(5) * this.cellSize * this.SLOPE_COST;    // 22.5° (2:1)
+      const midSlopeCost = this.cellSize * this.SLOPE_COST;                      // horizontal mid-slope
+
       for (const [key, node] of graph) {
         if (!node.isSlope) continue;
 
-        if (node.slopeDirection === 1) {
+        const dir = node.slopeDirection;
+        dirCounts[dir] = (dirCounts[dir] || 0) + 1;
+
+        if (dir === 1) {
+          // 45° slope-left (/): down-left, up-right
           const down = this.getNode(node.gx - 1, node.gy + 1);
           const up = this.getNode(node.gx + 1, node.gy - 1);
           if (down) {
-            node.connections.push({
-              target: down,
-              action: "walk_left",
-              cost: this.cellSize * this.SLOPE_COST,
-            });
-            count++;
+            node.connections.push({ target: down, action: "walk_left", cost: slopeDiagCost }); count++;
+            if (!down.isSlope) { down.connections.push({ target: node, action: "walk_right", cost: slopeDiagCost }); count++; }
           }
           if (up) {
-            node.connections.push({
-              target: up,
-              action: "walk_right",
-              cost: this.cellSize * this.SLOPE_COST,
-            });
-            count++;
+            node.connections.push({ target: up, action: "walk_right", cost: slopeDiagCost }); count++;
+            if (!up.isSlope) { up.connections.push({ target: node, action: "walk_left", cost: slopeDiagCost }); count++; }
           }
-        } else if (node.slopeDirection === 2) {
+        } else if (dir === 2) {
+          // 45° slope-right (\): up-left, down-right
           const up = this.getNode(node.gx - 1, node.gy - 1);
           const down = this.getNode(node.gx + 1, node.gy + 1);
           if (up) {
-            node.connections.push({
-              target: up,
-              action: "walk_left",
-              cost: this.cellSize * this.SLOPE_COST,
-            });
-            count++;
+            node.connections.push({ target: up, action: "walk_left", cost: slopeDiagCost }); count++;
+            if (!up.isSlope) { up.connections.push({ target: node, action: "walk_right", cost: slopeDiagCost }); count++; }
           }
           if (down) {
-            node.connections.push({
-              target: down,
-              action: "walk_right",
-              cost: this.cellSize * this.SLOPE_COST,
-            });
-            count++;
+            node.connections.push({ target: down, action: "walk_right", cost: slopeDiagCost }); count++;
+            if (!down.isSlope) { down.connections.push({ target: node, action: "walk_left", cost: slopeDiagCost }); count++; }
+          }
+        } else if (dir === 3) {
+          // 22.5° gentle-left (/): 2 tiles horizontal per 1 vertical
+          const down = this.getNode(node.gx - 2, node.gy + 1);
+          const up = this.getNode(node.gx + 2, node.gy - 1);
+          if (down) {
+            node.connections.push({ target: down, action: "walk_left", cost: gentleDiagCost }); count++;
+            if (!down.isSlope) { down.connections.push({ target: node, action: "walk_right", cost: gentleDiagCost }); count++; }
+          }
+          if (up) {
+            node.connections.push({ target: up, action: "walk_right", cost: gentleDiagCost }); count++;
+            if (!up.isSlope) { up.connections.push({ target: node, action: "walk_left", cost: gentleDiagCost }); count++; }
+          }
+          // Horizontal mid-slope connections (skip if _connectWalk already created this link)
+          const midLeft = this.getNode(node.gx - 1, node.gy);
+          const midRight = this.getNode(node.gx + 1, node.gy);
+          if (midLeft && midLeft.isSlope && !node.connections.some(c => c.target === midLeft && c.action === "walk_left")) {
+            node.connections.push({ target: midLeft, action: "walk_left", cost: midSlopeCost }); count++;
+          }
+          if (midRight && midRight.isSlope && !node.connections.some(c => c.target === midRight && c.action === "walk_right")) {
+            node.connections.push({ target: midRight, action: "walk_right", cost: midSlopeCost }); count++;
+          }
+        } else if (dir === 4) {
+          // 22.5° gentle-right (\): 2 tiles horizontal per 1 vertical
+          const up = this.getNode(node.gx - 2, node.gy - 1);
+          const down = this.getNode(node.gx + 2, node.gy + 1);
+          if (up) {
+            node.connections.push({ target: up, action: "walk_left", cost: gentleDiagCost }); count++;
+            if (!up.isSlope) { up.connections.push({ target: node, action: "walk_right", cost: gentleDiagCost }); count++; }
+          }
+          if (down) {
+            node.connections.push({ target: down, action: "walk_right", cost: gentleDiagCost }); count++;
+            if (!down.isSlope) { down.connections.push({ target: node, action: "walk_left", cost: gentleDiagCost }); count++; }
+          }
+          // Horizontal mid-slope connections (skip if _connectWalk already created this link)
+          const midLeft = this.getNode(node.gx - 1, node.gy);
+          const midRight = this.getNode(node.gx + 1, node.gy);
+          if (midLeft && midLeft.isSlope && !node.connections.some(c => c.target === midLeft && c.action === "walk_left")) {
+            node.connections.push({ target: midLeft, action: "walk_left", cost: midSlopeCost }); count++;
+          }
+          if (midRight && midRight.isSlope && !node.connections.some(c => c.target === midRight && c.action === "walk_right")) {
+            node.connections.push({ target: midRight, action: "walk_right", cost: midSlopeCost }); count++;
           }
         }
       }
 
-      this._log(`Created ${count} slope connections`);
+      const dirSummary = Object.entries(dirCounts).map(([d, c]) => `${dirNames[d] || "unknown(" + d + ")"}:${c}`).join(", ");
+      this._log(`Created ${count} slope connections (${dirSummary || "no slope nodes"})`);
+
+      // Diagnostic: dump each slope node's slope connections
+      for (const [key, node] of graph) {
+        if (!node.isSlope) continue;
+        const slopeConns = node.connections.filter(c => c.action.includes("walk")).map(c => `${c.action}→(${c.target.gx},${c.target.gy})`).join(", ");
+        this._log(`  Slope node (${node.gx},${node.gy}) dir=${dirNames[node.slopeDirection]}: ${slopeConns || "NO walk connections"}`);
+      }
     }
 
     aceAddCircleHazard(x, y, radius, severity) {
@@ -2757,6 +3134,10 @@ export default function (parentClass) {
             conn.cost * hazardMultiplier * agentAvoidanceCost;
 
           if (tentativeG < neighbor.gScore) {
+            // Diagnostic: log every update to the goal node
+            if (neighbor === goalNode) {
+              this._log(`  A* goal update: from (${current.gx},${current.gy}) action=${conn.action} cost=${conn.cost.toFixed(1)} tentativeG=${tentativeG.toFixed(1)} (prev gScore=${neighbor.gScore === Infinity ? "Inf" : neighbor.gScore.toFixed(1)} action=${neighbor.parentAction || "none"})`);
+            }
             neighbor.parent = current;
             neighbor.parentAction = conn.action;
             neighbor.parentPortalId = conn.portalId || null;
@@ -2834,12 +3215,13 @@ export default function (parentClass) {
         const toNode = path[i + 1].node;
         if (!fromNode || !toNode) continue; // start/end may not have nodes
         if (fromNode === toNode) continue;
-        const conn = this._findConnectionBetween(fromNode, toNode);
+        // Try to find the connection matching the path's action first; fall back to cheapest
+        const conn = this._findConnectionBetween(fromNode, toNode, path[i + 1].action);
         if (!conn) {
           this._log(`Path validation failed: no connection between (${fromNode.gx},${fromNode.gy}) and (${toNode.gx},${toNode.gy}) at waypoint ${i}`);
           return null;
         }
-        // Fix action if it doesn't match the actual connection
+        // Fix action only if the path's action doesn't exist for this edge
         // (can happen when _combinePaths merges at a common node)
         if (path[i + 1].action !== conn.action) {
           path[i + 1].action = conn.action;
@@ -2852,16 +3234,21 @@ export default function (parentClass) {
       return path;
     }
 
-    /** Returns the first graph connection (walk, jump, fall, or portal) from one node to another, or null. */
-    _findConnectionBetween(fromNode, toNode) {
+    /** Returns the best graph connection from one node to another, or null.
+     *  If preferredAction is given, returns that action's connection if it exists;
+     *  otherwise returns the cheapest connection to the target. */
+    _findConnectionBetween(fromNode, toNode, preferredAction) {
       const allConnections = [
         ...fromNode.connections,
         ...fromNode.portalConnections,
       ];
+      let best = null;
       for (const conn of allConnections) {
-        if (conn.target === toNode) return conn;
+        if (conn.target !== toNode) continue;
+        if (preferredAction && conn.action === preferredAction) return conn;
+        if (!best || conn.cost < best.cost) best = conn;
       }
-      return null;
+      return best;
     }
 
     /** Sums up the Euclidean distance cost of all segments in a path. */
@@ -3188,12 +3575,31 @@ export default function (parentClass) {
         return;
       }
 
-      const dist = this.distance(
-        this.instance.x,
-        this.instance.y,
-        waypoint.x,
-        waypoint.y
-      );
+      // Walk/fall/landed-jump arrivals: use X-only distance when the Y offset is
+      // slope-plausible (< cellSize). For slope targets during walk/fall, also bypass
+      // the Y check — slope surfaces can be offset from the node center.
+      // IMPORTANT: Do NOT apply the slope bypass for jump-action waypoints. A vertical
+      // jump (dx≈0) to a slope target would immediately read dist=0 at the launch
+      // position (same X, different Y), triggering false arrival before the jump fires.
+      // IMPORTANT: Do NOT apply the slope bypass while airborne (e.g. fall_right to a
+      // slope node). The character may be at the right X but still far above the target Y.
+      // Only bypass when isOnFloor — the character is actually standing on the slope.
+      let dist;
+      const dy = Math.abs(this.instance.y - waypoint.y);
+      const isOnFloor = this.platformBehavior && this.platformBehavior.isOnFloor;
+      const isGroundArrival = waypoint.action.includes("walk") || waypoint.action.includes("fall") ||
+        (waypoint.action === "jump" && isOnFloor);
+      const isSlopeTarget = waypoint.node && waypoint.node.isSlope;
+      // Slope bypass: X-only distance ONLY when walking along the slope surface.
+      // Fall/jump actions approach the slope from above — the character may be at the
+      // right X but still above the target Y, so Y must be checked normally.
+      const isWalkAction = waypoint.action === "walk_left" || waypoint.action === "walk_right";
+      const applySlopeBypass = isSlopeTarget && isWalkAction && isOnFloor;
+      if (isGroundArrival && (dy < this.cellSize || applySlopeBypass)) {
+        dist = Math.abs(this.instance.x - waypoint.x);
+      } else {
+        dist = this.distance(this.instance.x, this.instance.y, waypoint.x, waypoint.y);
+      }
 
       let arrivalThreshold;
       if (waypoint.node && waypoint.node.isIsland) {
@@ -3253,6 +3659,15 @@ export default function (parentClass) {
         this._log(`Waypoint ${this.currentWaypoint} reached (action=${waypoint.action})`);
         this.currentWaypoint++;
         this.timeAtWaypoint = 0;
+        // Reset per-action state so the NEXT waypoint starts clean.
+        // departureCommitted is set during jump pre-centering; if the waypoint arrival
+        // fires mid-air (e.g. double jump still descending), the flag stays true and
+        // blocks walk input on the following waypoint.
+        // doubleJumpPhase/isHoldingJump must also be cleared so the next action doesn't
+        // inherit stale jump state from the previous waypoint's trajectory.
+        this.departureCommitted = false;
+        this.doubleJumpPhase = 0;
+        this.isHoldingJump = false;
         this._trigger("OnWaypointReached");
         return;
       }
@@ -3282,9 +3697,9 @@ export default function (parentClass) {
       if (this.autoControl) {
         let effectiveAction = waypoint.action;
 
-        // Convert jump to fall when the target is below and the character is on a
-        // platform edge (not an island). On islands, the character must jump.
-        if (effectiveAction === "jump" && waypoint.y > this.instance.y + this.cellSize * 0.3) {
+        // Convert jump to fall when the target is below, character is on the floor,
+        // and not on an island. Only when grounded — mid-air conversion disrupts the jump arc.
+        if (effectiveAction === "jump" && this.platformBehavior.isOnFloor && waypoint.y > this.instance.y + this.cellSize * 0.3) {
           const prevWpIdx = this.currentWaypoint - 1;
           const prevWp = prevWpIdx >= 0 ? this.currentPath[prevWpIdx] : null;
           const prevNode = prevWp ? prevWp.node : null;
@@ -3505,12 +3920,6 @@ export default function (parentClass) {
 
     /** Routes physics-based actions (walk, jump, coyote_jump, fall) to their specific movement handlers. */
     _executePhysicsAware(action, targetX, targetY, waypoint) {
-      const speed =
-        this.platformBehavior.speed || Math.abs(this.estimatedVelocityX);
-      const decel = this.platformProps.deceleration;
-      const distToTarget = Math.abs(targetX - this.instance.x);
-      const stoppingDist = (speed * speed) / (2 * decel);
-
       if (action === "walk_left" || action === "walk_right") {
         // Committed departure: skip walk input so character doesn't overshoot before jump fires
         if (this.departureCommitted) return;
@@ -3583,7 +3992,7 @@ export default function (parentClass) {
             }
           } catch (e) {}
         }
-        this._handleFallAction(targetX, action);
+        this._handleFallAction(targetX);
         return;
       }
     }
@@ -3636,8 +4045,9 @@ export default function (parentClass) {
         }
       }
 
-      // Strict positioning: cap speed when approaching a ledge before a departure action
-      if (this.currentPathStrict && waypoint && waypoint.node) {
+      // Strict positioning: cap speed when approaching a ledge before a departure action.
+      // Only applies when grounded — mid-air speed capping is counterproductive (e.g. after micro-jumps).
+      if (this.currentPathStrict && this.platformBehavior.isOnFloor && waypoint && waypoint.node) {
         const node = waypoint.node;
         if (node.isLeftLedge || node.isRightLedge || node.isIsland) {
           const nextIdx = this.currentWaypoint + 1;
@@ -3648,13 +4058,31 @@ export default function (parentClass) {
             nextWp.action === "fall_left" || nextWp.action === "fall_right"
           )) {
             const maxDepartureSpeed = Math.sqrt(2 * decel * (this.cellSize * 0.35));
-            if (speed > maxDepartureSpeed) return; // Coast to safe speed
+            if (speed > maxDepartureSpeed) return;
           }
         }
       }
 
       if (distToTarget > stoppingDist + this.cellSize * 0.1) {
         this.platformBehavior.simulateControl(direction);
+
+        // Slope micro-jump: if the character hasn't moved for several ticks while
+        // walk input is being applied, a gentle slope tile boundary is likely blocking.
+        // A small jump dislodges the character without disrupting the walk path.
+        if (this._walkStuckX === undefined) { this._walkStuckX = -1; this._walkStuckCount = 0; }
+        const roundedX = Math.round(this.instance.x * 10);
+        if (roundedX === this._walkStuckX) {
+          this._walkStuckCount++;
+          if (this._walkStuckCount >= 5 && this.platformBehavior.isOnFloor) {
+            this.platformBehavior.simulateControl("jump");
+            this._walkStuckCount = 0;
+          }
+        } else {
+          this._walkStuckX = roundedX;
+          this._walkStuckCount = 0;
+        }
+      } else {
+        this._walkStuckCount = 0;
       }
     }
 
@@ -3688,6 +4116,34 @@ export default function (parentClass) {
         const firstJumpHorizontal = atOrAboveTarget;
         const secondJumpHorizontal = atOrAboveTarget || this._isDoubleJumpHorizontalClear(dir);
 
+        // Pre-position for double jump: center on launch node before phase 0.
+        // Without this, the character launches from wherever it landed (possibly
+        // off-center), causing the first vertical phase to pass through different
+        // grid cells than _canDoubleJump() validated — hitting ceilings.
+        if (this.doubleJumpPhase === 0 && this.platformBehavior.isOnFloor) {
+          const prevIdx = this.currentWaypoint - 1;
+          const prevWp = prevIdx >= 0 ? this.currentPath[prevIdx] : null;
+          if (prevWp && prevWp.node) {
+            const tileCenterX = prevWp.node.x;
+            const distToCenter = Math.abs(this.instance.x - tileCenterX);
+            // Same slope tolerance as single-jump: slope surface shifts Y while walking X,
+            // so half-tile precision is sufficient for arc correctness.
+            const centerTolerance = prevWp.node.isSlope ? this.cellSize * 0.5 : this.cellSize * 0.15;
+            if (distToCenter > centerTolerance) {
+              const centerDir = tileCenterX < this.instance.x ? "left" : "right";
+              try {
+                if (!this.platformBehavior.isByWall(centerDir)) {
+                  this.platformBehavior.simulateControl(centerDir);
+                }
+              } catch (e) {}
+              return; // Wait until centered
+            }
+            if (this.currentPathStrict) {
+              this.departureCommitted = true;
+            }
+          }
+        }
+
         if (this.doubleJumpPhase === 0) {
           // Phase 0: Initiate first jump from the ground
           this._log(`Double jump initiated toward (${Math.round(targetX)}, ${Math.round(targetY)})`);
@@ -3696,6 +4152,7 @@ export default function (parentClass) {
           this.doubleJumpPhase = 1;
           this.jumpStartTime = 0;
           this._doubleJumpGrace = 0.1; // 100ms grace before checking isFalling
+          this._doubleJumpLastY = this.instance.y;
         } else if (this.doubleJumpPhase === 1) {
           // Phase 1: Sustain first jump, wait for isFalling (apex reached)
           if (firstJumpHorizontal) this.platformBehavior.simulateControl(dir);
@@ -3710,6 +4167,15 @@ export default function (parentClass) {
           // Wait for grace period, then detect apex
           this._doubleJumpGrace -= dt;
           if (this._doubleJumpGrace <= 0) {
+            // Ceiling hit detection: if character moved downward during first jump
+            // (y increased), a ceiling stopped the ascent — repath immediately
+            if (this.instance.y > this._doubleJumpLastY + 1) {
+              this._warn(`Double jump: ceiling hit during phase 1 — repathing`);
+              this.doubleJumpPhase = 0;
+              this._rePath();
+              return;
+            }
+            this._doubleJumpLastY = this.instance.y;
             // If character fell back to floor, first jump failed entirely — repath
             if (this.platformBehavior.isOnFloor && !this.platformBehavior.isJumping) {
               this._warn(`Double jump: back on floor before second jump — repathing`);
@@ -3734,6 +4200,7 @@ export default function (parentClass) {
           this.platformBehavior.simulateControl("jump");
           this.doubleJumpPhase = 4;
           this.jumpStartTime = 0;
+          this._doubleJumpLastY = this.instance.y;
         } else if (this.doubleJumpPhase === 4) {
           // Phase 4: Sustain second jump
           if (secondJumpHorizontal) this.platformBehavior.simulateControl(dir);
@@ -3744,6 +4211,20 @@ export default function (parentClass) {
               this.platformBehavior.simulateControl("jump");
             }
           }
+
+          // Ceiling hit detection for second jump — only check during ascent.
+          // platformBehavior.isFalling is true once the character has passed the
+          // apex and is descending. Checking without this guard causes a false
+          // positive with jumpSustain=0: the character reaches the apex and starts
+          // falling normally, but the per-tick y delta exceeds 1px a few frames
+          // into the descent, triggering a spurious repath.
+          if (!this.platformBehavior.isFalling && this.instance.y > this._doubleJumpLastY + 1) {
+            this._warn(`Double jump: ceiling hit during phase 4 — repathing`);
+            this.doubleJumpPhase = 0;
+            this._rePath();
+            return;
+          }
+          this._doubleJumpLastY = this.instance.y;
         }
 
         // Wall collision detection for phases 2-4: if moving horizontally and
@@ -3766,6 +4247,7 @@ export default function (parentClass) {
         // the character landed but didn't reach the target.
         if (this.doubleJumpPhase >= 3 && this.platformBehavior.isOnFloor && !this.platformBehavior.isJumping) {
           this.doubleJumpPhase = 0;
+          this.departureCommitted = false;
           // Don't repath here — let normal waypoint arrival check handle it.
           // The character may have landed close enough to the target.
         }
@@ -3832,7 +4314,11 @@ export default function (parentClass) {
           } else {
             const tileCenterX = node.x;
             const distToCenter = Math.abs(this.instance.x - tileCenterX);
-            if (distToCenter > this.cellSize * 0.15) {
+            // Slope departure: the slope surface shifts the character's Y as they walk X,
+            // making it hard to settle within a tight X tolerance. Half a tile is enough
+            // since arc validation uses grid-cell precision, not sub-cell precision.
+            const centerTolerance = node.isSlope ? this.cellSize * 0.5 : this.cellSize * 0.15;
+            if (distToCenter > centerTolerance) {
               // Walk toward tile center before jumping
               const centerDir = tileCenterX < this.instance.x ? "left" : "right";
               try {
@@ -3936,26 +4422,19 @@ export default function (parentClass) {
       } catch (e) {}
     }
 
-    /** Handles fall/fall_left/fall_right by applying directional input to drift toward the landing target. */
-    _handleFallAction(targetX, action) {
-      if (action === "fall_left") {
-        this.platformBehavior.simulateControl("left");
-      } else if (action === "fall_right") {
-        this.platformBehavior.simulateControl("right");
-      } else {
-        // Straight fall — nudge toward target X for precise tile landing
-        // This is important when a subsequent jump needs the character centered on the tile
-        const speed =
-          this.platformBehavior.speed || Math.abs(this.estimatedVelocityX);
-        const decel = this.platformProps.deceleration;
-        const distToTarget = Math.abs(targetX - this.instance.x);
-        const stoppingDist = (speed * speed) / (2 * decel);
+    /** Handles fall/fall_left/fall_right by applying directional input to drift toward the landing target.
+     *  Uses deceleration-based braking to avoid overshooting the target X. */
+    _handleFallAction(targetX) {
+      const speed =
+        this.platformBehavior.speed || Math.abs(this.estimatedVelocityX);
+      const decel = this.platformProps.deceleration;
+      const distToTarget = Math.abs(targetX - this.instance.x);
+      const stoppingDist = (speed * speed) / (2 * decel);
 
-        if (distToTarget > this.cellSize * 0.2) {
-          const dir = targetX < this.instance.x ? "left" : "right";
-          if (distToTarget > stoppingDist + this.cellSize * 0.1) {
-            this.platformBehavior.simulateControl(dir);
-          }
+      if (distToTarget > this.cellSize * 0.2) {
+        const dir = targetX < this.instance.x ? "left" : "right";
+        if (distToTarget > stoppingDist + this.cellSize * 0.1) {
+          this.platformBehavior.simulateControl(dir);
         }
       }
     }
@@ -4529,11 +5008,13 @@ export default function (parentClass) {
       if (!this.obstacleMap) return "clear";
       const val = this.obstacleMap[gy * this.gridWidth + gx];
       if (val === 0) {
-        if (
-          this.slopeMap &&
-          this.slopeMap[gy * this.gridWidth + gx] > 0
-        )
-          return "slope";
+        if (this.slopeMap) {
+          const sv = this.slopeMap[gy * this.gridWidth + gx];
+          if (sv === 1) return "slope_left";
+          if (sv === 2) return "slope_right";
+          if (sv === 3) return "gentle_slope_left";
+          if (sv === 4) return "gentle_slope_right";
+        }
         return "clear";
       }
       if (val === 1) return "solid";
@@ -4559,7 +5040,11 @@ export default function (parentClass) {
       )
         return "none";
       const val = this.slopeMap[gy * this.gridWidth + gx];
-      return val === 1 ? "left" : val === 2 ? "right" : "none";
+      if (val === 1) return "left";
+      if (val === 2) return "right";
+      if (val === 3) return "gentle_left";
+      if (val === 4) return "gentle_right";
+      return "none";
     }
 
     /** Returns the obstacle map as a JSON string for serialization/debugging. */
