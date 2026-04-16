@@ -23,5 +23,10 @@
     "added": "- Reverse Pathing, prefers turning fall nodes into jump nodes\n- Strict Tile Positioning Before Jumps / Ledge Departures\n- Reverse Pathing, prefers turning fall nodes into jump nodes. (to improve jump pathing)\n- Path Strategy Preset (Property + ACE) & Fix Climbing via Reverse Pathing…\n- Find Path Upgrade (Reach/Jump-Toward/Jump-At-Target)\n- more edgecase refinement\n- Debugger support\n-\n\n",
     "changed": "",
     "fixed": ""
+  },
+  "0.4.0.0": {
+    "added": "- Better support Scripting.\n- Add Portal Tags (Remove/Add/Pick Nearest Portal/Pick Furthest Portal)\n- Clean up the code.",
+    "changed": "",
+    "fixed": ""
   }
 }

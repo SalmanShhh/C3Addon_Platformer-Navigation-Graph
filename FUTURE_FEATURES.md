@@ -212,7 +212,7 @@ Tag groups of nodes as zones for area-based AI logic (patrol zones, safe zones).
 
 ---
 
-## Auto Slope Detection
+## Auto Slope Detection ✅ Implemented
 
 Auto-classify slope tiles from their collision polygon shape, eliminating the need for `MapSlopeTilesFromTilemap` tile-ID lists.
 

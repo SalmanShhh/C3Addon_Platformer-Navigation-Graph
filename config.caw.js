@@ -38,7 +38,11 @@ export const files = {
 };
 
 // categories that are not filled will use the folder name
-export const aceCategories = {};
+export const aceCategories = {
+  ObstacleMap: "Obstacle Map",
+  GraphData: "Graph Data",
+  SharedNavigation: "Shared Navigation",
+};
 
 export const info = {
   // icon: "icon.svg",

@@ -1504,32 +1504,43 @@ export default function (parentClass) {
       let count = 0;
       // In debug mode: collect tile IDs that exist in the tilemap but aren't in any slope set.
       // These unregistered tiles may silently allow invalid jump connections through them.
-      const unregisteredIds = this.enableDebug ? new Map() : null; // tileId → example {gx, gy}
+      const unregisteredIds = this.enableDebug ? new Map() : null; // baseTileId → example {gx, gy}
+
+      // Tile values from getTileAt() are 32-bit integers: lower 29 bits = tile ID, upper 3 = flip flags.
+      // Empty tiles return -1. Tiles placed H-flipped produce negative values that the old `< 0`
+      // guard incorrectly skipped — check for exactly -1 instead and use >>> 0 to treat as
+      // unsigned when extracting the base ID and flip flags.
+      const TILE_ID_MASK = 0x1FFFFFFF;
+      const TILE_H_FLIP  = 0x80000000;
 
       for (let gy = 0; gy < this.gridHeight; gy++) {
         for (let gx = 0; gx < this.gridWidth; gx++) {
-          let tileId;
+          let rawTile;
           try {
-            tileId = tilemapInst.getTileAt(gx, gy);
+            rawTile = tilemapInst.getTileAt(gx, gy);
           } catch (e) {
             continue;
           }
-          if (tileId < 0) continue;
+          if (rawTile === -1) continue; // empty cell
+
+          const baseTileId = (rawTile >>> 0) & TILE_ID_MASK;
+          // Horizontal flip mirrors slope direction: left ↔ right, gentle-left ↔ gentle-right
+          const hFlipped   = ((rawTile >>> 0) & TILE_H_FLIP) !== 0;
 
           const index = gy * this.gridWidth + gx;
           let slopeVal = 0;
-          if (leftSet.has(tileId)) slopeVal = 1;
-          else if (rightSet.has(tileId)) slopeVal = 2;
-          else if (gentleLeftSet.has(tileId)) slopeVal = 3;
-          else if (gentleRightSet.has(tileId)) slopeVal = 4;
+          if      (leftSet.has(baseTileId))        slopeVal = hFlipped ? 2 : 1;
+          else if (rightSet.has(baseTileId))       slopeVal = hFlipped ? 1 : 2;
+          else if (gentleLeftSet.has(baseTileId))  slopeVal = hFlipped ? 4 : 3;
+          else if (gentleRightSet.has(baseTileId)) slopeVal = hFlipped ? 3 : 4;
 
           if (slopeVal > 0) {
             this.obstacleMap[index] = 0;
             this.slopeMap[index] = slopeVal;
             count++;
-          } else if (unregisteredIds && !unregisteredIds.has(tileId)) {
+          } else if (unregisteredIds && !unregisteredIds.has(baseTileId)) {
             // Record one example position per unregistered tile ID (for debug output)
-            unregisteredIds.set(tileId, { gx, gy });
+            unregisteredIds.set(baseTileId, { gx, gy });
           }
         }
       }
@@ -1555,6 +1566,194 @@ export default function (parentClass) {
         }
       }
     }
+
+    // -----------------------------------------------------------------------
+    // Auto slope detection helpers
+    // -----------------------------------------------------------------------
+
+    // Try to retrieve the IAnimationFrame for a base tile ID from the tilemap.
+    // C3 tilemaps store their tileset as animation frames (one animation whose
+    // frames correspond to tile IDs 0, 1, 2, …). The public ITilemapInstance
+    // scripting interface does not document this path, so we try it and return
+    // null on any failure so callers can fall back gracefully.
+    _tryGetTileFrame(baseTileId, tilemapInst) {
+      try {
+        const animations = tilemapInst.animations;
+        if (!animations) return null;
+        for (const anim of animations) {
+          let idx = 0;
+          for (const frame of anim.frames) {
+            if (idx === baseTileId) return frame;
+            idx++;
+          }
+          break; // only check the first animation (the tileset)
+        }
+      } catch (e) {
+        // Animation frame API is not accessible on this object / C3 version
+      }
+      return null;
+    }
+
+    // Classify the collision polygon of a single tile ID as a slope type.
+    // Returns: 1 = slope_left (/), 2 = slope_right (\),
+    //          3 = gentle_slope_left, 4 = gentle_slope_right, 0 = not a slope.
+    // Polygon points are read in normalized coordinates relative to the frame
+    // origin (IAnimationFrame.getPolyPointX/Y). We convert to 0-1 tile space
+    // by adding originX/originY so corner detection is consistent.
+    _classifyTilePolygon(baseTileId, tilemapInst) {
+      const frame = this._tryGetTileFrame(baseTileId, tilemapInst);
+      if (!frame) return 0;
+
+      let count;
+      try {
+        count = frame.getPolyPointCount();
+      } catch (e) {
+        return 0;
+      }
+      if (count < 3) return 0;
+
+      // Convert origin-relative coords to 0-1 tile space
+      const originX = frame.originX ?? 0.5;
+      const originY = frame.originY ?? 0.5;
+      const pts = [];
+      for (let i = 0; i < count; i++) {
+        pts.push([frame.getPolyPointX(i) + originX, frame.getPolyPointY(i) + originY]);
+      }
+
+      const eps = 0.1;
+      const hasCorner = (cx, cy) => pts.some(([px, py]) => Math.abs(px - cx) < eps && Math.abs(py - cy) < eps);
+      const hasTL = hasCorner(0, 0);
+      const hasTR = hasCorner(1, 0);
+      const hasBL = hasCorner(0, 1);
+      const hasBR = hasCorner(1, 1);
+
+      if (count === 3) {
+        // 45° slope triangle — the absent corner reveals the cut direction.
+        // slope_left  (/): solid fills bottom-right triangle → top-left corner absent
+        // slope_right (\): solid fills bottom-left triangle → top-right corner absent
+        if (!hasTL && hasTR && hasBL && hasBR) return 1; // slope_left
+        if ( hasTL && !hasTR && hasBL && hasBR) return 2; // slope_right
+      } else if (count === 4) {
+        // 22.5° gentle-slope trapezoid — three real corners plus one midpoint
+        // on a vertical edge. The side with the midpoint is the cut side.
+        // gentle_slope_left  (/): top-right cut → extra point on right edge  (x≈1, 0<y<1)
+        // gentle_slope_right (\): top-left  cut → extra point on left edge   (x≈0, 0<y<1)
+        if (hasTL && !hasTR && hasBL && hasBR) {
+          const mid = pts.find(([px, py]) => Math.abs(px - 1) < eps && py > eps && py < 1 - eps);
+          if (mid) return 3; // gentle_slope_left
+        }
+        if (!hasTL && hasTR && hasBL && hasBR) {
+          const mid = pts.find(([px, py]) => Math.abs(px) < eps && py > eps && py < 1 - eps);
+          if (mid) return 4; // gentle_slope_right
+        }
+      }
+      return 0; // flat/solid or unrecognised shape
+    }
+
+    // Scan a tilemap and automatically classify every tile that has a triangular
+    // or trapezoidal collision polygon as a slope, without requiring explicit
+    // tile-ID lists. Each unique base tile ID is classified only once for
+    // efficiency. Horizontal-flip variants are handled automatically.
+    aceAutoDetectSlopeTiles(tilemapClass) {
+      const tilemapInst = tilemapClass.getFirstPickedInstance();
+      if (!tilemapInst) {
+        this._warn("AutoDetectSlopeTiles: tilemap instance not found");
+        return;
+      }
+      if (!this.obstacleMap) {
+        this._warn("AutoDetectSlopeTiles: obstacle map not created yet");
+        return;
+      }
+      if (!this.slopeMap) this.slopeMap = new Uint8Array(this.gridWidth * this.gridHeight);
+
+      const TILE_ID_MASK = 0x1FFFFFFF;
+      const TILE_H_FLIP  = 0x80000000;
+
+      // Pass 1 — collect all unique base tile IDs and classify each once.
+      // We classify per unique ID rather than per cell to avoid redundant
+      // (and potentially expensive) polygon API lookups for repeated tiles.
+      const classificationCache = new Map(); // baseTileId → slopeType (0-4)
+      let polyApiWorked = false;
+
+      for (let gy = 0; gy < this.gridHeight; gy++) {
+        for (let gx = 0; gx < this.gridWidth; gx++) {
+          let rawTile;
+          try { rawTile = tilemapInst.getTileAt(gx, gy); } catch (e) { continue; }
+          if (rawTile === -1) continue;
+
+          const baseTileId = (rawTile >>> 0) & TILE_ID_MASK;
+          if (classificationCache.has(baseTileId)) continue;
+
+          // Attempt polygon classification; cache result even if 0 (not a slope)
+          // so we don't re-query the same tile ID in subsequent cells.
+          const slopeType = this._classifyTilePolygon(baseTileId, tilemapInst);
+          classificationCache.set(baseTileId, slopeType);
+
+          // If _tryGetTileFrame returned a frame (not null), the polygon API is
+          // accessible even when the tile isn't a slope — check via a helper probe.
+          if (!polyApiWorked && this._tryGetTileFrame(baseTileId, tilemapInst) !== null) {
+            polyApiWorked = true;
+          }
+        }
+      }
+
+      if (!polyApiWorked) {
+        this._warn(
+          "AutoDetectSlopeTiles: tile collision polygon data is not accessible at runtime on this C3 version. " +
+          "Use MapSlopeTilesFromTilemap with explicit tile IDs instead."
+        );
+        return;
+      }
+
+      // Pass 2 — write slope values into slopeMap, applying H-flip mirroring.
+      let count = 0;
+      const typeCounts = [0, 0, 0, 0]; // [slope_left, slope_right, gentle_left, gentle_right]
+
+      for (let gy = 0; gy < this.gridHeight; gy++) {
+        for (let gx = 0; gx < this.gridWidth; gx++) {
+          let rawTile;
+          try { rawTile = tilemapInst.getTileAt(gx, gy); } catch (e) { continue; }
+          if (rawTile === -1) continue;
+
+          const baseTileId = (rawTile >>> 0) & TILE_ID_MASK;
+          const hFlipped   = ((rawTile >>> 0) & TILE_H_FLIP) !== 0;
+          const baseType   = classificationCache.get(baseTileId) ?? 0;
+          if (baseType === 0) continue;
+
+          // H-flip mirrors left ↔ right
+          const slopeVal = hFlipped
+            ? (baseType === 1 ? 2 : baseType === 2 ? 1 : baseType === 3 ? 4 : 3)
+            : baseType;
+
+          const index = gy * this.gridWidth + gx;
+          this.obstacleMap[index] = 0;
+          this.slopeMap[index] = slopeVal;
+          typeCounts[slopeVal - 1]++;
+          count++;
+        }
+      }
+
+      if (count > 0) {
+        this._log(
+          `AutoDetectSlopeTiles: detected ${count} slope tile(s) — ` +
+          `left:${typeCounts[0]} right:${typeCounts[1]} ` +
+          `gentle-left:${typeCounts[2]} gentle-right:${typeCounts[3]}`
+        );
+        if (this.graphGenerated && this.obstacleMap) {
+          this._log("Rebuilding navigation graph with auto-detected slope data");
+          this._generateGraph();
+        } else {
+          this.graphGenerated = false;
+        }
+      } else {
+        this._log(
+          "AutoDetectSlopeTiles: no slope tiles detected. " +
+          "Ensure tiles have triangular or trapezoidal collision polygons set in the C3 editor."
+        );
+      }
+    }
+
+    // -----------------------------------------------------------------------
 
     aceSetTileHazard(gx, gy, severity) {
       if (
@@ -2578,7 +2777,7 @@ export default function (parentClass) {
       }
     }
 
-    aceAddPortal(direction, entryX, entryY, exitX, exitY, portalType, cost, speed) {
+    aceAddPortal(direction, entryX, entryY, exitX, exitY, portalType, cost, speed, tag) {
       this.enablePortals = true;
       const portalsMap = this._getPortalsMap();
       const portalId = this.nextPortalId++;
@@ -2595,6 +2794,7 @@ export default function (parentClass) {
         speed: speed || 0,
         ignoreHazards: false,
         twoWay: direction === "two_way",
+        tag: tag || "",
       };
       portalsMap.set(portalId, portal);
 
@@ -2603,12 +2803,12 @@ export default function (parentClass) {
       }
     }
 
-    aceAddInstantPortal(direction, entryX, entryY, exitX, exitY, cost) {
-      this.aceAddPortal(direction, entryX, entryY, exitX, exitY, "instant", cost, 0);
+    aceAddInstantPortal(direction, entryX, entryY, exitX, exitY, cost, tag) {
+      this.aceAddPortal(direction, entryX, entryY, exitX, exitY, "instant", cost, 0, tag);
     }
 
-    aceAddGradualPortal(direction, entryX, entryY, exitX, exitY, cost, speed) {
-      this.aceAddPortal(direction, entryX, entryY, exitX, exitY, "gradual", cost, speed);
+    aceAddGradualPortal(direction, entryX, entryY, exitX, exitY, cost, speed, tag) {
+      this.aceAddPortal(direction, entryX, entryY, exitX, exitY, "gradual", cost, speed, tag);
     }
 
     aceRemovePortal(portalId) {
@@ -2680,22 +2880,22 @@ export default function (parentClass) {
       }
     }
 
-    aceAddPortalFromObjects(direction, entryObjectClass, exitObjectClass, portalType, cost, speed) {
+    aceAddPortalFromObjects(direction, entryObjectClass, exitObjectClass, portalType, cost, speed, tag) {
       const entryInst = entryObjectClass.getFirstPickedInstance();
       const exitInst = exitObjectClass.getFirstPickedInstance();
       if (!entryInst || !exitInst) {
         this._warn("Add portal from objects: could not find picked instances");
         return;
       }
-      this.aceAddPortal(direction, entryInst.x, entryInst.y, exitInst.x, exitInst.y, portalType, cost, speed);
+      this.aceAddPortal(direction, entryInst.x, entryInst.y, exitInst.x, exitInst.y, portalType, cost, speed, tag);
     }
 
-    aceAddInstantPortalFromObjects(direction, entryObjectClass, exitObjectClass, cost) {
-      this.aceAddPortalFromObjects(direction, entryObjectClass, exitObjectClass, "instant", cost, 0);
+    aceAddInstantPortalFromObjects(direction, entryObjectClass, exitObjectClass, cost, tag) {
+      this.aceAddPortalFromObjects(direction, entryObjectClass, exitObjectClass, "instant", cost, 0, tag);
     }
 
-    aceAddGradualPortalFromObjects(direction, entryObjectClass, exitObjectClass, cost, speed) {
-      this.aceAddPortalFromObjects(direction, entryObjectClass, exitObjectClass, "gradual", cost, speed);
+    aceAddGradualPortalFromObjects(direction, entryObjectClass, exitObjectClass, cost, speed, tag) {
+      this.aceAddPortalFromObjects(direction, entryObjectClass, exitObjectClass, "gradual", cost, speed, tag);
     }
 
     aceRemovePortalAtObject(objectClass) {
@@ -2751,7 +2951,90 @@ export default function (parentClass) {
       }
     }
 
-    aceAddElevatorStop(groupId, x, y, speed) {
+    /** Returns true if the portal's comma-separated tag string contains the given tag token. */
+    _portalHasTag(portal, tag) {
+      if (!portal || !tag) return false;
+      const needle = tag.trim();
+      if (!needle) return false;
+      return portal.tag.split(",").some(t => t.trim() === needle);
+    }
+
+    /** Sets the tag string on a portal (comma-separated for multiple tags, e.g. "door,room_A"). Replaces any existing tag. */
+    aceSetPortalTag(portalId, tag) {
+      const portalsMap = this._getPortalsMap();
+      const portal = portalsMap.get(portalId);
+      if (!portal) return;
+      portal.tag = tag;
+    }
+
+    /** Removes all portals that contain the given tag token (checked within comma-separated tag string). */
+    aceRemovePortalsByTag(tag) {
+      const portalsMap = this._getPortalsMap();
+      for (const [id, portal] of portalsMap) {
+        if (this._portalHasTag(portal, tag)) {
+          this._removePortalConnections(id, portal);
+          portalsMap.delete(id);
+        }
+      }
+    }
+
+    /** Returns the tag string of a portal, or empty string if the portal doesn't exist. */
+    aceGetPortalTag(portalId) {
+      const portalsMap = this._getPortalsMap();
+      const portal = portalsMap.get(portalId);
+      return portal ? (portal.tag || "") : "";
+    }
+
+    /** Returns the number of portals that contain the given tag token. */
+    aceGetPortalCountByTag(tag) {
+      const portalsMap = this._getPortalsMap();
+      let count = 0;
+      for (const [, portal] of portalsMap) {
+        if (this._portalHasTag(portal, tag)) count++;
+      }
+      return count;
+    }
+
+    /** Returns the portal ID at the given index within the set of portals that contain the given tag. Returns -1 if out of range. */
+    aceGetPortalIDByTag(tag, index) {
+      const portalsMap = this._getPortalsMap();
+      let i = 0;
+      for (const [id, portal] of portalsMap) {
+        if (this._portalHasTag(portal, tag)) {
+          if (i === index) return id;
+          i++;
+        }
+      }
+      return -1;
+    }
+
+    /** Returns the ID of the portal whose entry point is nearest to (x, y). Filters by tag if tag is non-empty. Returns -1 if no matching portals exist. */
+    aceFindNearestPortalID(x, y, tag) {
+      const portalsMap = this._getPortalsMap();
+      let bestId = -1;
+      let bestDist = Infinity;
+      for (const [id, portal] of portalsMap) {
+        if (tag && !this._portalHasTag(portal, tag)) continue;
+        const dist = this.distance(x, y, portal.entryX, portal.entryY);
+        if (dist < bestDist) { bestDist = dist; bestId = id; }
+      }
+      return bestId;
+    }
+
+    /** Returns the ID of the portal whose entry point is furthest from (x, y). Filters by tag if tag is non-empty. Returns -1 if no matching portals exist. */
+    aceFindFurthestPortalID(x, y, tag) {
+      const portalsMap = this._getPortalsMap();
+      let bestId = -1;
+      let bestDist = -1;
+      for (const [id, portal] of portalsMap) {
+        if (tag && !this._portalHasTag(portal, tag)) continue;
+        const dist = this.distance(x, y, portal.entryX, portal.entryY);
+        if (dist > bestDist) { bestDist = dist; bestId = id; }
+      }
+      return bestId;
+    }
+
+    aceAddElevatorStop(groupId, x, y, speed, tag) {
       if (!this.elevatorGroups.has(groupId)) {
         this.elevatorGroups.set(groupId, []);
       }
@@ -2763,19 +3046,19 @@ export default function (parentClass) {
         const dist = Math.sqrt((x - stop.x) ** 2 + (y - stop.y) ** 2);
         const portalSpeed = speed || stop.speed || 100;
         const cost = dist > 0 ? (dist / portalSpeed) * this.WALK_COST : 1;
-        this.aceAddPortal("two_way", stop.x, stop.y, x, y, "gradual", cost, portalSpeed);
+        this.aceAddPortal("two_way", stop.x, stop.y, x, y, "gradual", cost, portalSpeed, tag);
       }
 
       stops.push(newStop);
     }
 
-    aceAddElevatorStopFromObject(groupId, objectClass, speed) {
+    aceAddElevatorStopFromObject(groupId, objectClass, speed, tag) {
       const inst = objectClass.getFirstPickedInstance();
       if (!inst) {
         this._warn("Add elevator stop from object: could not find picked instance");
         return;
       }
-      this.aceAddElevatorStop(groupId, inst.x, inst.y, speed);
+      this.aceAddElevatorStop(groupId, inst.x, inst.y, speed, tag);
     }
 
     /** Removes all portal connections for a specific portal ID from graph nodes. */

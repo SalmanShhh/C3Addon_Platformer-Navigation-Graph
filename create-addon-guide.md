@@ -10,7 +10,7 @@ Generate a comprehensive `Guide.md` for a CAW (Construct Addon Wizard) Construct
    - `src/runtime/instance.js` — runtime logic, available methods, data model
    - Any existing `Guide.md` or `README.md` for context
 
-2. **Write `Guide.md`** at the project root following the structure below. Match the depth and quality of the UIDirector guide — no section should be a stub.
+2. **Write `Guide.md`** at the project root following the structure below. No section should be a stub — every section must be fleshed out with prose, tables, and code examples.
 
 ---
 
@@ -38,7 +38,7 @@ Table: Property | Type | Default | Description. Cover every property in `config.
 One section per major feature group. Name them after what the user thinks about, not internal implementation names. Each section should include:
 - What it does and when to use it
 - How to configure or call it
-- A concrete event sheet example (code block using the same Construct-style pseudocode as UIDirector's guide)
+- A concrete event sheet example (code block using Construct-style pseudocode — see Writing Style Rules)
 - Edge cases or gotchas the user will hit
 
 ### Actions Reference
@@ -62,10 +62,22 @@ Single table: Trigger | Description.
 
 Use cases should cover: the simplest possible setup, the most common advanced pattern, at least one edge case (cleanup, persistence, error state), and at least one combination of multiple features.
 
+After the numbered use cases, add a `### Other game use cases` sub-section. This section contains brief paragraph-per-genre descriptions (no full event-sheet code blocks) showing how the addon fits common game genres at a high level. Bold the genre name at the start of each paragraph. write them from the feature set. Aim for 5–8 genres.
+
 ### C3 Debugger (if `_getDebuggerProperties` is implemented)
 - What sections the debugger shows
 - A table of every field and what it means
 - How to open the debugger
+
+### Scripting (C3 Script / JavaScript)
+Include this section if the addon has any `expose: true` ACEs or any public camelCase methods on the instance. It should cover:
+
+- **Accessing the behavior/plugin** — show `inst.behaviors.BehaviorName` (or `inst.BehaviorName` for plugins) and how the name comes from the project, not the addon ID.
+- **Calling actions from script** — explain that `expose: true` copies the ACE function directly onto the prototype (not a thin wrapper), so calling it from script produces the same side-effects as the event sheet action. Method names are **PascalCase**, derived from the ACE filename (`a.RemoveBuff.js` → `RemoveBuff()`). Document parameter order. Note that combo parameters arrive as **0-based indices**.
+- **Reading state from script** — document any public camelCase getter methods on the instance. These are NOT the same as expressions (expressions are not callable from script); they are methods added to the instance class. Group by category (stat values, buff info, counts, etc.) with a code block.
+- **Listening to events from script** — show `inst.behaviors.X.addEventListener("OnTriggerName", callback)` for each trigger the addon fires. Event context accessors (if any) should be called from within the listener.
+- **Looping patterns** — if the addon exposes Count + Index expressions, show the JS equivalent using a `for` loop.
+- **A complete example** — a short class or function showing realistic usage of actions + getters + event listeners together.
 
 ### Feature Deep-Dives (one per complex feature, if needed)
 For features that need more than a paragraph — like timescale control, animation system, save/load — give them their own numbered section with sub-sections, tables, and code examples.
@@ -89,4 +101,3 @@ A bullet list of the top 5–10 gotchas: things that look like they should work 
 - **Tables for reference; prose for concepts.** Use prose to explain why something works the way it does. Use tables for lookup (properties, conditions, expressions).
 - **Bold the first use of every term** the reader needs to remember.
 - **Section headers** use `##` for top-level, `###` for sub-sections. No `####` unless a sub-section has multiple named variants.
-- Match the depth and tone of the UIDirector guide at: `c:\Users\mrlig\OneDrive\Documents\Git Repos\Construct 3 Addons Dev\UI Director\Guide.md`

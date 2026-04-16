@@ -21,9 +21,10 @@ Smart pathfinding for platformer games. Add this behavior to any character and i
 13. [Conditions Reference](#13-conditions-reference)
 14. [Expressions Reference](#14-expressions-reference)
 15. [Triggers Reference](#15-triggers-reference)
-16. [Game Use Cases](#16-game-use-cases)
-17. [C3 Debugger](#17-c3-debugger)
-18. [Tips and Common Mistakes](#18-tips-and-common-mistakes)
+16. [Scripting (C3 Script / JavaScript)](#16-scripting-c3-script--javascript)
+17. [Game Use Cases](#17-game-use-cases)
+18. [C3 Debugger](#18-c3-debugger)
+19. [Tips and Common Mistakes](#19-tips-and-common-mistakes)
 
 ---
 
@@ -520,6 +521,47 @@ Action: Enemy -> PlatformerNavGraph -> ClearAllPortals
 // Remove everything when switching layout
 ```
 
+### Portal tags
+
+Every portal has an optional **tag** — a comma-separated string used to group and query portals at runtime. Tags are assigned when the portal is added or changed afterwards with `SetPortalTag`.
+
+```
+// Assign tags when adding
+Action: Enemy -> PlatformerNavGraph -> AddInstantPortalFromObjects
+  Direction: One-way
+  Entry object: DoorEntry
+  Exit object: DoorExit
+  Cost: 1
+  Tag: "door,floor_1"
+
+// Or set them afterwards
+Action: Enemy -> PlatformerNavGraph -> SetPortalTag  myPortalId, "door,floor_1"
+```
+
+Use commas for multiple tags (e.g. `"door,room_A"`). Whitespace around commas is ignored, so `"door, room_A"` is the same as `"door,room_A"`.
+
+**Querying by tag:**
+
+```
+// How many portals carry the "door" tag?
+Set Variable -> Enemy.PlatformerNavGraph.PortalCountByTag("door")
+
+// Loop over all "door" portals
+Repeat Enemy.PlatformerNavGraph.PortalCountByTag("door") times:
+  Set Variable -> Enemy.PlatformerNavGraph.PortalIDByTag("door", LoopIndex)
+
+// Find the nearest or furthest portal (optional tag filter; leave empty for any portal)
+Set Variable -> Enemy.PlatformerNavGraph.NearestPortalID(Enemy.X, Enemy.Y, "door")
+Set Variable -> Enemy.PlatformerNavGraph.FurthestPortalID(Enemy.X, Enemy.Y, "")
+```
+
+**Removing portals by tag:**
+
+```
+// Remove every portal that has the "door" tag (including portals with multiple tags like "door,floor_1")
+Action: Enemy -> PlatformerNavGraph -> RemovePortalsByTag  "door"
+```
+
 ---
 
 ## 9. Hazards — Danger Zone Avoidance
@@ -691,21 +733,23 @@ Expression: AnyEnemy.PlatformerNavGraph.PathQueueSize
 
 | Action | Description |
 |---|---|
-| **AddInstantPortal** Direction, EntryX, EntryY, ExitX, ExitY, Cost | Add a teleportation portal using world coordinates. |
-| **AddInstantPortalFromObjects** Direction, EntryObj, ExitObj, Cost | Add a teleportation portal using object positions. |
-| **AddGradualPortal** Direction, EntryX, EntryY, ExitX, ExitY, Cost, Speed | Add a linear-movement portal using world coordinates. |
-| **AddGradualPortalFromObjects** Direction, EntryObj, ExitObj, Cost, Speed | Add a linear-movement portal using object positions. |
+| **AddInstantPortal** Direction, EntryX, EntryY, ExitX, ExitY, Cost, Tag | Add a teleportation portal using world coordinates. |
+| **AddInstantPortalFromObjects** Direction, EntryObj, ExitObj, Cost, Tag | Add a teleportation portal using object positions. |
+| **AddGradualPortal** Direction, EntryX, EntryY, ExitX, ExitY, Cost, Speed, Tag | Add a linear-movement portal using world coordinates. |
+| **AddGradualPortalFromObjects** Direction, EntryObj, ExitObj, Cost, Speed, Tag | Add a linear-movement portal using object positions. |
 | **RemovePortal** ID | Remove a portal by its ID. |
 | **RemovePortalAtObject** Object | Remove the portal whose entry or exit is closest to this object. |
+| **RemovePortalsByTag** Tag | Remove all portals whose tag string contains the given tag token. |
 | **SetPortalCost** ID, Cost | Change a portal's pathfinding cost. Lower = preferred. |
 | **SetPortalSpeed** ID, Speed | Change a gradual portal's traversal speed in pixels per second. |
 | **SetPortalIgnoreHazards** ID, Ignore | Set whether this portal ignores nearby hazards when costing its connection. |
+| **SetPortalTag** ID, Tag | Set the tag string on a portal. Use commas for multiple tags (e.g. `"door,room_A"`). Replaces any existing tag. |
 | **PauseAtPortal** | Pause before portal execution (call inside On portal entry only). |
 | **ResumePortal** | Execute the portal's built-in movement after pausing. |
 | **CompletePortal** | Finish a portal without built-in movement (you've moved the character yourself). |
 | **TeleportToPosition** X, Y | Instantly move the character to a position. Suppresses re-pathing for one tick. |
-| **AddElevatorStop** GroupID, X, Y, Speed | Add a stop to an elevator group; auto-creates pairwise portals with existing stops. |
-| **AddElevatorStopFromObject** GroupID, Object, Speed | Same as AddElevatorStop using an object's position. |
+| **AddElevatorStop** GroupID, X, Y, Speed, Tag | Add a stop to an elevator group; auto-creates pairwise portals with existing stops. |
+| **AddElevatorStopFromObject** GroupID, Object, Speed, Tag | Same as AddElevatorStop using an object's position. |
 | **ClearAllPortals** | Remove all portals from the navigation graph. |
 
 ### Configuration
@@ -833,6 +877,11 @@ Expression: AnyEnemy.PlatformerNavGraph.PathQueueSize
 | **PortalExitX** | Number | Exit X of the current portal. Valid inside portal triggers. |
 | **PortalExitY** | Number | Exit Y of the current portal. Valid inside portal triggers. |
 | **PortalType(portalId)** | String | Returns `instant` or `gradual` for the given portal ID. |
+| **PortalTag(portalId)** | String | Returns the tag string of a portal, or `""` if the portal doesn't exist. |
+| **PortalCountByTag(tag)** | Number | Number of portals whose tag string contains the given tag token. |
+| **PortalIDByTag(tag, index)** | Number | Portal ID at the given zero-based index within the set of portals matching the tag. Returns -1 if out of range. |
+| **NearestPortalID(x, y, tag)** | Number | ID of the portal whose entry point is nearest to (x, y). Leave tag empty to search all portals. Returns -1 if none. |
+| **FurthestPortalID(x, y, tag)** | Number | ID of the portal whose entry point is furthest from (x, y). Leave tag empty to search all portals. Returns -1 if none. |
 
 ### GraphData
 
@@ -906,7 +955,263 @@ Expression: AnyEnemy.PlatformerNavGraph.PathQueueSize
 
 ---
 
-## 16. Game Use Cases
+## 16. Scripting (C3 Script / JavaScript)
+
+All actions, conditions, and expressions have `expose: true`, so the entire behavior API is callable directly from C3 Script without any event sheet bridges.
+
+### Accessing the behavior
+
+Use `inst.behaviors.YourBehaviorName` where `YourBehaviorName` is the name you gave the behavior in the C3 editor (shown in the Object Properties panel). The default name C3 assigns is `PlatformerNavigationGraph`.
+
+```js
+const nav = inst.behaviors.PlatformerNavigationGraph;
+
+// If you renamed it in the editor:
+const nav = inst.behaviors.Nav;
+```
+
+### Calling actions from script
+
+Action method names are **PascalCase** derived from their ACE file names: `a.FindPath.js` → `FindPath()`, `a.SetAutoControl.js` → `SetAutoControl()`. The function is copied directly onto the behavior prototype, so calling it from script produces the exact same side-effects as the event sheet action.
+
+**Combo parameters** accept either a 0-based integer index or the equivalent string key.
+
+| Action | Combo parameter | Index → value |
+|---|---|---|
+| `FindPath(x, y, correctToGround, mode, positioning)` | `correctToGround` | `0` = No, `1` = Yes |
+| | `mode` | `0` = Reach, `1` = Nearest |
+| | `positioning` | `0` = Default, `1` = Strict, `2` = Relaxed |
+| `SetAutoControl(enabled)` | `enabled` | `0` = Enabled, `1` = Disabled |
+| `SetStrictJumpPositioning(enabled)` | `enabled` | `0` = Enabled, `1` = Disabled |
+| `SetLedgeRestriction(enabled)` | `enabled` | `0` = Enabled, `1` = Disabled |
+| `SetMultiAgentAvoidance(enabled)` | `enabled` | `0` = Enabled, `1` = Disabled |
+| `SetPathStrategy(strategy)` | `strategy` | `0` = balanced, `1` = shortest, `2` = safest, `3` = simplest |
+| `UsePathfindingObstacleMap(autoRegen)` | `autoRegen` | `0` = Yes, `1` = No |
+
+String keys also work — `SetPathStrategy("safest")`, `SetAutoControl("yes")`, `FindPath(x, y, "yes", "nearest", "default")`.
+
+Non-combo actions take plain values:
+
+```js
+nav.SetCoyoteTime(0.15);
+nav.SetLedgeLeniency(8);
+nav.SetRePathCooldown(0.5);
+nav.SetRePathThreshold(3);
+nav.SetHazardRadius(2);
+nav.SetMaxPathsPerTick(5);
+nav.SetMaxJumpHeight(200);
+nav.SetMaxJumpDistance(300);
+nav.SetMaxFallDistance(400);
+nav.SetPortalCost(portalId, 10);
+nav.SetPortalSpeed(portalId, 80);
+nav.RegenerateGraph();
+nav.StopPathfinding();
+```
+
+The common path call:
+
+```js
+// Path to (targetX, targetY); correct to ground; nearest mode; default positioning
+nav.FindPath(targetX, targetY, 1, 1, 0);
+```
+
+### Checking conditions from script
+
+Exposed conditions become methods that return `true` or `false`:
+
+```js
+if (nav.HasPath()) {
+  // Character is actively following a path
+}
+
+if (nav.IsAtLedge()) {
+  // Standing at a platform edge
+}
+
+if (nav.IsPositionHazardous(enemy.x, enemy.y)) {
+  // Current position overlaps a hazard zone
+  nav.FindPath(safeTarget.x, safeTarget.y, 1, 1, 0);
+}
+
+if (nav.IsPathPending()) {
+  // A* is queued but hasn't run yet (per-tick budget reached)
+}
+
+if (nav.IsTraversingPortal()) {
+  // Character is mid-way through a gradual portal
+}
+
+if (nav.TileHasState(10, 5, "solid")) {
+  // Grid tile (10, 5) is marked solid in the obstacle map
+}
+```
+
+### Reading values from script
+
+Exposed expression methods return numbers or strings:
+
+```js
+// Current path state
+const count  = nav.WaypointCount();
+const idx    = nav.CurrentWaypoint();
+const wx     = nav.CurrentWaypointX();
+const wy     = nav.CurrentWaypointY();
+const action = nav.CurrentPathAction(idx);  // "walk_left", "jump", "fall", etc.
+const cost   = nav.PathCost();
+const reason = nav.PathFailReason();        // "no_start_node", "no_path", etc.
+
+// Portal state
+const portalId  = nav.CurrentPortalID();
+const progress  = nav.PortalProgress();     // 0–1 during gradual traversal
+const exitX     = nav.PortalExitX();
+const exitY     = nav.PortalExitY();
+const lastId    = nav.LastPortalID();       // ID of most recently added portal
+
+// Graph info
+const nodes  = nav.NodeCount();
+const gridW  = nav.GridWidth();
+const gridH  = nav.GridHeight();
+const source = nav.ObstacleMapSource();     // "pathfinding", "custom", "collision"
+
+// Performance
+const queue    = nav.PathQueueSize();
+const maxPerTk = nav.MaxPathsPerTick();
+
+// Debug / diagnostics
+const jumpH = nav.CalculatedJumpHeight();
+const jumpD = nav.CalculatedJumpDistance();
+const nearX = nav.NearestNodeX(enemy.x, enemy.y);
+const nearY = nav.NearestNodeY(enemy.x, enemy.y);
+```
+
+### Listening to triggers from script
+
+Triggers fire as DOM-style events on the behavior object:
+
+```js
+nav.addEventListener("OnGraphGenerated", () => {
+  // Safe to add portals and start pathfinding here
+  nav.FindPath(target.x, target.y, 1, 1, 0);
+});
+
+nav.addEventListener("OnPathFound",    () => { enemy.animationName = "Run"; });
+nav.addEventListener("OnPathFailed",   () => { console.warn("Path failed:", nav.PathFailReason()); });
+nav.addEventListener("OnPathComplete", () => { nav.FindPath(target.x, target.y, 1, 1, 0); });
+
+nav.addEventListener("OnWaypointReached", () => {
+  const a = nav.CurrentPathAction(nav.CurrentWaypoint());
+  if (a === "jump") enemy.animationName = "Jump";
+  else if (a.includes("walk")) enemy.animationName = "Run";
+});
+
+nav.addEventListener("OnPortalEntry", () => {
+  nav.PauseAtPortal(); // hold character at entry point
+  // play door animation, then call nav.ResumePortal() when done
+});
+
+nav.addEventListener("OnWaypointStuck", () => {
+  nav.FindPath(target.x, target.y, 1, 1, 0); // repath on stuck
+});
+```
+
+All available event strings:
+
+| Event string | When it fires |
+|---|---|
+| `"OnPathFound"` | Path calculated successfully |
+| `"OnPathFailed"` | No path found |
+| `"OnPathComplete"` | Final destination reached |
+| `"OnGraphGenerated"` | Navigation graph built and ready |
+| `"OnWaypointReached"` | Arrived at a single waypoint |
+| `"OnJumpTowardLaunched"` | `JumpTowardPosition` fired |
+| `"OnRePathTriggered"` | Automatic re-path fired |
+| `"OnWaypointStuck"` | Waypoint timeout exceeded |
+| `"OnObstacleMapCreated"` | Custom obstacle map created |
+| `"OnObstacleMapRemoved"` | Obstacle map cleared |
+| `"OnPathfindingMapReady"` | Pathfinding behavior map ready |
+| `"OnPathfindingMapFailed"` | Pathfinding map init failed |
+| `"OnPathfindingMapTimeout"` | Pathfinding map wait timed out |
+| `"OnPortalEntry"` | Character arrived at portal entry |
+| `"OnPortalComplete"` | Portal traversal finished |
+
+### Iterating over path waypoints
+
+```js
+const count = nav.WaypointCount();
+for (let i = 0; i < count; i++) {
+  const x      = nav.WaypointX(i);
+  const y      = nav.WaypointY(i);
+  const action = nav.CurrentPathAction(i);
+  console.log(`Waypoint ${i}: ${action} -> (${Math.round(x)}, ${Math.round(y)})`);
+}
+```
+
+### A complete scripting example
+
+```js
+// EnemyAI.js — script attached to an Enemy object
+const runtime = this.runtime;
+const inst    = this.instance;
+const nav     = inst.behaviors.PlatformerNavigationGraph;
+
+// Configure movement style
+nav.SetPathStrategy("safest");   // prefer walking over jumping
+nav.SetRePathThreshold(3);       // repath if drifts > 3 tiles
+nav.SetMaxPathsPerTick(4);       // prevent frame drops with many agents
+
+// Helper: find the player and path to them
+function chasePlayer() {
+  const player = runtime.objects.Player.getFirstInstance();
+  if (player) nav.FindPath(player.x, player.y, 1, 1, 0);
+}
+
+// When the nav graph is ready, add portals and start chasing
+nav.addEventListener("OnGraphGenerated", () => {
+  const entry = runtime.objects.DoorEntry.getFirstInstance();
+  const exit  = runtime.objects.DoorExit.getFirstInstance();
+  if (entry && exit) {
+    nav.AddInstantPortal(1, entry.x, entry.y, exit.x, exit.y, 1); // 1 = two-way
+  }
+  chasePlayer();
+});
+
+// Keep chasing: re-path on completion, failure, and when stuck
+nav.addEventListener("OnPathComplete",  chasePlayer);
+nav.addEventListener("OnPathFailed",    () => {
+  console.warn("[EnemyAI] Path failed:", nav.PathFailReason());
+  setTimeout(chasePlayer, 1000);
+});
+nav.addEventListener("OnWaypointStuck", chasePlayer);
+
+// Animate per waypoint action
+nav.addEventListener("OnWaypointReached", () => {
+  const action = nav.CurrentPathAction(nav.CurrentWaypoint());
+  if (action === "jump")        inst.animationName = "Jump";
+  else if (action === "fall" ||
+           action === "fall_left" ||
+           action === "fall_right") inst.animationName = "Fall";
+  else if (action.includes("walk")) inst.animationName = "Run";
+});
+
+// Pause at the door, wait for open animation, then resume
+nav.addEventListener("OnPortalEntry", () => {
+  nav.PauseAtPortal();
+  const door = runtime.objects.DoorSprite.getFirstInstance();
+  if (door) {
+    door.setAnimation("Open");
+    door.addEventListener("animationend", () => nav.ResumePortal(), { once: true });
+  } else {
+    nav.ResumePortal();
+  }
+});
+
+// Kick off the obstacle map (auto-regenerate enabled)
+nav.UsePathfindingObstacleMap(0); // 0 = yes
+```
+
+---
+
+## 17. Game Use Cases
 
 ### 1. Basic enemy that chases the player
 
@@ -1207,7 +1512,25 @@ Also call `LogGraphStats` to see how many nodes and connections were generated �
 
 ---
 
-## 17. C3 Debugger
+### Other game use cases
+
+**Action platformer.** Enemies chase the player across interconnected platforms, adjusting strategy mid-fight: a normal state uses Balanced pathing to close distance, and an attack state calls `JumpTowardPosition` for a lunge when within range. Explosions from the player's weapons register as temporary circle hazards so other enemies automatically reroute around the blast zone.
+
+**Metroidvania.** As the player unlocks new rooms, portals representing doors and fast-travel terminals are added to the shared graph at runtime. The companion NPC and roaming enemies always find cross-room routes automatically. Locked doors can be toggled by setting their portal cost to 999 (effectively blocked) until the key is found, then restored to 1.
+
+**Tower defense.** Up to 50+ creeps share a single navigation graph built at level start. `SetMaxPathsPerTick` spreads A* calculations across frames so game performance is smooth even when an entire wave spawns simultaneously. Multi-agent avoidance prevents stacking so creeps fan out naturally across multiple paths to the exit.
+
+**Stealth game.** Guards use Safest Route strategy and patrol set waypoints with Ledge Restriction on to stay on their platforms. Lit areas and laser tripwires register as rect hazards, causing guards to naturally avoid regions they shouldn't notice the player hiding in. When the player triggers an alarm, guards switch to Shortest Distance strategy to converge quickly.
+
+**Puzzle platformer.** Enemies pathfind through the current level state and repath automatically whenever the player adds or removes blocks. `SetTileStateWorld` marks the changed tile, `RegenerateGraph` rebuilds the graph, and the enemy calls `FindPath` in `OnGraphGenerated`. The result is adversaries that feel reactive to the player's solutions.
+
+**Arcade-style co-op.** Player 2 is an AI-controlled partner using the same nav graph as enemies. The partner uses Nearest mode so it never gets stuck permanently, and Strict Jump Positioning ensures it cleanly clears the same pits the player jumps. `NearbyAgentCount` drives a crowd density bar — if too many agents are nearby, the partner detours using agent avoidance.
+
+**Roguelite / procedural.** Each generated level rebuilds the obstacle map from scratch via `BuildObstacleMapFromLayout`, scans solid and jump-thru objects, then exports the result to a JSON string for instant reloading if the player revisits the same seed. Portals for room transitions are added after generation based on runtime-placed warp tiles.
+
+---
+
+## 18. C3 Debugger
 
 Press **F12** during a preview to open the Construct 3 Debugger. Select the character object and find the PlatformerNavGraph sections in the properties panel.
 
@@ -1265,7 +1588,7 @@ Press **F12** during a preview to open the Construct 3 Debugger. Select the char
 
 ---
 
-## 18. Tips and Common Mistakes
+## 19. Tips and Common Mistakes
 
 - **Tile Size must match your Pathfinding Cell Size.** This is the single most common setup error. If the grid is misaligned, characters will try to walk through walls or jump into ceilings. Set both to the same value (usually the tilemap tile size).
 
