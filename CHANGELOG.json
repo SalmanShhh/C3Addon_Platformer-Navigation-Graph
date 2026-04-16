@@ -28,5 +28,10 @@
     "added": "- Better support Scripting.\n- Add Portal Tags (Remove/Add/Pick Nearest Portal/Pick Furthest Portal)\n- Clean up the code.",
     "changed": "",
     "fixed": ""
+  },
+  "0.4.0.1": {
+    "added": "",
+    "changed": "",
+    "fixed": "Fix expression param. for Portal Tags"
   }
 }

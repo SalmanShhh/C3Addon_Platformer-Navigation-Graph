@@ -1,25 +1,15 @@
 <img src="./src/icon.svg" width="100" /><br>
 # Platformer Navigation Graph
 <i>Smart pathfinding for platformer games. Characters automatically jump across gaps, fall between platforms, and find optimal routes through complex levels. Includes instant portals (teleporters, doors) and gradual portals (elevators, ladders, ziplines) with pause/resume support for custom animations. Features hazard avoidance, multiple path strategies, coyote jumps, ledge restriction, and multi-agent support. Works with the built-in Platform behavior — just add the behavior and go.</i> <br>
-### Version 0.3.0.0
+### Version 0.4.0.1
 
-[<img src="https://placehold.co/200x50/4493f8/FFF?text=Download&font=montserrat" width="200"/>](https://github.com/SalmanShhh/Platformer-Navigation-Graph-V2/releases/download/salmanshh_platformer_navigationgraph-0.3.0.0.c3addon/salmanshh_platformer_navigationgraph-0.3.0.0.c3addon)
+[<img src="https://placehold.co/200x50/4493f8/FFF?text=Download&font=montserrat" width="200"/>](https://github.com/SalmanShhh/Platformer-Navigation-Graph-V2/releases/download/salmanshh_platformer_navigationgraph-0.4.0.1.c3addon/salmanshh_platformer_navigationgraph-0.4.0.1.c3addon)
 <br>
 <sub> [See all releases](https://github.com/SalmanShhh/Platformer-Navigation-Graph-V2/releases) </sub> <br>
 
-#### What's New in 0.3.0.0
-**Added:**
-- Reverse Pathing, prefers turning fall nodes into jump nodes
-- Strict Tile Positioning Before Jumps / Ledge Departures
-- Reverse Pathing, prefers turning fall nodes into jump nodes. (to improve jump pathing)
-- Path Strategy Preset (Property + ACE) & Fix Climbing via Reverse Pathing…
-- Find Path Upgrade (Reach/Jump-Toward/Jump-At-Target)
-- more edgecase refinement
-- Debugger support
--
-
-
-
+#### What's New in 0.4.0.1
+**Fixed:**
+Fix expression param. for Portal Tags
 
 <sub>[View full changelog](#changelog)</sub>
 
@@ -77,15 +67,16 @@ npm run dev
 ## Actions
 | Action | Description | Params
 | --- | --- | --- |
-| Set max fall distance | Override the auto-calculated maximum fall distance. The navigation graph must be regenerated after changing this for the new value to take effect. | Distance (px)             *(number)* <br> |
-| Set max jump distance | Override the auto-calculated maximum horizontal jump distance. The navigation graph must be regenerated after changing this for the new value to take effect. | Distance (px)             *(number)* <br> |
-| Set max jump height | Override the auto-calculated maximum jump height. The navigation graph must be regenerated after changing this for the new value to take effect. | Height (px)             *(number)* <br> |
-| Log graph stats to console | Output detailed navigation graph statistics to the browser console. Use for debugging graph generation and connectivity issues. |  |
+| Set max fall distance | Override the maximum fall distance (in pixels) the AI is allowed to drop when pathfinding. Falls beyond this value will not be considered as valid connections. Calling this locks in the value. | Distance             *(number)* <br> |
+| Set max jump distance | Override the maximum horizontal jump distance (in pixels) used to build navigation graph connections. Use this if the auto-detected value from the platform behavior is wrong for your setup. Calling this locks in the value — it won't be overridden by platform behavior properties. | Distance             *(number)* <br> |
+| Set max jump height | Override the maximum jump height (in pixels) used to build navigation graph connections. Use this if the auto-detected value from the platform behavior is wrong for your setup. Calling this locks in the value — it won't be overridden by platform behavior properties. | Height             *(number)* <br> |
+| Log graph stats | Print navigation graph statistics to the browser console. Useful for debugging — shows node count, connection count, portal count, etc. |  |
 | Add circle hazard | Add a circular hazard area. The AI will avoid this area based on severity. Hazard avoidance is automatically enabled. Returns a hazard ID for later removal. Use for dynamic danger zones like explosions or enemy AOE. | X             *(number)* <br>Y             *(number)* <br>Radius             *(number)* <br>Severity             *(number)* <br> |
 | Add rectangle hazard | Add a rectangular hazard area. The AI will avoid this area based on severity. Hazard avoidance is automatically enabled. Returns a hazard ID for later removal. Use for static danger zones like spike pits. | X             *(number)* <br>Y             *(number)* <br>Width             *(number)* <br>Height             *(number)* <br>Severity             *(number)* <br> |
 | Clear all hazards | Remove all circular and rectangular hazards. This does NOT clear tile-based hazards. Use when resetting a level or clearing all dynamic dangers. |  |
 | Clear all tile hazards | Reset all tile hazard severities to 0. This does NOT remove circle/rect hazards. Use when you want to clear static tile dangers. |  |
 | Remove hazard | Remove a hazard by its ID. Use this when a danger zone is no longer active. The graph will be regenerated if needed. | ID             *(number)* <br> |
+| Auto-detect slope tiles from tilemap | Scan a Tilemap and automatically classify slope tiles by reading their per-tile collision polygon shapes. Triangular collision polygons (3 points) are classified as 45° slopes; trapezoidal polygons (4 non-rectangular points) are classified as 22.5° gentle slopes. Horizontally-flipped tile variants are detected and their slope direction is automatically mirrored. | Tilemap             *(object)* <br> |
 | Build obstacle map from layout | Create an empty obstacle map grid from layout pixel dimensions. No Pathfinding behavior required. Follow with ScanSolidObjectsIntoObstacleMap and ScanJumpThruObjectsIntoObstacleMap to fill it. | Layout width (px)             *(number)* <br>Layout height (px)             *(number)* <br> |
 | Clear all slope markings | Remove all slope markings from the obstacle map. Slopes will be treated as regular solid tiles. Use this to reset slope data. |  |
 | Clear obstacle map | Remove the obstacle map and all associated data. Use this when switching levels or resetting the navigation system. |  |
@@ -108,36 +99,38 @@ npm run dev
 | Set auto-control | Toggle auto-movement on/off. When enabled, the behavior automatically controls the Platform behavior to follow paths. When disabled, you control movement yourself using path data expressions. | Enabled             *(combo)* <br> |
 | Set coyote time | Set the coyote time window in seconds. The AI can jump within this window after walking off a ledge. Set to 0 to disable coyote time. | Seconds             *(number)* <br> |
 | Set ledge leniency | Set how many pixels past a platform edge the AI can walk before stopping (0 = strict stop). Increase for more natural-looking patrol movement near edges. Only used when ledge restriction is enabled. | Pixels             *(number)* <br> |
-| Set ledge restriction | Prevents AI characters from walking off platform edges when they have no reason to leave. Useful for patrol guards that should stay on their platform, or NPCs that shouldn't wander off rooftops. This only stops characters from casually walking off edges — if the AI's path requires a jump or fall to reach its goal, it will still leave the platform. To make those jumps and falls more precise, use 'Set strict jump positioning' instead. | Enabled             *(combo)* <br> |
+| Set ledge restriction | Prevents AI characters from walking off platform edges when they have no reason to leave. Useful for patrol guards that should stay on their platform, or NPCs that shouldn't wander off rooftops. This only stops characters from casually walking off edges — if the AI's path requires a jump or fall to reach its goal, it will still leave the platform. | Enabled             *(combo)* <br> |
 | Set path strategy | Change how the AI picks the best route when multiple paths exist. Balanced: weighs distance and difficulty equally. Shortest Distance: always takes the fastest route. Safest Route: avoids jumps and falls. Simplest Path: fewest waypoints. | Strategy             *(combo)* <br> |
 | Set re-path cooldown | Set the minimum time in seconds between automatic re-path attempts. Lower values = more responsive re-pathing but more CPU usage. Default is 0.5 seconds. | Seconds             *(number)* <br> |
-| Set strict jump positioning | Toggle whether this AI character slows down and carefully positions itself before jumping or falling during pathfinding. This does NOT affect walking off edges (use 'Set ledge restriction' for that). Use this to change behavior at runtime — for example, disable when a boss enters 'rage mode' for reckless movement, or enable when an NPC needs to carefully cross a narrow bridge. Overrides the property setting for this character. | Enabled             *(combo)* <br> |
+| Set strict jump positioning | Toggle whether this AI character slows down and carefully positions itself before jumping or falling during pathfinding. This does NOT affect walking off edges (use 'Set ledge restriction' for that). Use this to change behavior at runtime — for example, disable when a boss enters 'rage mode' for reckless movement, or enable when an NPC needs to carefully cross a narrow bridge. | Enabled             *(combo)* <br> |
 | Stop pathfinding | Stop the character immediately and clear the current path. Use when you want to cancel AI navigation and regain manual control. |  |
-| Set max paths per tick | Limit path calculations per tick to prevent frame drops with many agents. 0 = unlimited (default). Re-paths always run immediately regardless of this limit. | Max paths             *(number)* <br> |
-| Add elevator stop | Add a stop to an elevator group. Automatically creates two-way gradual portals between this stop and all other stops in the same group. Cost is auto-calculated from distance and speed. Use a unique group name (e.g. 'elevator_A') for each elevator. Example: 3 calls with the same group creates 3 pairwise portals (Floor1-Floor2, Floor1-Floor3, Floor2-Floor3). Use PortalExitX/PortalExitY in 'On portal entry' to determine which floor the AI is heading to. | Group             *(string)* <br>X             *(number)* <br>Y             *(number)* <br>Speed             *(number)* <br> |
-| Add elevator stop from object | Add an elevator stop using an object's position. Same as 'Add elevator stop' but uses the object's current X/Y. The object serves as a floor marker. | Group             *(string)* <br>Object             *(object)* <br>Speed             *(number)* <br> |
-| Add gradual portal | Add a portal that gradually moves the AI from entry to exit at the given speed. The character moves in a straight line (any direction — vertical, horizontal, or diagonal). Platform behavior is disabled during movement. Use for: elevators, lifts, moving platforms, ziplines. For vertical-only movement (ladders/ropes), align entry and exit X positions, or use 'Pause at portal' to implement your own custom movement via events. | Direction             *(combo)* <br>Entry X             *(number)* <br>Entry Y             *(number)* <br>Exit X             *(number)* <br>Exit Y             *(number)* <br>Cost             *(number)* <br>Speed             *(number)* <br> |
-| Add gradual portal from objects | Add a gradual portal using two objects. Character moves from entry object to exit object at the given speed. Use for: linking elevator sprites, rope endpoints, etc. | Direction             *(combo)* <br>Entry object             *(object)* <br>Exit object             *(object)* <br>Cost             *(number)* <br>Speed             *(number)* <br> |
-| Add instant portal | Add a portal that instantly teleports the AI from the entry to the exit. Use for: teleporters, doors, warp zones, or any portal where the character disappears and reappears at the exit. Use 'On portal entry' with 'Pause at portal' to play animations before the teleport happens. | Direction             *(combo)* <br>Entry X             *(number)* <br>Entry Y             *(number)* <br>Exit X             *(number)* <br>Exit Y             *(number)* <br>Cost             *(number)* <br> |
-| Add instant portal from objects | Add an instant portal using two objects as entry and exit positions. The objects' current X/Y positions are used. Use for: linking door sprites, warp pad objects, etc. | Direction             *(combo)* <br>Entry object             *(object)* <br>Exit object             *(object)* <br>Cost             *(number)* <br> |
+| Set max paths per tick | Set how many pathfinding requests can be processed per game tick. Higher values reduce latency but increase CPU cost per frame. Default is 1. | Count             *(number)* <br> |
+| Add elevator stop | Add a stop to an elevator group. Automatically creates two-way gradual portals between this stop and all other stops in the same group. Cost is auto-calculated from distance and speed. Use a unique group name (e.g. 'elevator_A') for each elevator. Use PortalExitX/PortalExitY in 'On portal entry' to determine which floor the AI is heading to. | Group             *(string)* <br>X             *(number)* <br>Y             *(number)* <br>Speed             *(number)* <br>Tag             *(string)* <br> |
+| Add elevator stop from object | Add an elevator stop using an object's position. Same as 'Add elevator stop' but uses the object's current X/Y. The object serves as a floor marker. | Group             *(string)* <br>Object             *(object)* <br>Speed             *(number)* <br>Tag             *(string)* <br> |
+| Add gradual portal | Add a portal that gradually moves the AI from entry to exit at the given speed. The character moves in a straight line (any direction — vertical, horizontal, or diagonal). Platform behavior is disabled during movement. Use for: elevators, lifts, moving platforms, ziplines. | Direction             *(combo)* <br>Entry X             *(number)* <br>Entry Y             *(number)* <br>Exit X             *(number)* <br>Exit Y             *(number)* <br>Cost             *(number)* <br>Speed             *(number)* <br>Tag             *(string)* <br> |
+| Add gradual portal from objects | Add a gradual portal using two objects. Character moves from entry object to exit object at the given speed. Use for: linking elevator sprites, rope endpoints, etc. | Direction             *(combo)* <br>Entry object             *(object)* <br>Exit object             *(object)* <br>Cost             *(number)* <br>Speed             *(number)* <br>Tag             *(string)* <br> |
+| Add instant portal | Add a portal that instantly teleports the AI from the entry to the exit. Use for: teleporters, doors, warp zones, or any portal where the character disappears and reappears at the exit. Use 'On portal entry' with 'Pause at portal' to play animations before the teleport happens. | Direction             *(combo)* <br>Entry X             *(number)* <br>Entry Y             *(number)* <br>Exit X             *(number)* <br>Exit Y             *(number)* <br>Cost             *(number)* <br>Tag             *(string)* <br> |
+| Add instant portal from objects | Add an instant portal using two objects as entry and exit positions. The objects' current X/Y positions are used. Use for: linking door sprites, warp pad objects, etc. | Direction             *(combo)* <br>Entry object             *(object)* <br>Exit object             *(object)* <br>Cost             *(number)* <br>Tag             *(string)* <br> |
 | Clear all portals | Remove all portals from the navigation graph. Useful when resetting the level or switching layouts. |  |
 | Complete portal | Finish a paused portal without executing its built-in movement. Use this when you've already moved the character yourself (e.g., custom animation, physics launch, manual position set). The AI will continue pathfinding from wherever the character is now. Also works mid-traverse to cut a gradual portal short. |  |
 | Pause at portal | Call INSIDE 'On portal entry' to pause the AI before the portal executes. The character stops at the entry point and waits. Use this to play animations, open doors, trigger screen transitions, or run any custom events before the portal activates. Call 'Resume portal' to execute the built-in behavior, or 'Complete portal' if you moved the character yourself. |  |
 | Remove portal by ID | Remove a portal by its ID. The portal connection is removed from the navigation graph immediately. | Portal ID             *(number)* <br> |
 | Remove portal at object | Remove the portal closest to this object. Works with both entry and exit positions — for two-way portals, either endpoint object can be used. | Object             *(object)* <br> |
+| Remove portals by tag | Remove every portal whose tag matches the given string. Connections are removed from the navigation graph immediately. Use this to deactivate a group of related portals — for example, removing all 'door' portals when a room is sealed, or clearing 'floor_2' portals when a floor is destroyed. | Tag             *(string)* <br> |
 | Resume portal | Continue portal execution after pausing with 'Pause at portal'. For instant portals: teleports the character to the exit. For gradual portals: begins moving the character toward the exit. Use this when you want the portal's built-in movement to handle the transition. |  |
 | Set portal cost | Change how 'expensive' a portal is for the AI to use. Lower cost = preferred, higher cost = avoided. | Portal ID             *(number)* <br>Cost             *(number)* <br> |
 | Set portal ignore hazards | Set whether a portal ignores nearby hazards when calculating its pathfinding cost. | Portal ID             *(number)* <br>Ignore hazards             *(combo)* <br> |
 | Set portal speed | Change the movement speed of a gradual portal (pixels per second). Has no effect on instant portals. | Portal ID             *(number)* <br>Speed             *(number)* <br> |
+| Set portal tag | Assign a string tag to a portal. Tags are used to group portals so they can be removed together with 'Remove portals by tag'. A portal can only have one tag at a time — calling this again replaces the previous tag. | Portal ID             *(number)* <br>Tag             *(string)* <br> |
 | Teleport to position | Instantly move the character to the given position. Can be used anywhere — inside portal events, on button press, on collision, etc. Suppresses re-pathing for one tick to prevent the AI from thinking it's lost. Useful with 'Pause at portal' + 'Complete portal' for fully custom portal behavior. | X             *(number)* <br>Y             *(number)* <br> |
-| Set multi-agent avoidance | Enable or disable multi-agent collision avoidance. When enabled, AI agents will attempt to avoid paths occupied by other agents. Shared Navigation graph mode only — requires graph mode set to 'shared'. | Enabled             *(combo)* <br> |
+| Set multi-agent avoidance | Enable or disable path-level multi-agent avoidance. When enabled, agents try to avoid choosing overlapping paths when multiple agents share the same navigation map. | Enabled             *(combo)* <br> |
 
 
 ---
 ## Conditions
 | Condition | Description | Params
 | --- | --- | --- |
-| Is node at ledge | Check if a specific node is marked as a ledge (platform edge). Returns true if the node is a left or right ledge. | Grid X *(number)* <br>Grid Y *(number)* <br> |
+| Is node a ledge | True if the node at the given grid coordinates is a ledge node (left or right ledge). | Grid X *(number)* <br>Grid Y *(number)* <br> |
 | Is position hazardous | Check if a specific world position is within any hazard area (circle, rect, or tile). Returns true if any hazard affects this position. | X *(number)* <br>Y *(number)* <br> |
 | Is setting up Pathfinding | Check if the behavior is currently waiting for the Pathfinding obstacle map to initialize. Returns true during async setup. |  |
 | On obstacle map created | Triggered when a custom obstacle map is successfully created. Use this to start configuring tiles after map creation. |  |
@@ -161,43 +154,43 @@ npm run dev
 | On re-path triggered | Triggered when automatic re-pathing occurs due to the character drifting too far from the path. Use this to monitor navigation accuracy. |  |
 | On waypoint reached | Triggered each time the character reaches a waypoint along the path. Use this to play footstep sounds, particle effects, or update animations. |  |
 | On waypoint stuck | Triggered when the character has been stuck at a waypoint for too long (exceeds Max Waypoint Time). The path is automatically cancelled. Use this to handle stuck situations or repath. |  |
-| Is path pending | True when a path request is queued and waiting to be processed (time-slicing is active and the per-tick budget was reached). |  |
+| Is path pending | True when a pathfinding request has been submitted but not yet resolved. Use to show a 'thinking' state or delay actions until the path arrives. |  |
 | Is at portal | True when the AI is paused at a portal entry (after 'Pause at portal' was called but before 'Resume portal' or 'Complete portal'). Use to check if the character is waiting at a portal. |  |
 | Is traversing portal | True when the AI is currently moving through a gradual portal (elevator, ladder, etc.). Platform behavior is disabled during traversal. |  |
 | On portal complete | Triggered when portal execution finishes — after an instant teleport completes, a gradual movement reaches the exit, or 'Complete portal' is called. Use this for post-portal effects like opening doors at the exit, playing arrival animations, etc. |  |
 | On portal entry | Triggered when the AI arrives at a portal entry point, BEFORE the portal executes. Use 'Pause at portal' inside this event to delay execution and run your own events first (animations, sounds, screen effects). If you don't pause, the portal executes immediately. Use CurrentPortalID to identify which portal was reached. |  |
-| Is multi-agent avoidance enabled | Check if multi-agent collision avoidance is currently enabled. Shared Navigation graph mode only — requires graph mode set to 'shared'. |  |
+| Is multi-agent avoidance enabled | True if multi-agent avoidance is currently active. |  |
 
 
 ---
 ## Expressions
 | Expression | Description | Return Type | Params
 | --- | --- | --- | --- |
-| CalculatedJumpDistance | Get the calculated maximum horizontal jump distance in pixels based on Platform behavior settings. Used for determining reachable positions. | number |  | 
-| CalculatedJumpHeight | Get the calculated maximum jump height in pixels based on Platform behavior settings. Used for determining reachable positions. | number |  | 
-| PlatformJumpStrength | Get the jump strength from the Platform behavior. Used for internal pathfinding calculations. Returns 0 if Platform behavior not found. | number |  | 
-| PlatformMaxSpeed | Get the max speed from the Platform behavior. Used for internal pathfinding calculations. Returns 0 if Platform behavior not found. | number |  | 
-| IsNodeIsland | Check if a node at grid coordinates is an island (single-tile platform). Returns 1 if true, 0 if false or node doesn't exist. | number | Grid X *(number)* <br>Grid Y *(number)* <br> | 
-| IsNodeLeftLedge | Check if a node at grid coordinates is a left ledge. Returns 1 if true, 0 if false or node doesn't exist. | number | Grid X *(number)* <br>Grid Y *(number)* <br> | 
-| IsNodeRightLedge | Check if a node at grid coordinates is a right ledge. Returns 1 if true, 0 if false or node doesn't exist. | number | Grid X *(number)* <br>Grid Y *(number)* <br> | 
-| IsTileJumpThru | Check if a tile at grid coordinates is a jump-thru platform. Returns 1 if true, 0 if false or tile doesn't exist. | number | Grid X *(number)* <br>Grid Y *(number)* <br> | 
-| NearestNodeGridX | Get the grid X coordinate of the nearest navigation node to a world position. Returns -1 if no nodes exist. | number | X *(number)* <br>Y *(number)* <br> | 
-| NearestNodeGridY | Get the grid Y coordinate of the nearest navigation node to a world position. Returns -1 if no nodes exist. | number | X *(number)* <br>Y *(number)* <br> | 
-| NearestNodeX | Get the world X position of the nearest navigation node to a world position. Returns 0 if no nodes exist. | number | X *(number)* <br>Y *(number)* <br> | 
-| NearestNodeY | Get the world Y position of the nearest navigation node to a world position. Returns 0 if no nodes exist. | number | X *(number)* <br>Y *(number)* <br> | 
-| NodeAtIndexConnectionCount | Get the number of connections (edges) from a node by its index. Returns 0 if index is out of bounds. | number | Index *(number)* <br> | 
-| NodeAtIndexGridX | Get the grid X coordinate of a node by its index in the node array. Returns -1 if index is out of bounds. | number | Index *(number)* <br> | 
-| NodeAtIndexGridY | Get the grid Y coordinate of a node by its index in the node array. Returns -1 if index is out of bounds. | number | Index *(number)* <br> | 
-| NodeAtIndexIsLeftLedge | Check if a node is a left ledge by its index. Returns 1 if true, 0 if false or index is out of bounds. | number | Index *(number)* <br> | 
-| NodeAtIndexIsRightLedge | Check if a node is a right ledge by its index. Returns 1 if true, 0 if false or index is out of bounds. | number | Index *(number)* <br> | 
-| NodeAtIndexIsSlope | Check if a node is on a slope by its index. Returns 1 if true, 0 if false or index is out of bounds. | number | Index *(number)* <br> | 
-| NodeAtIndexX | Get the world X position of a node by its index in the node array. Returns 0 if index is out of bounds. | number | Index *(number)* <br> | 
-| NodeAtIndexY | Get the world Y position of a node by its index in the node array. Returns 0 if index is out of bounds. | number | Index *(number)* <br> | 
-| NodeConnectionAction | Get the action name for a connection (e.g., 'walk', 'jump', 'fall'). Returns empty string if node/connection doesn't exist. | string | Grid X *(number)* <br>Grid Y *(number)* <br>Connection index *(number)* <br> | 
-| NodeConnectionCost | Get the movement cost for a connection. Returns 0 if node/connection doesn't exist. | number | Grid X *(number)* <br>Grid Y *(number)* <br>Connection index *(number)* <br> | 
-| NodeConnectionCount | Get the number of connections (edges) from a node at grid coordinates. Returns 0 if node doesn't exist. | number | Grid X *(number)* <br>Grid Y *(number)* <br> | 
-| NodeConnectionTargetX | Get the world X position of a connection's target node. Returns 0 if node/connection doesn't exist. | number | Grid X *(number)* <br>Grid Y *(number)* <br>Connection index *(number)* <br> | 
-| NodeConnectionTargetY | Get the world Y position of a connection's target node. Returns 0 if node/connection doesn't exist. | number | Grid X *(number)* <br>Grid Y *(number)* <br>Connection index *(number)* <br> | 
+| CalculatedJumpDistance | Get the calculated maximum jump distance in pixels. This is the value used to build graph connections. Useful for debugging jump arc detection. | number |  | 
+| CalculatedJumpHeight | Get the calculated maximum jump height in pixels. This is the value used to build graph connections. Useful for debugging jump arc detection. | number |  | 
+| PlatformJumpStrength | Get the platform behavior's jump strength value. Useful for debugging jump parameter detection. | number |  | 
+| PlatformMaxSpeed | Get the platform behavior's max speed value. Useful for debugging jump parameter detection. | number |  | 
+| IsNodeIsland | Returns 1 if the node at the given grid coordinates is an island node (no horizontal neighbors), 0 otherwise. | number | Grid X *(number)* <br>Grid Y *(number)* <br> | 
+| IsNodeLeftLedge | Returns 1 if the node at the given grid coordinates is a left ledge, 0 otherwise. | number | Grid X *(number)* <br>Grid Y *(number)* <br> | 
+| IsNodeRightLedge | Returns 1 if the node at the given grid coordinates is a right ledge, 0 otherwise. | number | Grid X *(number)* <br>Grid Y *(number)* <br> | 
+| IsTileJumpThru | Returns 1 if the tile at the given grid coordinates is a jump-through tile, 0 otherwise. | number | Grid X *(number)* <br>Grid Y *(number)* <br> | 
+| NearestNodeGridX | Get the grid X coordinate of the nearest navigation node to a given world position. | number | X *(number)* <br>Y *(number)* <br> | 
+| NearestNodeGridY | Get the grid Y coordinate of the nearest navigation node to a given world position. | number | X *(number)* <br>Y *(number)* <br> | 
+| NearestNodeX | Get the world X position of the nearest navigation node to a given world position. | number | X *(number)* <br>Y *(number)* <br> | 
+| NearestNodeY | Get the world Y position of the nearest navigation node to a given world position. | number | X *(number)* <br>Y *(number)* <br> | 
+| NodeAtIndexConnectionCount | Get the number of outgoing connections from the node at the given index. | number | Index *(number)* <br> | 
+| NodeAtIndexGridX | Get the grid X coordinate of the node at the given index. | number | Index *(number)* <br> | 
+| NodeAtIndexGridY | Get the grid Y coordinate of the node at the given index. | number | Index *(number)* <br> | 
+| NodeAtIndexIsLeftLedge | Returns 1 if the node at the given index is a left ledge, 0 otherwise. | number | Index *(number)* <br> | 
+| NodeAtIndexIsRightLedge | Returns 1 if the node at the given index is a right ledge, 0 otherwise. | number | Index *(number)* <br> | 
+| NodeAtIndexIsSlope | Returns 1 if the node at the given index is a slope node, 0 otherwise. | number | Index *(number)* <br> | 
+| NodeAtIndexX | Get the world X position of the node at the given index. | number | Index *(number)* <br> | 
+| NodeAtIndexY | Get the world Y position of the node at the given index. | number | Index *(number)* <br> | 
+| NodeConnectionAction | Get the action string for a connection from the given grid node (e.g. 'walk', 'jump', 'fall', 'portal'). | string | Grid X *(number)* <br>Grid Y *(number)* <br>Index *(number)* <br> | 
+| NodeConnectionCost | Get the movement cost for a connection from the given grid node. | number | Grid X *(number)* <br>Grid Y *(number)* <br>Index *(number)* <br> | 
+| NodeConnectionCount | Get the number of outgoing connections from the node at the given grid coordinates. | number | Grid X *(number)* <br>Grid Y *(number)* <br> | 
+| NodeConnectionTargetX | Get the world X position of the target node for a connection from the given grid node. | number | Grid X *(number)* <br>Grid Y *(number)* <br>Index *(number)* <br> | 
+| NodeConnectionTargetY | Get the world Y position of the target node for a connection from the given grid node. | number | Grid X *(number)* <br>Grid Y *(number)* <br>Index *(number)* <br> | 
 | HazardCount | Get the total number of active hazards (circles and rectangles). Does not include tile hazards. | number |  | 
 | HazardSeverity | Get the total hazard severity at a world position from all sources (circles, rects, tiles). Higher values = more dangerous. | number | X *(number)* <br>Y *(number)* <br> | 
 | PositionIsHazardous | Check if a world position is hazardous. Returns 1 if hazardous, 0 if safe. | number | X *(number)* <br>Y *(number)* <br> | 
@@ -229,8 +222,8 @@ npm run dev
 | LedgeLeniency | Get the ledge leniency setting in pixels. This is how far past a ledge edge the AI can walk before stopping. | number |  | 
 | LedgeRestriction | Get whether ledge restriction is enabled. Returns 1 if enabled, 0 if disabled. | number |  | 
 | NodeCount | Get the total number of navigation nodes in the generated graph. Returns 0 if no graph exists. | number |  | 
-| NodeWorldX | Get the world X position of a node at the specified grid coordinates. the node position is centred within the tile. Returns 0 if node doesn't exist. | number | Grid X *(number)* <br>Grid Y *(number)* <br> | 
-| NodeWorldY | Get the world Y position of a node at the specified grid coordinates. the node position is centred within the tile. Returns 0 if node doesn't exist. | number | Grid X *(number)* <br>Grid Y *(number)* <br> | 
+| NodeWorldX | Get the world X position of a node at the specified grid coordinates. The node position is centred within the tile. Returns 0 if node doesn't exist. | number | Grid X *(number)* <br>Grid Y *(number)* <br> | 
+| NodeWorldY | Get the world Y position of a node at the specified grid coordinates. The node position is centred within the tile. Returns 0 if node doesn't exist. | number | Grid X *(number)* <br>Grid Y *(number)* <br> | 
 | PathCost | Get the total calculated cost of the current path. Returns 0 if no path is active. | number |  | 
 | PathFailReason | Get the reason the last pathfinding attempt failed. Returns: 'no_start_node', 'no_goal_node', 'max_nodes_reached', 'no_path', or empty string if path succeeded. | string |  | 
 | PathStrategy | Get the current path strategy preset (balanced, shortest, safest, simplest). | string |  | 
@@ -243,22 +236,42 @@ npm run dev
 | WaypointCount | Get the total number of waypoints in the current path. Returns 0 if no path is active. | number |  | 
 | WaypointGridX | Get the grid X coordinate of a waypoint by index. Returns -1 if index is out of bounds. | number | Index *(number)* <br> | 
 | WaypointGridY | Get the grid Y coordinate of a waypoint by index. Returns -1 if index is out of bounds. | number | Index *(number)* <br> | 
-| WaypointX | Get the world X position of a waypoint by index. the waypoint position is centred within the tile. Returns 0 if index is out of bounds. | number | Index *(number)* <br> | 
-| WaypointY | Get the world Y position of a waypoint by index. the waypoint position is centred within the tile. Returns 0 if index is out of bounds. | number | Index *(number)* <br> | 
-| MaxPathsPerTick | Current max paths per tick limit (0 = unlimited). | number |  | 
-| PathQueueSize | Number of path requests currently waiting in the queue. | number |  | 
+| WaypointX | Get the world X position of a waypoint by index. The waypoint position is centred within the tile. Returns 0 if index is out of bounds. | number | Index *(number)* <br> | 
+| WaypointY | Get the world Y position of a waypoint by index. The waypoint position is centred within the tile. Returns 0 if index is out of bounds. | number | Index *(number)* <br> | 
+| MaxPathsPerTick | Get the current maximum paths per tick setting. | number |  | 
+| PathQueueSize | Get the number of pathfinding requests currently waiting in the queue. | number |  | 
 | CurrentPortalID | Returns the portal ID during OnPortalEntry/OnPortalComplete triggers. Use to identify which portal was reached. | number |  | 
+| FurthestPortalID | Returns the ID of the portal whose entry point is furthest from the given (X, Y) position. If Tag is non-empty, only portals with that tag are considered. Returns -1 if no matching portals exist. | number | X *(number)* <br>Y *(number)* <br>Tag *(string)* <br> | 
 | LastPortalID | Returns the ID of the most recently added portal. Use right after adding a portal to save the ID for later configuration or removal. | number |  | 
+| NearestPortalID | Returns the ID of the portal whose entry point is nearest to the given (X, Y) position. If Tag is non-empty, only portals with that tag are considered. Returns -1 if no matching portals exist. | number | X *(number)* <br>Y *(number)* <br>Tag *(string)* <br> | 
 | PortalCount | Get the total number of portals. | number |  | 
+| PortalCountByTag | Returns the number of portals that contain the given tag token (checked within each portal's comma-separated tag string). | number | Tag *(string)* <br> | 
 | PortalExitX | Get the exit X position of the current portal. Valid inside OnPortalEntry/OnPortalComplete triggers. | number |  | 
 | PortalExitY | Get the exit Y position of the current portal. Valid inside OnPortalEntry/OnPortalComplete triggers. | number |  | 
+| PortalIDByTag | Returns the portal ID at the given index within the set of portals that contain the given tag. Returns -1 if the index is out of range. Use PortalCountByTag to get the total count. | number | Tag *(string)* <br>Index *(number)* <br> | 
 | PortalProgress | Get the 0-1 traversal progress for gradual portals. Returns 0 if not traversing. | number |  | 
+| PortalTag | Get the tag of a portal by its ID. Returns an empty string if the portal has no tag or doesn't exist. | string | Portal ID *(number)* <br> | 
 | PortalType | Returns 'instant' or 'gradual' for the given portal ID. | string | Portal ID *(number)* <br> | 
-| NearbyAgentCount | Get the number of nearby AI agents within detection range. Used for multi-agent avoidance calculations. Returns 0 if multi-agent avoidance is disabled. Shared Navigation graph mode only — requires graph mode set to 'shared'. | number |  | 
+| NearbyAgentCount | Get the number of nearby agents sharing the same navigation map. | number |  | 
 
 
 ---
 ## Changelog
+
+### Version 0.4.0.1
+
+**Fixed:**
+Fix expression param. for Portal Tags
+---
+
+### Version 0.4.0.0
+
+**Added:**
+- Better support Scripting.
+- Add Portal Tags (Remove/Add/Pick Nearest Portal/Pick Furthest Portal)
+- Clean up the code.
+
+---
 
 ### Version 0.3.0.0
 

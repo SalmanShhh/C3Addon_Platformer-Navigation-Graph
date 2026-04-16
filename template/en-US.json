@@ -9,13 +9,13 @@
         "help-url": "https://www.construct.net",
         "aceCategories": {
           "Configuration": "Configuration",
-          "GraphData": "GraphData",
+          "GraphData": "Graph Data",
           "Hazards": "Hazards",
-          "ObstacleMap": "ObstacleMap",
+          "ObstacleMap": "Obstacle Map",
           "Pathfinding": "Pathfinding",
           "Performance": "Performance",
           "Portals": "Portals",
-          "SharedNavigation": "SharedNavigation",
+          "SharedNavigation": "Shared Navigation",
           "Debug": "Debug"
         },
         "properties": {
@@ -94,10 +94,10 @@
           "SetMaxFallDistance": {
             "list-name": "Set max fall distance",
             "display-text": "Set max fall distance to {0} px",
-            "description": "Override the auto-calculated maximum fall distance. The navigation graph must be regenerated after changing this for the new value to take effect.",
+            "description": "Override the maximum fall distance (in pixels) the AI is allowed to drop when pathfinding. Falls beyond this value will not be considered as valid connections. Calling this locks in the value.",
             "params": {
               "value": {
-                "name": "Distance (px)",
+                "name": "Distance",
                 "desc": "Maximum fall distance in pixels"
               }
             }
@@ -105,10 +105,10 @@
           "SetMaxJumpDistance": {
             "list-name": "Set max jump distance",
             "display-text": "Set max jump distance to {0} px",
-            "description": "Override the auto-calculated maximum horizontal jump distance. The navigation graph must be regenerated after changing this for the new value to take effect.",
+            "description": "Override the maximum horizontal jump distance (in pixels) used to build navigation graph connections. Use this if the auto-detected value from the platform behavior is wrong for your setup. Calling this locks in the value — it won't be overridden by platform behavior properties.",
             "params": {
               "value": {
-                "name": "Distance (px)",
+                "name": "Distance",
                 "desc": "Maximum jump distance in pixels"
               }
             }
@@ -116,18 +116,18 @@
           "SetMaxJumpHeight": {
             "list-name": "Set max jump height",
             "display-text": "Set max jump height to {0} px",
-            "description": "Override the auto-calculated maximum jump height. The navigation graph must be regenerated after changing this for the new value to take effect.",
+            "description": "Override the maximum jump height (in pixels) used to build navigation graph connections. Use this if the auto-detected value from the platform behavior is wrong for your setup. Calling this locks in the value — it won't be overridden by platform behavior properties.",
             "params": {
               "value": {
-                "name": "Height (px)",
+                "name": "Height",
                 "desc": "Maximum jump height in pixels"
               }
             }
           },
           "LogGraphStats": {
-            "list-name": "Log graph stats to console",
-            "display-text": "Log navigation graph statistics to console",
-            "description": "Output detailed navigation graph statistics to the browser console. Use for debugging graph generation and connectivity issues.",
+            "list-name": "Log graph stats",
+            "display-text": "Log graph stats to console",
+            "description": "Print navigation graph statistics to the browser console. Useful for debugging — shows node count, connection count, portal count, etc.",
             "params": {}
           },
           "AddCircleHazard": {
@@ -200,6 +200,17 @@
               "id": {
                 "name": "ID",
                 "desc": "Hazard ID to remove"
+              }
+            }
+          },
+          "AutoDetectSlopeTiles": {
+            "list-name": "Auto-detect slope tiles from tilemap",
+            "display-text": "Auto-detect slope tiles from {0} by collision polygon shape",
+            "description": "Scan a Tilemap and automatically classify slope tiles by reading their per-tile collision polygon shapes. Triangular collision polygons (3 points) are classified as 45° slopes; trapezoidal polygons (4 non-rectangular points) are classified as 22.5° gentle slopes. Horizontally-flipped tile variants are detected and their slope direction is automatically mirrored.",
+            "params": {
+              "tilemap": {
+                "name": "Tilemap",
+                "desc": "The Tilemap object to scan"
               }
             }
           },
@@ -489,7 +500,7 @@
               },
               "strict": {
                 "name": "Jump Positioning",
-                "desc": "Control how carefully the character positions itself before jumps and falls on THIS specific path. This only affects jump/fall precision during pathfinding — it does NOT affect edge walking (use Ledge Restriction for that). 'Default' uses whatever the property or SetStrictJumpPositioning action is set to. 'Strict' forces careful positioning — use for dangerous routes over pits or narrow platforms. 'Relaxed' skips positioning checks for maximum speed — use for chase sequences or when the character is fleeing and precision doesn't matter.",
+                "desc": "Control how carefully the character positions itself before jumps and falls on THIS specific path. 'Default' uses whatever the property or SetStrictJumpPositioning action is set to. 'Strict' forces careful positioning. 'Relaxed' skips positioning checks for maximum speed.",
                 "items": {
                   "default": "Default (use property)",
                   "strict": "Strict",
@@ -559,7 +570,7 @@
           "SetLedgeRestriction": {
             "list-name": "Set ledge restriction",
             "display-text": "Set ledge restriction: {0}",
-            "description": "Prevents AI characters from walking off platform edges when they have no reason to leave. Useful for patrol guards that should stay on their platform, or NPCs that shouldn't wander off rooftops. This only stops characters from casually walking off edges — if the AI's path requires a jump or fall to reach its goal, it will still leave the platform. To make those jumps and falls more precise, use 'Set strict jump positioning' instead.",
+            "description": "Prevents AI characters from walking off platform edges when they have no reason to leave. Useful for patrol guards that should stay on their platform, or NPCs that shouldn't wander off rooftops. This only stops characters from casually walking off edges — if the AI's path requires a jump or fall to reach its goal, it will still leave the platform.",
             "params": {
               "enabled": {
                 "name": "Enabled",
@@ -602,7 +613,7 @@
           "SetStrictJumpPositioning": {
             "list-name": "Set strict jump positioning",
             "display-text": "Set strict jump positioning: {0}",
-            "description": "Toggle whether this AI character slows down and carefully positions itself before jumping or falling during pathfinding. This does NOT affect walking off edges (use 'Set ledge restriction' for that). Use this to change behavior at runtime — for example, disable when a boss enters 'rage mode' for reckless movement, or enable when an NPC needs to carefully cross a narrow bridge. Overrides the property setting for this character.",
+            "description": "Toggle whether this AI character slows down and carefully positions itself before jumping or falling during pathfinding. This does NOT affect walking off edges (use 'Set ledge restriction' for that). Use this to change behavior at runtime — for example, disable when a boss enters 'rage mode' for reckless movement, or enable when an NPC needs to carefully cross a narrow bridge.",
             "params": {
               "enabled": {
                 "name": "Enabled",
@@ -623,18 +634,18 @@
           "SetMaxPathsPerTick": {
             "list-name": "Set max paths per tick",
             "display-text": "Set max paths per tick to {0}",
-            "description": "Limit path calculations per tick to prevent frame drops with many agents. 0 = unlimited (default). Re-paths always run immediately regardless of this limit.",
+            "description": "Set how many pathfinding requests can be processed per game tick. Higher values reduce latency but increase CPU cost per frame. Default is 1.",
             "params": {
               "count": {
-                "name": "Max paths",
-                "desc": "Maximum path calculations per tick (0 = unlimited)"
+                "name": "Count",
+                "desc": "Maximum number of paths to process per tick"
               }
             }
           },
           "AddElevatorStop": {
             "list-name": "Add elevator stop",
-            "display-text": "Add elevator stop to group {0} at ({1}, {2}) [Speed: {3}]",
-            "description": "Add a stop to an elevator group. Automatically creates two-way gradual portals between this stop and all other stops in the same group. Cost is auto-calculated from distance and speed. Use a unique group name (e.g. 'elevator_A') for each elevator. Example: 3 calls with the same group creates 3 pairwise portals (Floor1-Floor2, Floor1-Floor3, Floor2-Floor3). Use PortalExitX/PortalExitY in 'On portal entry' to determine which floor the AI is heading to.",
+            "display-text": "Add elevator stop to group {0} at ({1}, {2}) [Speed: {3}] [Tag: {4}]",
+            "description": "Add a stop to an elevator group. Automatically creates two-way gradual portals between this stop and all other stops in the same group. Cost is auto-calculated from distance and speed. Use a unique group name (e.g. 'elevator_A') for each elevator. Use PortalExitX/PortalExitY in 'On portal entry' to determine which floor the AI is heading to.",
             "params": {
               "groupId": {
                 "name": "Group",
@@ -651,12 +662,16 @@
               "speed": {
                 "name": "Speed",
                 "desc": "Movement speed in pixels per second"
+              },
+              "tag": {
+                "name": "Tag",
+                "desc": "Optional tag for grouping portals. Use commas for multiple tags (e.g. \"door,room_A\"). Leave empty for no tag."
               }
             }
           },
           "AddElevatorStopFromObject": {
             "list-name": "Add elevator stop from object",
-            "display-text": "Add elevator stop to group {0} at {1} [Speed: {2}]",
+            "display-text": "Add elevator stop to group {0} at {1} [Speed: {2}] [Tag: {3}]",
             "description": "Add an elevator stop using an object's position. Same as 'Add elevator stop' but uses the object's current X/Y. The object serves as a floor marker.",
             "params": {
               "groupId": {
@@ -670,13 +685,17 @@
               "speed": {
                 "name": "Speed",
                 "desc": "Movement speed in pixels per second"
+              },
+              "tag": {
+                "name": "Tag",
+                "desc": "Optional tag for grouping portals. Use commas for multiple tags (e.g. \"door,room_A\"). Leave empty for no tag."
               }
             }
           },
           "AddGradualPortal": {
             "list-name": "Add gradual portal",
-            "display-text": "Add {0} gradual portal from ({1}, {2}) to ({3}, {4}) [Cost: {5}] [Speed: {6}]",
-            "description": "Add a portal that gradually moves the AI from entry to exit at the given speed. The character moves in a straight line (any direction — vertical, horizontal, or diagonal). Platform behavior is disabled during movement. Use for: elevators, lifts, moving platforms, ziplines. For vertical-only movement (ladders/ropes), align entry and exit X positions, or use 'Pause at portal' to implement your own custom movement via events.",
+            "display-text": "Add {0} gradual portal from ({1}, {2}) to ({3}, {4}) [Cost: {5}] [Speed: {6}] [Tag: {7}]",
+            "description": "Add a portal that gradually moves the AI from entry to exit at the given speed. The character moves in a straight line (any direction — vertical, horizontal, or diagonal). Platform behavior is disabled during movement. Use for: elevators, lifts, moving platforms, ziplines.",
             "params": {
               "direction": {
                 "name": "Direction",
@@ -709,12 +728,16 @@
               "speed": {
                 "name": "Speed",
                 "desc": "Movement speed in pixels per second"
+              },
+              "tag": {
+                "name": "Tag",
+                "desc": "Optional tag for grouping portals. Use commas for multiple tags (e.g. \"door,room_A\"). Leave empty for no tag."
               }
             }
           },
           "AddGradualPortalFromObjects": {
             "list-name": "Add gradual portal from objects",
-            "display-text": "Add {0} gradual portal from {1} to {2} [Cost: {3}] [Speed: {4}]",
+            "display-text": "Add {0} gradual portal from {1} to {2} [Cost: {3}] [Speed: {4}] [Tag: {5}]",
             "description": "Add a gradual portal using two objects. Character moves from entry object to exit object at the given speed. Use for: linking elevator sprites, rope endpoints, etc.",
             "params": {
               "direction": {
@@ -740,12 +763,16 @@
               "speed": {
                 "name": "Speed",
                 "desc": "Movement speed in pixels per second"
+              },
+              "tag": {
+                "name": "Tag",
+                "desc": "Optional tag for grouping portals. Use commas for multiple tags (e.g. \"door,room_A\"). Leave empty for no tag."
               }
             }
           },
           "AddInstantPortal": {
             "list-name": "Add instant portal",
-            "display-text": "Add {0} instant portal from ({1}, {2}) to ({3}, {4}) [Cost: {5}]",
+            "display-text": "Add {0} instant portal from ({1}, {2}) to ({3}, {4}) [Cost: {5}] [Tag: {6}]",
             "description": "Add a portal that instantly teleports the AI from the entry to the exit. Use for: teleporters, doors, warp zones, or any portal where the character disappears and reappears at the exit. Use 'On portal entry' with 'Pause at portal' to play animations before the teleport happens.",
             "params": {
               "direction": {
@@ -775,12 +802,16 @@
               "cost": {
                 "name": "Cost",
                 "desc": "How much the AI 'pays' to use this portal. Default 1 = same as walking one tile. Lower = preferred, higher = avoided."
+              },
+              "tag": {
+                "name": "Tag",
+                "desc": "Optional tag for grouping portals. Use commas for multiple tags (e.g. \"door,room_A\"). Leave empty for no tag."
               }
             }
           },
           "AddInstantPortalFromObjects": {
             "list-name": "Add instant portal from objects",
-            "display-text": "Add {0} instant portal from {1} to {2} [Cost: {3}]",
+            "display-text": "Add {0} instant portal from {1} to {2} [Cost: {3}] [Tag: {4}]",
             "description": "Add an instant portal using two objects as entry and exit positions. The objects' current X/Y positions are used. Use for: linking door sprites, warp pad objects, etc.",
             "params": {
               "direction": {
@@ -802,6 +833,10 @@
               "cost": {
                 "name": "Cost",
                 "desc": "Movement cost (lower = preferred, default is 1)"
+              },
+              "tag": {
+                "name": "Tag",
+                "desc": "Optional tag for grouping portals. Use commas for multiple tags (e.g. \"door,room_A\"). Leave empty for no tag."
               }
             }
           },
@@ -842,6 +877,17 @@
               "object": {
                 "name": "Object",
                 "desc": "The object whose position to match against portal positions"
+              }
+            }
+          },
+          "RemovePortalsByTag": {
+            "list-name": "Remove portals by tag",
+            "display-text": "Remove all portals tagged {0}",
+            "description": "Remove every portal whose tag matches the given string. Connections are removed from the navigation graph immediately. Use this to deactivate a group of related portals — for example, removing all 'door' portals when a room is sealed, or clearing 'floor_2' portals when a floor is destroyed.",
+            "params": {
+              "tag": {
+                "name": "Tag",
+                "desc": "Tag string to match against (e.g. \"door\", \"elevator\", \"room_A\")"
               }
             }
           },
@@ -900,6 +946,21 @@
               }
             }
           },
+          "SetPortalTag": {
+            "list-name": "Set portal tag",
+            "display-text": "Set portal {0} tag to {1}",
+            "description": "Assign a string tag to a portal. Tags are used to group portals so they can be removed together with 'Remove portals by tag'. A portal can only have one tag at a time — calling this again replaces the previous tag.",
+            "params": {
+              "portalId": {
+                "name": "Portal ID",
+                "desc": "The ID of the portal to tag"
+              },
+              "tag": {
+                "name": "Tag",
+                "desc": "Tag string to assign (e.g. \"door\", \"elevator\", \"room_A\")"
+              }
+            }
+          },
           "TeleportToPosition": {
             "list-name": "Teleport to position",
             "display-text": "Teleport to ({0}, {1})",
@@ -918,14 +979,14 @@
           "SetMultiAgentAvoidance": {
             "list-name": "Set multi-agent avoidance",
             "display-text": "Set multi-agent avoidance: {0}",
-            "description": "Enable or disable multi-agent collision avoidance. When enabled, AI agents will attempt to avoid paths occupied by other agents. Shared Navigation graph mode only — requires graph mode set to 'shared'.",
+            "description": "Enable or disable path-level multi-agent avoidance. When enabled, agents try to avoid choosing overlapping paths when multiple agents share the same navigation map.",
             "params": {
               "enabled": {
                 "name": "Enabled",
                 "desc": "Enable or disable multi-agent avoidance",
                 "items": {
-                  "yes": "Enabled",
-                  "no": "Disabled"
+                  "yes": "Yes",
+                  "no": "No"
                 }
               }
             }
@@ -933,17 +994,17 @@
         },
         "conditions": {
           "IsNodeLedge": {
-            "list-name": "Is node at ledge",
-            "display-text": "Is node at ({0}, {1}) a ledge",
-            "description": "Check if a specific node is marked as a ledge (platform edge). Returns true if the node is a left or right ledge.",
+            "list-name": "Is node a ledge",
+            "display-text": "Node at ({0}, {1}) is a ledge",
+            "description": "True if the node at the given grid coordinates is a ledge node (left or right ledge).",
             "params": {
               "gx": {
                 "name": "Grid X",
-                "desc": "Grid X coordinate (tile number)"
+                "desc": "Grid X coordinate"
               },
               "gy": {
                 "name": "Grid Y",
-                "desc": "Grid Y coordinate (tile number)"
+                "desc": "Grid Y coordinate"
               }
             }
           },
@@ -1156,8 +1217,8 @@
           },
           "IsPathPending": {
             "list-name": "Is path pending",
-            "display-text": "Path is pending",
-            "description": "True when a path request is queued and waiting to be processed (time-slicing is active and the per-tick budget was reached).",
+            "display-text": "Is path pending",
+            "description": "True when a pathfinding request has been submitted but not yet resolved. Use to show a 'thinking' state or delay actions until the path arrives.",
             "params": {}
           },
           "IsAtPortal": {
@@ -1186,227 +1247,227 @@
           },
           "IsMultiAgentAvoidanceEnabled": {
             "list-name": "Is multi-agent avoidance enabled",
-            "display-text": "Multi-agent avoidance is enabled",
-            "description": "Check if multi-agent collision avoidance is currently enabled. Shared Navigation graph mode only — requires graph mode set to 'shared'.",
+            "display-text": "Is multi-agent avoidance enabled",
+            "description": "True if multi-agent avoidance is currently active.",
             "params": {}
           }
         },
         "expressions": {
           "CalculatedJumpDistance": {
             "translated-name": "CalculatedJumpDistance",
-            "description": "Get the calculated maximum horizontal jump distance in pixels based on Platform behavior settings. Used for determining reachable positions.",
+            "description": "Get the calculated maximum jump distance in pixels. This is the value used to build graph connections. Useful for debugging jump arc detection.",
             "params": {}
           },
           "CalculatedJumpHeight": {
             "translated-name": "CalculatedJumpHeight",
-            "description": "Get the calculated maximum jump height in pixels based on Platform behavior settings. Used for determining reachable positions.",
+            "description": "Get the calculated maximum jump height in pixels. This is the value used to build graph connections. Useful for debugging jump arc detection.",
             "params": {}
           },
           "PlatformJumpStrength": {
             "translated-name": "PlatformJumpStrength",
-            "description": "Get the jump strength from the Platform behavior. Used for internal pathfinding calculations. Returns 0 if Platform behavior not found.",
+            "description": "Get the platform behavior's jump strength value. Useful for debugging jump parameter detection.",
             "params": {}
           },
           "PlatformMaxSpeed": {
             "translated-name": "PlatformMaxSpeed",
-            "description": "Get the max speed from the Platform behavior. Used for internal pathfinding calculations. Returns 0 if Platform behavior not found.",
+            "description": "Get the platform behavior's max speed value. Useful for debugging jump parameter detection.",
             "params": {}
           },
           "IsNodeIsland": {
             "translated-name": "IsNodeIsland",
-            "description": "Check if a node at grid coordinates is an island (single-tile platform). Returns 1 if true, 0 if false or node doesn't exist.",
+            "description": "Returns 1 if the node at the given grid coordinates is an island node (no horizontal neighbors), 0 otherwise.",
             "params": {
               "gx": {
                 "name": "Grid X",
-                "desc": "Grid X coordinate"
+                "desc": "Node grid X"
               },
               "gy": {
                 "name": "Grid Y",
-                "desc": "Grid Y coordinate"
+                "desc": "Node grid Y"
               }
             }
           },
           "IsNodeLeftLedge": {
             "translated-name": "IsNodeLeftLedge",
-            "description": "Check if a node at grid coordinates is a left ledge. Returns 1 if true, 0 if false or node doesn't exist.",
+            "description": "Returns 1 if the node at the given grid coordinates is a left ledge, 0 otherwise.",
             "params": {
               "gx": {
                 "name": "Grid X",
-                "desc": "Grid X coordinate"
+                "desc": "Node grid X"
               },
               "gy": {
                 "name": "Grid Y",
-                "desc": "Grid Y coordinate"
+                "desc": "Node grid Y"
               }
             }
           },
           "IsNodeRightLedge": {
             "translated-name": "IsNodeRightLedge",
-            "description": "Check if a node at grid coordinates is a right ledge. Returns 1 if true, 0 if false or node doesn't exist.",
+            "description": "Returns 1 if the node at the given grid coordinates is a right ledge, 0 otherwise.",
             "params": {
               "gx": {
                 "name": "Grid X",
-                "desc": "Grid X coordinate"
+                "desc": "Node grid X"
               },
               "gy": {
                 "name": "Grid Y",
-                "desc": "Grid Y coordinate"
+                "desc": "Node grid Y"
               }
             }
           },
           "IsTileJumpThru": {
             "translated-name": "IsTileJumpThru",
-            "description": "Check if a tile at grid coordinates is a jump-thru platform. Returns 1 if true, 0 if false or tile doesn't exist.",
+            "description": "Returns 1 if the tile at the given grid coordinates is a jump-through tile, 0 otherwise.",
             "params": {
               "gx": {
                 "name": "Grid X",
-                "desc": "Grid X coordinate"
+                "desc": "Tile grid X"
               },
               "gy": {
                 "name": "Grid Y",
-                "desc": "Grid Y coordinate"
+                "desc": "Tile grid Y"
               }
             }
           },
           "NearestNodeGridX": {
             "translated-name": "NearestNodeGridX",
-            "description": "Get the grid X coordinate of the nearest navigation node to a world position. Returns -1 if no nodes exist.",
+            "description": "Get the grid X coordinate of the nearest navigation node to a given world position.",
             "params": {
               "x": {
                 "name": "X",
-                "desc": "World X position in pixels"
+                "desc": "World X position"
               },
               "y": {
                 "name": "Y",
-                "desc": "World Y position in pixels"
+                "desc": "World Y position"
               }
             }
           },
           "NearestNodeGridY": {
             "translated-name": "NearestNodeGridY",
-            "description": "Get the grid Y coordinate of the nearest navigation node to a world position. Returns -1 if no nodes exist.",
+            "description": "Get the grid Y coordinate of the nearest navigation node to a given world position.",
             "params": {
               "x": {
                 "name": "X",
-                "desc": "World X position in pixels"
+                "desc": "World X position"
               },
               "y": {
                 "name": "Y",
-                "desc": "World Y position in pixels"
+                "desc": "World Y position"
               }
             }
           },
           "NearestNodeX": {
             "translated-name": "NearestNodeX",
-            "description": "Get the world X position of the nearest navigation node to a world position. Returns 0 if no nodes exist.",
+            "description": "Get the world X position of the nearest navigation node to a given world position.",
             "params": {
               "x": {
                 "name": "X",
-                "desc": "World X position in pixels"
+                "desc": "World X position"
               },
               "y": {
                 "name": "Y",
-                "desc": "World Y position in pixels"
+                "desc": "World Y position"
               }
             }
           },
           "NearestNodeY": {
             "translated-name": "NearestNodeY",
-            "description": "Get the world Y position of the nearest navigation node to a world position. Returns 0 if no nodes exist.",
+            "description": "Get the world Y position of the nearest navigation node to a given world position.",
             "params": {
               "x": {
                 "name": "X",
-                "desc": "World X position in pixels"
+                "desc": "World X position"
               },
               "y": {
                 "name": "Y",
-                "desc": "World Y position in pixels"
+                "desc": "World Y position"
               }
             }
           },
           "NodeAtIndexConnectionCount": {
             "translated-name": "NodeAtIndexConnectionCount",
-            "description": "Get the number of connections (edges) from a node by its index. Returns 0 if index is out of bounds.",
+            "description": "Get the number of outgoing connections from the node at the given index.",
             "params": {
               "index": {
                 "name": "Index",
-                "desc": "Node index (0-based)"
+                "desc": "Node index"
               }
             }
           },
           "NodeAtIndexGridX": {
             "translated-name": "NodeAtIndexGridX",
-            "description": "Get the grid X coordinate of a node by its index in the node array. Returns -1 if index is out of bounds.",
+            "description": "Get the grid X coordinate of the node at the given index.",
             "params": {
               "index": {
                 "name": "Index",
-                "desc": "Node index (0-based)"
+                "desc": "Node index"
               }
             }
           },
           "NodeAtIndexGridY": {
             "translated-name": "NodeAtIndexGridY",
-            "description": "Get the grid Y coordinate of a node by its index in the node array. Returns -1 if index is out of bounds.",
+            "description": "Get the grid Y coordinate of the node at the given index.",
             "params": {
               "index": {
                 "name": "Index",
-                "desc": "Node index (0-based)"
+                "desc": "Node index"
               }
             }
           },
           "NodeAtIndexIsLeftLedge": {
             "translated-name": "NodeAtIndexIsLeftLedge",
-            "description": "Check if a node is a left ledge by its index. Returns 1 if true, 0 if false or index is out of bounds.",
+            "description": "Returns 1 if the node at the given index is a left ledge, 0 otherwise.",
             "params": {
               "index": {
                 "name": "Index",
-                "desc": "Node index (0-based)"
+                "desc": "Node index"
               }
             }
           },
           "NodeAtIndexIsRightLedge": {
             "translated-name": "NodeAtIndexIsRightLedge",
-            "description": "Check if a node is a right ledge by its index. Returns 1 if true, 0 if false or index is out of bounds.",
+            "description": "Returns 1 if the node at the given index is a right ledge, 0 otherwise.",
             "params": {
               "index": {
                 "name": "Index",
-                "desc": "Node index (0-based)"
+                "desc": "Node index"
               }
             }
           },
           "NodeAtIndexIsSlope": {
             "translated-name": "NodeAtIndexIsSlope",
-            "description": "Check if a node is on a slope by its index. Returns 1 if true, 0 if false or index is out of bounds.",
+            "description": "Returns 1 if the node at the given index is a slope node, 0 otherwise.",
             "params": {
               "index": {
                 "name": "Index",
-                "desc": "Node index (0-based)"
+                "desc": "Node index"
               }
             }
           },
           "NodeAtIndexX": {
             "translated-name": "NodeAtIndexX",
-            "description": "Get the world X position of a node by its index in the node array. Returns 0 if index is out of bounds.",
+            "description": "Get the world X position of the node at the given index.",
             "params": {
               "index": {
                 "name": "Index",
-                "desc": "Node index (0-based)"
+                "desc": "Node index"
               }
             }
           },
           "NodeAtIndexY": {
             "translated-name": "NodeAtIndexY",
-            "description": "Get the world Y position of a node by its index in the node array. Returns 0 if index is out of bounds.",
+            "description": "Get the world Y position of the node at the given index.",
             "params": {
               "index": {
                 "name": "Index",
-                "desc": "Node index (0-based)"
+                "desc": "Node index"
               }
             }
           },
           "NodeConnectionAction": {
             "translated-name": "NodeConnectionAction",
-            "description": "Get the action name for a connection (e.g., 'walk', 'jump', 'fall'). Returns empty string if node/connection doesn't exist.",
+            "description": "Get the action string for a connection from the given grid node (e.g. 'walk', 'jump', 'fall', 'portal').",
             "params": {
               "gx": {
                 "name": "Grid X",
@@ -1417,14 +1478,14 @@
                 "desc": "Source node grid Y"
               },
               "index": {
-                "name": "Connection index",
-                "desc": "Connection index (0-based)"
+                "name": "Index",
+                "desc": "Connection index"
               }
             }
           },
           "NodeConnectionCost": {
             "translated-name": "NodeConnectionCost",
-            "description": "Get the movement cost for a connection. Returns 0 if node/connection doesn't exist.",
+            "description": "Get the movement cost for a connection from the given grid node.",
             "params": {
               "gx": {
                 "name": "Grid X",
@@ -1435,28 +1496,28 @@
                 "desc": "Source node grid Y"
               },
               "index": {
-                "name": "Connection index",
-                "desc": "Connection index (0-based)"
+                "name": "Index",
+                "desc": "Connection index"
               }
             }
           },
           "NodeConnectionCount": {
             "translated-name": "NodeConnectionCount",
-            "description": "Get the number of connections (edges) from a node at grid coordinates. Returns 0 if node doesn't exist.",
+            "description": "Get the number of outgoing connections from the node at the given grid coordinates.",
             "params": {
               "gx": {
                 "name": "Grid X",
-                "desc": "Grid X coordinate"
+                "desc": "Node grid X coordinate"
               },
               "gy": {
                 "name": "Grid Y",
-                "desc": "Grid Y coordinate"
+                "desc": "Node grid Y coordinate"
               }
             }
           },
           "NodeConnectionTargetX": {
             "translated-name": "NodeConnectionTargetX",
-            "description": "Get the world X position of a connection's target node. Returns 0 if node/connection doesn't exist.",
+            "description": "Get the world X position of the target node for a connection from the given grid node.",
             "params": {
               "gx": {
                 "name": "Grid X",
@@ -1467,14 +1528,14 @@
                 "desc": "Source node grid Y"
               },
               "index": {
-                "name": "Connection index",
-                "desc": "Connection index (0-based)"
+                "name": "Index",
+                "desc": "Connection index"
               }
             }
           },
           "NodeConnectionTargetY": {
             "translated-name": "NodeConnectionTargetY",
-            "description": "Get the world Y position of a connection's target node. Returns 0 if node/connection doesn't exist.",
+            "description": "Get the world Y position of the target node for a connection from the given grid node.",
             "params": {
               "gx": {
                 "name": "Grid X",
@@ -1485,8 +1546,8 @@
                 "desc": "Source node grid Y"
               },
               "index": {
-                "name": "Connection index",
-                "desc": "Connection index (0-based)"
+                "name": "Index",
+                "desc": "Connection index"
               }
             }
           },
@@ -1707,7 +1768,7 @@
           },
           "NodeWorldX": {
             "translated-name": "NodeWorldX",
-            "description": "Get the world X position of a node at the specified grid coordinates. the node position is centred within the tile. Returns 0 if node doesn't exist.",
+            "description": "Get the world X position of a node at the specified grid coordinates. The node position is centred within the tile. Returns 0 if node doesn't exist.",
             "params": {
               "gx": {
                 "name": "Grid X",
@@ -1721,7 +1782,7 @@
           },
           "NodeWorldY": {
             "translated-name": "NodeWorldY",
-            "description": "Get the world Y position of a node at the specified grid coordinates. the node position is centred within the tile. Returns 0 if node doesn't exist.",
+            "description": "Get the world Y position of a node at the specified grid coordinates. The node position is centred within the tile. Returns 0 if node doesn't exist.",
             "params": {
               "gx": {
                 "name": "Grid X",
@@ -1815,7 +1876,7 @@
           },
           "WaypointX": {
             "translated-name": "WaypointX",
-            "description": "Get the world X position of a waypoint by index. the waypoint position is centred within the tile. Returns 0 if index is out of bounds.",
+            "description": "Get the world X position of a waypoint by index. The waypoint position is centred within the tile. Returns 0 if index is out of bounds.",
             "params": {
               "index": {
                 "name": "Index",
@@ -1825,7 +1886,7 @@
           },
           "WaypointY": {
             "translated-name": "WaypointY",
-            "description": "Get the world Y position of a waypoint by index. the waypoint position is centred within the tile. Returns 0 if index is out of bounds.",
+            "description": "Get the world Y position of a waypoint by index. The waypoint position is centred within the tile. Returns 0 if index is out of bounds.",
             "params": {
               "index": {
                 "name": "Index",
@@ -1835,12 +1896,12 @@
           },
           "MaxPathsPerTick": {
             "translated-name": "MaxPathsPerTick",
-            "description": "Current max paths per tick limit (0 = unlimited).",
+            "description": "Get the current maximum paths per tick setting.",
             "params": {}
           },
           "PathQueueSize": {
             "translated-name": "PathQueueSize",
-            "description": "Number of path requests currently waiting in the queue.",
+            "description": "Get the number of pathfinding requests currently waiting in the queue.",
             "params": {}
           },
           "CurrentPortalID": {
@@ -1848,15 +1909,61 @@
             "description": "Returns the portal ID during OnPortalEntry/OnPortalComplete triggers. Use to identify which portal was reached.",
             "params": {}
           },
+          "FurthestPortalID": {
+            "translated-name": "FurthestPortalID",
+            "description": "Returns the ID of the portal whose entry point is furthest from the given (X, Y) position. If Tag is non-empty, only portals with that tag are considered. Returns -1 if no matching portals exist.",
+            "params": {
+              "x": {
+                "name": "X",
+                "desc": "World X position to measure from."
+              },
+              "y": {
+                "name": "Y",
+                "desc": "World Y position to measure from."
+              },
+              "tag": {
+                "name": "Tag",
+                "desc": "Tag filter. Leave empty to consider all portals."
+              }
+            }
+          },
           "LastPortalID": {
             "translated-name": "LastPortalID",
             "description": "Returns the ID of the most recently added portal. Use right after adding a portal to save the ID for later configuration or removal.",
             "params": {}
           },
+          "NearestPortalID": {
+            "translated-name": "NearestPortalID",
+            "description": "Returns the ID of the portal whose entry point is nearest to the given (X, Y) position. If Tag is non-empty, only portals with that tag are considered. Returns -1 if no matching portals exist.",
+            "params": {
+              "x": {
+                "name": "X",
+                "desc": "World X position to measure from."
+              },
+              "y": {
+                "name": "Y",
+                "desc": "World Y position to measure from."
+              },
+              "tag": {
+                "name": "Tag",
+                "desc": "Tag filter. Leave empty to consider all portals."
+              }
+            }
+          },
           "PortalCount": {
             "translated-name": "PortalCount",
             "description": "Get the total number of portals.",
             "params": {}
+          },
+          "PortalCountByTag": {
+            "translated-name": "PortalCountByTag",
+            "description": "Returns the number of portals that contain the given tag token (checked within each portal's comma-separated tag string).",
+            "params": {
+              "tag": {
+                "name": "Tag",
+                "desc": "The tag token to search for (e.g. \"door\")."
+              }
+            }
           },
           "PortalExitX": {
             "translated-name": "PortalExitX",
@@ -1868,10 +1975,34 @@
             "description": "Get the exit Y position of the current portal. Valid inside OnPortalEntry/OnPortalComplete triggers.",
             "params": {}
           },
+          "PortalIDByTag": {
+            "translated-name": "PortalIDByTag",
+            "description": "Returns the portal ID at the given index within the set of portals that contain the given tag. Returns -1 if the index is out of range. Use PortalCountByTag to get the total count.",
+            "params": {
+              "tag": {
+                "name": "Tag",
+                "desc": "The tag token to search for (e.g. \"door\")."
+              },
+              "index": {
+                "name": "Index",
+                "desc": "Zero-based index within the matched portals."
+              }
+            }
+          },
           "PortalProgress": {
             "translated-name": "PortalProgress",
             "description": "Get the 0-1 traversal progress for gradual portals. Returns 0 if not traversing.",
             "params": {}
+          },
+          "PortalTag": {
+            "translated-name": "PortalTag",
+            "description": "Get the tag of a portal by its ID. Returns an empty string if the portal has no tag or doesn't exist.",
+            "params": {
+              "portalId": {
+                "name": "Portal ID",
+                "desc": "The ID of the portal to query"
+              }
+            }
           },
           "PortalType": {
             "translated-name": "PortalType",
@@ -1885,7 +2016,7 @@
           },
           "NearbyAgentCount": {
             "translated-name": "NearbyAgentCount",
-            "description": "Get the number of nearby AI agents within detection range. Used for multi-agent avoidance calculations. Returns 0 if multi-agent avoidance is disabled. Shared Navigation graph mode only — requires graph mode set to 'shared'.",
+            "description": "Get the number of nearby agents sharing the same navigation map.",
             "params": {}
           }
         }
