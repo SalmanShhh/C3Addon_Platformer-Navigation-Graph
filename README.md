@@ -1,28 +1,24 @@
 <img src="./src/icon.svg" width="100" /><br>
 # Platformer Navigation Graph
 <i>Smart pathfinding for platformer games. Characters automatically jump across gaps, fall between platforms, and find optimal routes through complex levels. Includes instant portals (teleporters, doors) and gradual portals (elevators, ladders, ziplines) with pause/resume support for custom animations. Features hazard avoidance, multiple path strategies, coyote jumps, ledge restriction, and multi-agent support. Works with the built-in Platform behavior — just add the behavior and go.</i> <br>
-### Version 0.5.0.0
+### Version 0.5.1.0
 
-[<img src="https://placehold.co/200x50/4493f8/FFF?text=Download&font=montserrat" width="200"/>](https://github.com/SalmanShhh/Platformer-Navigation-Graph-V2/releases/download/salmanshh_platformer_navigationgraph-0.5.0.0.c3addon/salmanshh_platformer_navigationgraph-0.5.0.0.c3addon)
+[<img src="https://placehold.co/200x50/4493f8/FFF?text=Download&font=montserrat" width="200"/>](https://github.com/SalmanShhh/Platformer-Navigation-Graph-V2/releases/download/salmanshh_platformer_navigationgraph-0.5.1.0.c3addon/salmanshh_platformer_navigationgraph-0.5.1.0.c3addon)
 <br>
 <sub> [See all releases](https://github.com/SalmanShhh/Platformer-Navigation-Graph-V2/releases) </sub> <br>
 
-#### What's New in 0.5.0.0
+#### What's New in 0.5.1.0
 **Added:**
-- Auto-Build Graph property (Auto / From Pathfinding / From Solids): zero-event startup — the obstacle map and graph build themselves on layout start.
-- Tile Size auto-detect (0 = auto): reads the Pathfinding behavior's Cell Size or the solid tilemap's tile size, and propagates it to all shared-graph instances.
-- New simple 'Find path' (X, Y) and 'Find path to object' actions with sensible defaults (ground correction on, Nearest mode).
-- Time-sliced graph generation: large maps build across several ticks (~6ms per tick) instead of stalling a frame; any Find path call finishes an in-progress build synchronously first.
+- Collision-polygon accurate solids scanning (per the documented containsPoint API): rotated/irregular solid sprites no longer over-fill their bounding box, per-tile collision polygons are honored (disabled-collision tiles scan as clear, partial polys only mark covered cells), instances with collisions disabled are skipped.
+- Per-Instance graph mode warns once when used by 9+ instances on a layout (each builds its own graph; Shared is almost always the right choice at scale).
 
 **Changed:**
-- Old FindPath renamed to 'Find path to position (advanced)' — unchanged behavior, full parameter control.
-- Runtime split into maintainable modules (obstacle map, graph build, pathfinding, movement, portals, hazards, navigation manager).
-- Removed the dead legacy src/aces.js; ACE folder files are the single source of truth.
-- Guide.md fully rewritten: scenarios-first structure, complete ACE reference tables, system + game use cases (incl. fleeing and flee-to-cover), corrected scripting docs (on()/off() listener API).
+- Guide: new 'With or without the Pathfinding behavior' comparison section and 'Procedurally generated levels (best practices)' section (direct-write obstacle map pattern, timing rules, cleanup, validation, per-seed caching).
+- FUTURE_FEATURES: Graph Groups design (named graph sharing to eventually replace the Shared/Per-Instance mode).
 
 **Fixed:**
-- GraphData expressions IsNodeIsland / IsNodeLeftLedge / IsNodeRightLedge / IsTileJumpThru crashed at runtime (called methods that did not exist).
-- 'Node exists at grid/world position' conditions always returned false (stale string map key).
+- Horizontally flipped solid tiles were skipped by the tilemap scan (negative raw tile IDs failed the presence check).
+- Instances spawned after the shared graph was built no longer trigger a full graph rebuild per spawn (late joiners inherit the built graph); wave spawners are now safe at scale.
 
 <sub>[View full changelog](#changelog)</sub>
 
@@ -274,6 +270,21 @@ npm run dev
 ---
 ## Changelog
 
+### Version 0.5.1.0
+
+**Added:**
+- Collision-polygon accurate solids scanning (per the documented containsPoint API): rotated/irregular solid sprites no longer over-fill their bounding box, per-tile collision polygons are honored (disabled-collision tiles scan as clear, partial polys only mark covered cells), instances with collisions disabled are skipped.
+- Per-Instance graph mode warns once when used by 9+ instances on a layout (each builds its own graph; Shared is almost always the right choice at scale).
+
+**Changed:**
+- Guide: new 'With or without the Pathfinding behavior' comparison section and 'Procedurally generated levels (best practices)' section (direct-write obstacle map pattern, timing rules, cleanup, validation, per-seed caching).
+- FUTURE_FEATURES: Graph Groups design (named graph sharing to eventually replace the Shared/Per-Instance mode).
+
+**Fixed:**
+- Horizontally flipped solid tiles were skipped by the tilemap scan (negative raw tile IDs failed the presence check).
+- Instances spawned after the shared graph was built no longer trigger a full graph rebuild per spawn (late joiners inherit the built graph); wave spawners are now safe at scale.
+---
+
 ### Version 0.5.0.0
 
 **Added:**
@@ -281,6 +292,7 @@ npm run dev
 - Tile Size auto-detect (0 = auto): reads the Pathfinding behavior's Cell Size or the solid tilemap's tile size, and propagates it to all shared-graph instances.
 - New simple 'Find path' (X, Y) and 'Find path to object' actions with sensible defaults (ground correction on, Nearest mode).
 - Time-sliced graph generation: large maps build across several ticks (~6ms per tick) instead of stalling a frame; any Find path call finishes an in-progress build synchronously first.
+- {my} prefix on all action and condition display texts, so event sheet rows show which behavior they belong to.
 
 **Changed:**
 - Old FindPath renamed to 'Find path to position (advanced)' — unchanged behavior, full parameter control.

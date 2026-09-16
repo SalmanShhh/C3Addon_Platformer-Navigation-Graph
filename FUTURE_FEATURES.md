@@ -569,3 +569,40 @@ Graph patch work (incremental updates, hazard cost recalculation) currently runs
 - `runtime.addEventListener("pretick", handler)` — run graph maintenance work before the main tick so all movement decisions that frame use an up-to-date graph
 - `runtime.addEventListener("tick2", handler)` — alternatively, defer non-urgent bookkeeping (e.g., portal pause timer, repath cooldown decay) to `tick2` to spread work across sub-ticks
 - `inst.dt` — delta-time remains accurate in both `pretick` and `tick2` handlers
+
+---
+
+## Map Tags (replace the Shared / Per-Instance mode)
+
+The Graph Mode combo conflates two different things: a performance choice (share the build) and a semantic choice (this character sees different walls, e.g. a wall-phasing ghost). That is why sharing cannot be safely automated by instance count: the addon cannot observe which semantics the designer wants, and a mode that flips mid-game when a spawn threshold is crossed would make behavior timing-dependent.
+
+**Design: a "Map tag" text property (default "") instead of the mode combo.** "Tag" is the C3-native word for a user-supplied string identifier (Timer tags, Tween tags, Audio tags, instance tags) — and this addon already uses it for portal tags, so the vocabulary is consistent inside and out. "Map" matches C3's own Pathfinding term "obstacle map".
+
+- Instances with the same map tag on the same layout share one navigation map and graph (default tag = today's Shared mode, unchanged for everyone on defaults).
+- A wall-phasing ghost gets tag "ghost" and shares a ghost-specific map with other ghosts, instead of paying today's fully per-instance cost.
+- Per-Instance mode becomes a degenerate case (a unique tag per instance) that nobody needs, and can be deprecated.
+- Sharing stays automatic AND intent stays explicit: performance is the default, divergence is opt-in by name, and nothing ever switches at runtime.
+
+### Pros
+- **Divergent characters get sharing too.** Today a second map means Per-Instance mode, where 20 ghosts build 20 identical ghost graphs. With tags they build one.
+- **Deterministic and spawn-order independent.** No runtime mode switching; behavior cannot change because an instance count crossed a threshold.
+- **One concept instead of two modes.** "Name the map you navigate" covers Shared, Per-Instance, and everything between.
+- **Unlocks real design patterns cheaply**: flying creatures that ignore floors, swimmers with water-only maps, giant characters with a wider-clearance map, ghosts through inner walls — each variant one tag, each tag shared.
+- **Backward compatible**: default tag reproduces current behavior exactly; `graph_mode = instance` maps internally to a unique tag.
+
+### Cons
+- **Cost multiplies per distinct tag.** Every tag is a full obstacle map + graph + build + savegame payload. Two or three tags are cheap; ten are not.
+- **Typo footgun.** A misspelled tag silently creates a second, unconfigured map — the enemy just stands there with no graph. Needs a debug-mode log listing active tags and instance counts per tag to make this diagnosable.
+- **Setup multiplies per tag.** Each tag needs its own map source: auto-build must run per tag, and a ghost map needs its own scan (e.g. only boundary walls). More events for multi-tag projects.
+- **Portals and hazards need a per-tag decision.** Today they live in shared maps keyed by layout. Does a door portal exist in the ghost map too? Probably per-tag registration (with an optional "all tags" flag) — this is the largest design surface of the feature.
+- **Manager complexity.** Every NavigationManager subsystem (graphs, subscribers, build owners, capabilities, agent params, cell-size propagation) re-keys from `layoutUID` to `layoutUID + ":" + tag`, and the test matrix grows accordingly.
+- **Legacy property lingers.** `graph_mode` at index [5] must remain forever for savefile compatibility, even once deprecated.
+
+### What would need to change
+- `NavigationManager` keys `sharedGraphs` / `subscribers` / `buildOwners` / capabilities by `layoutUID + ":" + tag` instead of `layoutUID`.
+- Property [5] `graph_mode` must remain for savefile compatibility; add the map tag property at the end and map `instance` mode to a unique tag internally.
+- Obstacle map source ACEs affect the calling instance's tag map (today: the shared map), which gives ghosts their own map naturally (scan solids for the default tag, scan only boundary walls for "ghost").
+- Debugger: show the map tag in the Navigation Graph section.
+
+### Interim mitigation (shipped 0.5.1.0)
+- Per-Instance mode logs a one-time warning at 9+ instances on a layout, pointing users back to Shared mode.

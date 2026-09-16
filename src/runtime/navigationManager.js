@@ -116,6 +116,24 @@ class NavigationManager {
 
     // Incremental (chunked) graph builds: layoutUID → owning instance
     this.buildOwners = new Map();
+
+    // Per-Instance graph mode usage per layout, for the scale warning
+    this.perInstanceCounts = new Map();
+  }
+
+  /** Counts a Per-Instance-mode instance for its layout; returns the new count.
+   *  Used to warn when Per-Instance mode is (probably accidentally) used at scale. */
+  notePerInstanceUsage(layoutUID) {
+    const n = (this.perInstanceCounts.get(layoutUID) || 0) + 1;
+    this.perInstanceCounts.set(layoutUID, n);
+    return n;
+  }
+
+  /** Removes a Per-Instance-mode instance from its layout's count. */
+  releasePerInstanceUsage(layoutUID) {
+    const n = (this.perInstanceCounts.get(layoutUID) || 0) - 1;
+    if (n <= 0) this.perInstanceCounts.delete(layoutUID);
+    else this.perInstanceCounts.set(layoutUID, n);
   }
 
   /** Returns (or creates) the shared navigation graph Map for a given layout. */
@@ -126,12 +144,22 @@ class NavigationManager {
     return this.sharedGraphs.get(layoutUID);
   }
 
-  /** Registers an instance as a subscriber to the shared graph for its layout. */
+  /** Registers an instance as a subscriber to the shared graph for its layout.
+   *  Late joiners (instances spawned after the graph was built) inherit the
+   *  existing graph instead of forcing a full rebuild — otherwise every spawn
+   *  in a wave would trigger a rebuild storm. The capability-mismatch check in
+   *  _needsGraphRegeneration (e.g. double jump) still requests a rebuild when
+   *  the new instance genuinely needs connections the graph lacks. */
   subscribe(layoutUID, instance) {
     if (!this.subscribers.has(layoutUID)) {
       this.subscribers.set(layoutUID, new Set());
     }
     this.subscribers.get(layoutUID).add(instance);
+    // graphCapabilities is recorded when a shared build completes, so its
+    // presence means a built graph already exists for this layout.
+    if (this.graphCapabilities.has(layoutUID)) {
+      instance.graphGenerated = true;
+    }
   }
 
   /** Removes an instance from the shared graph subscribers; cleans up the graph when no subscribers remain. */

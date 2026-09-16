@@ -171,6 +171,22 @@ Event: Every 0.5 seconds
 
 Auto-build does not register slopes. Slope tiles scan as solid until you register them (see [Slopes](#8-slopes)), and the graph rebuilds automatically once you do.
 
+### With or without the Pathfinding behavior
+
+The addon does not require Construct's built-in Pathfinding behavior. Both map sources produce a full navigation graph; they differ in how the tile data arrives.
+
+| Aspect | Pathfinding behavior source | Solid/Jump-thru scan (no Pathfinding) |
+|---|---|---|
+| Extra setup | Pathfinding behavior added to the character, Cell Size configured | Nothing beyond Solid/Jump-thru behaviors your level already uses |
+| Timing | Asynchronous: the addon polls until the Pathfinding map is ready (ready/failed/timeout triggers) | Synchronous: the scan completes in the same call |
+| One-way platforms | Not represented (the Pathfinding map only knows obstacles), so no fall-through connections from this source alone | Fully supported: Jump-thru objects scan as their own tile state |
+| Rasterization | The Pathfinding behavior's own obstacle rasterization | Collision-polygon accurate: rotated sprites, per-tile polygons, and disabled-collision tiles are all honored |
+| Tile Size | Auto-detects from the Pathfinding Cell Size | Auto-detects from the solid tilemap's tile size |
+| Level changes | Auto-regenerate option reacts to Pathfinding map changes | Update tiles with SetTileState, then RegenerateGraph |
+| Best for | Projects that already use the Pathfinding behavior for other AI | Everything else, including all new projects |
+
+Recommendation: use the scan source unless the Pathfinding behavior is already in your project for other reasons. Auto-Build Graph set to Auto makes the choice for you: it uses the Pathfinding map when the behavior is attached to the character and the scan otherwise. Note that jump-thru platforms need the scan source (or manual SetTileState calls) even when the Pathfinding map provides the solids.
+
 ### Using the Pathfinding behavior
 
 If your layout already uses Construct's built-in Pathfinding behavior, `UsePathfindingObstacleMap` copies its obstacle data. The Pathfinding map builds asynchronously, so the addon waits for it and fires triggers when ready.
@@ -199,7 +215,7 @@ Event: On start of layout
   Action: Enemy -> PlatformerNavGraph -> GenerateNavigationGraph
 ```
 
-Tilemaps are scanned cell by cell for accurate geometry. Sprites are rasterized by bounding box. Objects must have the Solid or Jump-thru behavior enabled; the addon checks the enabled flag, so temporarily disabled platforms are correctly ignored.
+Scanning is collision-polygon accurate. Sprites mark only the cells their collision polygon actually covers, so rotated or irregular solids do not over-fill their bounding box. Tilemap tiles are refined against their per-tile collision polygons: tiles with collisions disabled scan as clear, and partial polygons (half-height fences, thin floors) only mark the cells they cover. Objects must have the Solid or Jump-thru behavior enabled, and instances with collisions disabled are skipped, so temporarily disabled platforms are correctly ignored. Polygon features smaller than about a third of a cell are treated as not blocking.
 
 ### Setting individual tiles
 
@@ -215,6 +231,67 @@ Event: On lava tile created
   Action: Enemy -> PlatformerNavGraph -> SetTileStateWorld  Lava.X, Lava.Y, "Avoid"
   // "Avoid" tiles are walkable but get a strong pathfinding cost penalty
 ```
+
+### Procedurally generated levels (best practices)
+
+Procedural stages work reliably when the map build runs after generation finishes. Follow these rules.
+
+**Rule 1: control the timing.** Auto-Build scans on the behavior's first tick, and On start of layout events run before that tick. If your generator finishes inside On start of layout, Auto-Build works as-is. If generation spans multiple frames, leave Auto-Build Graph Off and build explicitly when done.
+
+**Rule 2 (recommended): write the obstacle map directly from generator data.** Your generator already knows which cells are solid, so skip the tilemap scan entirely. This is the fastest and most exact path, and it handles slopes and one-way platforms in the same loop:
+
+```
+Event: (generation complete)
+  Action: Enemy -> PlatformerNavGraph -> CreateCustomObstacleMap  GridWidth, GridHeight
+  // Inside your generation loop, mirror each cell you generate:
+  Action: Enemy -> PlatformerNavGraph -> SetTileState  gx, gy, "Solid"
+  Action: Enemy -> PlatformerNavGraph -> SetTileState  gx, gy, "Jump-thru"
+  Action: Enemy -> PlatformerNavGraph -> SetTileState  gx, gy, "Slope left /"
+  // After the loop:
+  Action: Enemy -> PlatformerNavGraph -> GenerateNavigationGraph
+
+Event: Enemy -> PlatformerNavGraph -> On navigation graph generated
+  // Spawn or activate enemies here
+```
+
+Note: with a custom map, set the Tile Size property explicitly (auto-detection reads tilemaps, and a custom map may not have one).
+
+Alternatively, if your generator paints a tilemap, scan it after painting:
+
+```
+Event: (generation complete)
+  Action: Enemy -> PlatformerNavGraph -> BuildObstacleMapFromLayout  Layout.Width, Layout.Height
+  Action: Enemy -> PlatformerNavGraph -> ScanSolidObjectsIntoObstacleMap  TilemapWalls
+  Action: Enemy -> PlatformerNavGraph -> GenerateNavigationGraph
+```
+
+**Rule 3: clean up between regenerations.** Portals and hazards persist across graph rebuilds by design. When regenerating a level in the same layout, clear them first or stale portals will reconnect at their old coordinates:
+
+```
+Event: (before regenerating the level)
+  Action: Enemy -> PlatformerNavGraph -> ClearAllPortals
+  Action: Enemy -> PlatformerNavGraph -> ClearAllHazards
+  Action: Enemy -> PlatformerNavGraph -> ClearAllHazardTiles
+```
+
+**Rule 4: validate the generated level.** The graph doubles as a free traversability check for your generator:
+
+```
+Event: Enemy -> PlatformerNavGraph -> On navigation graph generated
+  Condition: Enemy.PlatformerNavGraph.NodeCount < 20
+  // Degenerate level: too little walkable ground, regenerate
+  Action: (regenerate with a new seed)
+
+Event: Enemy -> PlatformerNavGraph -> On path failed
+  Condition: (this was the spawn-to-exit test path)
+  // Exit unreachable from spawn: regenerate or add a connecting corridor
+```
+
+**Rule 5: spawn characters on walkable ground.** A character spawning mid-air or inside geometry gets `no_start_node` (ground correction searches about 10 tiles). Have the generator emit spawn points on floor cells, or check with `Node exists at world position` before spawning.
+
+**Rule 6: cache repeatable seeds.** For daily seeds or revisitable floors, save the finished map once and reload it instantly on revisit (see the next section). The JSON carries slopes and tile hazards, so nothing needs re-registration.
+
+For runtime digging and building after the level is live, update tiles with `SetTileState` plus `RegenerateGraph`; rebuilds are time-sliced, so tile-by-tile terrain changes do not hitch the frame.
 
 ### Saving and loading obstacle maps
 
@@ -607,6 +684,8 @@ Hazard changes take effect on the next graph build or hazard cost update. After 
 ### One graph, many agents
 
 With **Graph Mode** set to Shared (the default), every instance on the layout reads the same navigation graph. The build cost is paid once no matter how many enemies you spawn.
+
+Scanning and graph building are **single-flight**: with hundreds of instances carrying the behavior, exactly one instance performs the scan and build per layout while the rest wait on the shared result. Instances spawned after the graph is built inherit it immediately without triggering a rebuild, so wave spawners are safe. The one configuration to avoid at scale is Graph Mode = Per-Instance, which really does give every instance its own map and build.
 
 ### Per-tick path budget
 

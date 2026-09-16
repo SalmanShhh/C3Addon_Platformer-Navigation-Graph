@@ -271,9 +271,35 @@ export default {
     this._scanObjectsIntoObstacleMap(jumpThruClass, 2);
   },
 
+  /** Tests whether an instance's collision polygon covers any part of a grid cell,
+   *  using a 3x3 grid of point samples against the documented containsPoint test
+   *  (point-in-collision-polygon, honors rotation and per-tile tilemap polygons).
+   *  Point sampling approximates polygon-vs-cell intersection: samples sit at 1/6,
+   *  1/2, and 5/6 of the cell, so any feature wider than about a third of a cell
+   *  is caught. Smaller slivers are treated as not blocking. */
+  _cellCoveredByInstance(inst, gx, gy) {
+    const cs = this.cellSize;
+    const baseX = gx * cs;
+    const baseY = gy * cs;
+    for (let sy = 1; sy <= 5; sy += 2) {
+      const py = baseY + (cs * sy) / 6;
+      for (let sx = 1; sx <= 5; sx += 2) {
+        if (inst.containsPoint(baseX + (cs * sx) / 6, py)) return true;
+      }
+    }
+    return false;
+  },
+
   /** Shared helper: scans instances of objClass into the obstacle map with the given cellValue.
    *  Validates that each instance has the required C3 behavior enabled (Solid=1, Jumpthru=2).
-   *  Tilemaps are scanned cell-by-cell; sprites use bounding box rasterization. */
+   *  Rasterization is collision-polygon accurate via containsPoint sampling:
+   *  - Sprites: only cells the collision polygon actually covers are marked, so
+   *    rotated or irregular solids no longer over-fill their bounding box.
+   *  - Tilemaps: getTileAt pre-filters empty cells cheaply, then containsPoint
+   *    refines against per-tile collision polygons — tiles with collisions
+   *    disabled scan as clear, partial polygons only mark covered cells.
+   *  Falls back to bounding-box / tile-presence rasterization when containsPoint
+   *  is unavailable, so behavior degrades to the previous (coarser) scan. */
   _scanObjectsIntoObstacleMap(objClass, cellValue) {
     if (!objClass) return;
     if (!this.obstacleMap) {
@@ -310,17 +336,28 @@ export default {
         this._warn(`ScanObjectsIntoObstacleMap: "${inst.objectType?.name}" skipped — no enabled "${requiredBehavior}" behavior`);
         continue;
       }
+      // Documented flag: collisions disabled means the instance never blocks anything
+      if (typeof inst.isCollisionEnabled === "boolean" && !inst.isCollisionEnabled) continue;
+
+      const canPolyTest = typeof inst.containsPoint === "function";
+
       if (typeof inst.getTileAt === "function") {
-        // Tilemap: cell-by-cell (tile size must match cellSize)
+        // Tilemap: cell-by-cell (tile size must match cellSize). getTileAt returns
+        // -1 for empty cells; flipped tiles return other negative raw values, so
+        // compare against exactly -1 (a `>= 0` check would skip flipped tiles).
         for (let gy = 0; gy < gh; gy++) {
           for (let gx = 0; gx < gw; gx++) {
             let tileId;
             try { tileId = inst.getTileAt(gx, gy); } catch (e) { continue; }
-            if (tileId >= 0) { this.obstacleMap[gy * gw + gx] = cellValue; count++; }
+            if (tileId === -1) continue;
+            if (!canPolyTest || this._cellCoveredByInstance(inst, gx, gy)) {
+              this.obstacleMap[gy * gw + gx] = cellValue; count++;
+            }
           }
         }
       } else {
-        // Sprite: bounding box rasterization
+        // Sprite: iterate cells in the bounding box, marking only polygon-covered
+        // cells (falls back to full bbox fill without containsPoint)
         const bbox = inst.getBoundingBox();
         const x1 = Math.floor(bbox.left / cs);
         const y1 = Math.floor(bbox.top / cs);
@@ -328,7 +365,9 @@ export default {
         const y2 = Math.ceil(bbox.bottom / cs);
         for (let gy = Math.max(0, y1); gy < Math.min(gh, y2); gy++) {
           for (let gx = Math.max(0, x1); gx < Math.min(gw, x2); gx++) {
-            this.obstacleMap[gy * gw + gx] = cellValue; count++;
+            if (!canPolyTest || this._cellCoveredByInstance(inst, gx, gy)) {
+              this.obstacleMap[gy * gw + gx] = cellValue; count++;
+            }
           }
         }
       }

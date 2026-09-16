@@ -326,6 +326,8 @@ export default function (parentClass) {
       globalNavManager.removeQueuedRequest(this);
       if (this.useSharedGraph && this.layoutUID !== null) {
         globalNavManager.unsubscribe(this.layoutUID, this);
+      } else if (!this.useSharedGraph && this.layoutUID !== null) {
+        globalNavManager.releasePerInstanceUsage(this.layoutUID);
       }
       this.navGraph.clear();
       this.portals.clear();
@@ -856,10 +858,20 @@ export default function (parentClass) {
       }
     }
 
-    /** Subscribes this instance to the shared graph manager if using shared mode. */
+    /** Subscribes this instance to the shared graph manager if using shared mode.
+     *  Per-Instance mode at scale is almost always an accident (every instance
+     *  builds and stores its own full graph), so warn once when the count grows. */
     _initializeGraphMode() {
       if (this.useSharedGraph) {
         globalNavManager.subscribe(this.layoutUID, this);
+      } else {
+        const count = globalNavManager.notePerInstanceUsage(this.layoutUID);
+        if (count === 9) {
+          this._warn(
+            `${count}+ instances are using Per-Instance graph mode on this layout — each one builds and stores its own navigation graph. ` +
+            `Switch the Graph Mode property to "Shared" unless each character genuinely needs a different obstacle map.`
+          );
+        }
       }
     }
 
