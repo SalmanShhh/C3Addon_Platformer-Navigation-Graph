@@ -1,6 +1,6 @@
 export const config = {
   listName: "Map slope tiles from tilemap",
-  displayText: "Map slopes from {0}: left={1} right={2} gentle-left={3} gentle-right={4}",
+  displayText: "{my}: Map slopes from {0}: left={1} right={2} gentle-left={3} gentle-right={4}",
   description: "Scan a Tilemap and mark tiles matching the given tile IDs as slopes. Pass tile IDs as comma-separated strings (e.g. '5,6,7'). Pass empty string to skip a slope type. Requires the obstacle map to be created first.",
   params: [
     { id: "tilemap", name: "Tilemap", desc: "The Tilemap object to scan", type: "object" },

@@ -1,6 +1,6 @@
 export const config = {
   listName: "Set portal speed",
-  displayText: "Set portal {0} speed to {1}",
+  displayText: "{my}: Set portal {0} speed to {1}",
   description: "Change the movement speed of a gradual portal (pixels per second). Has no effect on instant portals.",
   params: [
     { id: "portalId", name: "Portal ID", desc: "The ID of the portal to configure", type: "number", initialValue: "0" },

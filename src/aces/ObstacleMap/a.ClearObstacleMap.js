@@ -1,6 +1,6 @@
 export const config = {
   listName: "Clear obstacle map",
-  displayText: "Clear obstacle map",
+  displayText: "{my}: Clear obstacle map",
   description: "Remove the obstacle map and all associated data. Use this when switching levels or resetting the navigation system."
 };
 

@@ -1,6 +1,6 @@
 export const config = {
   listName: "Add elevator stop",
-  displayText: "Add elevator stop to group {0} at ({1}, {2}) [Speed: {3}] [Tag: {4}]",
+  displayText: "{my}: Add elevator stop to group {0} at ({1}, {2}) [Speed: {3}] [Tag: {4}]",
   description: "Add a stop to an elevator group. Automatically creates two-way gradual portals between this stop and all other stops in the same group. Cost is auto-calculated from distance and speed. Use a unique group name (e.g. 'elevator_A') for each elevator. Use PortalExitX/PortalExitY in 'On portal entry' to determine which floor the AI is heading to.",
   params: [
     { id: "groupId", name: "Group", desc: "Unique group name for this elevator (e.g. 'elevator_A')", type: "string", initialValue: '"elevator_A"' },

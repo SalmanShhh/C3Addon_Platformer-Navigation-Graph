@@ -1,6 +1,6 @@
 export const config = {
   listName: "On waypoint reached",
-  displayText: "On waypoint reached",
+  displayText: "{my}: On waypoint reached",
   description: "Triggered each time the character reaches a waypoint along the path. Use this to play footstep sounds, particle effects, or update animations.",
   isTrigger: true
 };

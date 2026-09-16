@@ -33,5 +33,10 @@
     "added": "",
     "changed": "",
     "fixed": "Fix expression param. for Portal Tags"
+  },
+  "0.5.0.0": {
+    "added": "- Auto-Build Graph property (Auto / From Pathfinding / From Solids): zero-event startup — the obstacle map and graph build themselves on layout start.\n- Tile Size auto-detect (0 = auto): reads the Pathfinding behavior's Cell Size or the solid tilemap's tile size, and propagates it to all shared-graph instances.\n- New simple 'Find path' (X, Y) and 'Find path to object' actions with sensible defaults (ground correction on, Nearest mode).\n- Time-sliced graph generation: large maps build across several ticks (~6ms per tick) instead of stalling a frame; any Find path call finishes an in-progress build synchronously first.",
+    "changed": "- Old FindPath renamed to 'Find path to position (advanced)' — unchanged behavior, full parameter control.\n- Runtime split into maintainable modules (obstacle map, graph build, pathfinding, movement, portals, hazards, navigation manager).\n- Removed the dead legacy src/aces.js; ACE folder files are the single source of truth.\n- Guide.md fully rewritten: scenarios-first structure, complete ACE reference tables, system + game use cases (incl. fleeing and flee-to-cover), corrected scripting docs (on()/off() listener API).",
+    "fixed": "- GraphData expressions IsNodeIsland / IsNodeLeftLedge / IsNodeRightLedge / IsTileJumpThru crashed at runtime (called methods that did not exist).\n- 'Node exists at grid/world position' conditions always returned false (stale string map key)."
   }
 }

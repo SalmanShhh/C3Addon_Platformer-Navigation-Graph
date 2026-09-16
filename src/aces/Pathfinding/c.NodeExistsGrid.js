@@ -1,6 +1,6 @@
 export const config = {
   listName: "Node exists at grid position",
-  displayText: "Node exists at grid ({0}, {1})",
+  displayText: "{my}: Node exists at grid ({0}, {1})",
   description: "Check if a navigation node exists at the specified grid coordinates. Use this to validate positions before pathfinding or placing objects.",
   isInvertible: true,
   params: [

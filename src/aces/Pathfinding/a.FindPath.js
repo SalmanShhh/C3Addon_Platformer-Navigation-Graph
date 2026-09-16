@@ -1,7 +1,7 @@
 export const config = {
-  listName: "Find path to position",
-  displayText: "Find path to ({0}, {1}) [Ground correction: {2}] [Mode: {3}] [Jump positioning: {4}]",
-  description: "Calculate a path from the character's position to the target coordinates. Use this when you want the AI to navigate to a specific point. Requires: Navigation graph must be generated first.",
+  listName: "Find path to position (advanced)",
+  displayText: "{my}: Find path to ({0}, {1}) [Ground correction: {2}] [Mode: {3}] [Jump positioning: {4}]",
+  description: "Calculate a path to the target coordinates with full control over ground correction, path mode, and jump positioning. For the common case, the simpler 'Find path' or 'Find path to object' actions are recommended.",
   params: [
     { id: "x", name: "X", desc: "Target X position in pixels", type: "number", initialValue: "0" },
     { id: "y", name: "Y", desc: "Target Y position in pixels", type: "number", initialValue: "0" },

@@ -25,7 +25,7 @@
           },
           "cell_size": {
             "name": "Tile Size",
-            "desc": "Size of each grid tile in pixels. MUST match the Cell Size in your Pathfinding behavior! Smaller = more precise paths but slower performance."
+            "desc": "Size of each grid tile in pixels. 0 = Auto-detect (recommended): reads the Cell Size from the Pathfinding behavior, or the tile size of your solid tilemap. If set manually, it MUST match your Pathfinding behavior's Cell Size / tilemap tile size. Smaller = more precise paths but slower performance."
           },
           "max_search_nodes": {
             "name": "Max Search Nodes",
@@ -88,12 +88,22 @@
           "hazard_radius": {
             "name": "Hazard Radius",
             "desc": "Tile radius for hazard cost falloff buffer zone. Nearby tiles within this radius of a hazard get cost penalties. 0 = no buffer, only exact hazard tiles affected."
+          },
+          "auto_build": {
+            "name": "Auto-Build Graph",
+            "desc": "Zero-event startup: automatically build the obstacle map and navigation graph on startup, no events needed. Auto: use the Pathfinding behavior's map if one is attached to this object, otherwise scan all objects with Solid/Jump-thru behaviors. From Pathfinding: always wait for the Pathfinding behavior's map. From Solids: always scan Solid/Jump-thru objects. Off: set the map up yourself with actions (legacy behavior — still picks up an attached Pathfinding behavior's map automatically).",
+            "items": {
+              "off": "Off (manual setup)",
+              "auto": "Auto (recommended)",
+              "pathfinding": "From Pathfinding behavior",
+              "solids": "From Solid/Jump-thru objects"
+            }
           }
         },
         "actions": {
           "SetMaxFallDistance": {
             "list-name": "Set max fall distance",
-            "display-text": "Set max fall distance to {0} px",
+            "display-text": "{my}: Set max fall distance to {0} px",
             "description": "Override the maximum fall distance (in pixels) the AI is allowed to drop when pathfinding. Falls beyond this value will not be considered as valid connections. Calling this locks in the value.",
             "params": {
               "value": {
@@ -104,7 +114,7 @@
           },
           "SetMaxJumpDistance": {
             "list-name": "Set max jump distance",
-            "display-text": "Set max jump distance to {0} px",
+            "display-text": "{my}: Set max jump distance to {0} px",
             "description": "Override the maximum horizontal jump distance (in pixels) used to build navigation graph connections. Use this if the auto-detected value from the platform behavior is wrong for your setup. Calling this locks in the value — it won't be overridden by platform behavior properties.",
             "params": {
               "value": {
@@ -115,7 +125,7 @@
           },
           "SetMaxJumpHeight": {
             "list-name": "Set max jump height",
-            "display-text": "Set max jump height to {0} px",
+            "display-text": "{my}: Set max jump height to {0} px",
             "description": "Override the maximum jump height (in pixels) used to build navigation graph connections. Use this if the auto-detected value from the platform behavior is wrong for your setup. Calling this locks in the value — it won't be overridden by platform behavior properties.",
             "params": {
               "value": {
@@ -126,13 +136,13 @@
           },
           "LogGraphStats": {
             "list-name": "Log graph stats",
-            "display-text": "Log graph stats to console",
+            "display-text": "{my}: Log graph stats to console",
             "description": "Print navigation graph statistics to the browser console. Useful for debugging — shows node count, connection count, portal count, etc.",
             "params": {}
           },
           "AddCircleHazard": {
             "list-name": "Add circle hazard",
-            "display-text": "Add circle hazard at ({0}, {1}) [Radius: {2}] [Severity: {3}]",
+            "display-text": "{my}: Add circle hazard at ({0}, {1}) [Radius: {2}] [Severity: {3}]",
             "description": "Add a circular hazard area. The AI will avoid this area based on severity. Hazard avoidance is automatically enabled. Returns a hazard ID for later removal. Use for dynamic danger zones like explosions or enemy AOE.",
             "params": {
               "x": {
@@ -155,7 +165,7 @@
           },
           "AddRectHazard": {
             "list-name": "Add rectangle hazard",
-            "display-text": "Add rectangle hazard at ({0}, {1}) [Size: {2} x {3}] [Severity: {4}]",
+            "display-text": "{my}: Add rectangle hazard at ({0}, {1}) [Size: {2} x {3}] [Severity: {4}]",
             "description": "Add a rectangular hazard area. The AI will avoid this area based on severity. Hazard avoidance is automatically enabled. Returns a hazard ID for later removal. Use for static danger zones like spike pits.",
             "params": {
               "x": {
@@ -182,19 +192,19 @@
           },
           "ClearAllHazards": {
             "list-name": "Clear all hazards",
-            "display-text": "Clear all circle and rectangle hazards",
+            "display-text": "{my}: Clear all circle and rectangle hazards",
             "description": "Remove all circular and rectangular hazards. This does NOT clear tile-based hazards. Use when resetting a level or clearing all dynamic dangers.",
             "params": {}
           },
           "ClearAllHazardTiles": {
             "list-name": "Clear all tile hazards",
-            "display-text": "Clear all tile hazards",
+            "display-text": "{my}: Clear all tile hazards",
             "description": "Reset all tile hazard severities to 0. This does NOT remove circle/rect hazards. Use when you want to clear static tile dangers.",
             "params": {}
           },
           "RemoveHazard": {
             "list-name": "Remove hazard",
-            "display-text": "Remove hazard {0}",
+            "display-text": "{my}: Remove hazard {0}",
             "description": "Remove a hazard by its ID. Use this when a danger zone is no longer active. The graph will be regenerated if needed.",
             "params": {
               "id": {
@@ -205,7 +215,7 @@
           },
           "AutoDetectSlopeTiles": {
             "list-name": "Auto-detect slope tiles from tilemap",
-            "display-text": "Auto-detect slope tiles from {0} by collision polygon shape",
+            "display-text": "{my}: Auto-detect slope tiles from {0} by collision polygon shape",
             "description": "Scan a Tilemap and automatically classify slope tiles by reading their per-tile collision polygon shapes. Triangular collision polygons (3 points) are classified as 45° slopes; trapezoidal polygons (4 non-rectangular points) are classified as 22.5° gentle slopes. Horizontally-flipped tile variants are detected and their slope direction is automatically mirrored.",
             "params": {
               "tilemap": {
@@ -216,7 +226,7 @@
           },
           "BuildObstacleMapFromLayout": {
             "list-name": "Build obstacle map from layout",
-            "display-text": "Build obstacle map [{0}×{1} px]",
+            "display-text": "{my}: Build obstacle map [{0}×{1} px]",
             "description": "Create an empty obstacle map grid from layout pixel dimensions. No Pathfinding behavior required. Follow with ScanSolidObjectsIntoObstacleMap and ScanJumpThruObjectsIntoObstacleMap to fill it.",
             "params": {
               "layoutWidth": {
@@ -231,19 +241,19 @@
           },
           "ClearAllSlopes": {
             "list-name": "Clear all slope markings",
-            "display-text": "Clear all slope markings",
+            "display-text": "{my}: Clear all slope markings",
             "description": "Remove all slope markings from the obstacle map. Slopes will be treated as regular solid tiles. Use this to reset slope data.",
             "params": {}
           },
           "ClearObstacleMap": {
             "list-name": "Clear obstacle map",
-            "display-text": "Clear obstacle map",
+            "display-text": "{my}: Clear obstacle map",
             "description": "Remove the obstacle map and all associated data. Use this when switching levels or resetting the navigation system.",
             "params": {}
           },
           "CreateCustomObstacleMap": {
             "list-name": "Create custom obstacle map",
-            "display-text": "Create custom obstacle map [Width: {0} tiles] [Height: {1} tiles]",
+            "display-text": "{my}: Create custom obstacle map [Width: {0} tiles] [Height: {1} tiles]",
             "description": "Create a custom obstacle map with the specified dimensions in tiles. All tiles are initialized to 'clear' state. Use this when not using the Pathfinding behavior's obstacle map.",
             "params": {
               "width": {
@@ -258,13 +268,13 @@
           },
           "GenerateNodesFromCustomMap": {
             "list-name": "Generate navigation graph",
-            "display-text": "Generate navigation graph from obstacle map",
+            "display-text": "{my}: Generate navigation graph from obstacle map",
             "description": "Generate the navigation graph from the current obstacle map. Call this after setting up all tiles and before pathfinding. This is an expensive operation.",
             "params": {}
           },
           "LoadObstacleMapFromJSON": {
             "list-name": "Load obstacle map from JSON",
-            "display-text": "Load obstacle map from JSON: {0}",
+            "display-text": "{my}: Load obstacle map from JSON: {0}",
             "description": "Load a previously saved obstacle map from JSON string. Use this to restore saved maps or load pre-built level data.",
             "params": {
               "json": {
@@ -275,7 +285,7 @@
           },
           "MapSlopeTilesFromTilemap": {
             "list-name": "Map slope tiles from tilemap",
-            "display-text": "Map slopes from {0}: left={1} right={2} gentle-left={3} gentle-right={4}",
+            "display-text": "{my}: Map slopes from {0}: left={1} right={2} gentle-left={3} gentle-right={4}",
             "description": "Scan a Tilemap and mark tiles matching the given tile IDs as slopes. Pass tile IDs as comma-separated strings (e.g. '5,6,7'). Pass empty string to skip a slope type. Requires the obstacle map to be created first.",
             "params": {
               "tilemap": {
@@ -302,7 +312,7 @@
           },
           "MarkSlopeRegion": {
             "list-name": "Mark slope region",
-            "display-text": "Mark slope from ({0},{1}) to ({2},{3}) as {4}",
+            "display-text": "{my}: Mark slope from ({0},{1}) to ({2},{3}) as {4}",
             "description": "Mark a diagonal region of tiles as slope. Specify the start and end grid corners. All tiles along the diagonal will be marked as slope with the given direction.",
             "params": {
               "startGx": {
@@ -335,7 +345,7 @@
           },
           "ScanJumpThruObjectsIntoObstacleMap": {
             "list-name": "Scan jump-thru objects into obstacle map",
-            "display-text": "Scan {0} (jump-thru) into obstacle map",
+            "display-text": "{my}: Scan {0} (jump-thru) into obstacle map",
             "description": "Scan one-way platform objects into the obstacle map as jump-thru cells. Requires an existing obstacle map (call BuildObstacleMapFromLayout first). Objects must have the Jump-thru behavior enabled.",
             "params": {
               "jumpThruObjects": {
@@ -346,7 +356,7 @@
           },
           "ScanSolidObjectsIntoObstacleMap": {
             "list-name": "Scan solid objects into obstacle map",
-            "display-text": "Scan {0} (solid) into obstacle map",
+            "display-text": "{my}: Scan {0} (solid) into obstacle map",
             "description": "Scan solid objects into the obstacle map. Requires an existing obstacle map (call BuildObstacleMapFromLayout first). Tilemaps are scanned cell-by-cell; sprites use bounding box. Objects must have the Solid behavior enabled.",
             "params": {
               "solidObjects": {
@@ -357,7 +367,7 @@
           },
           "SetHazardRadius": {
             "list-name": "Set hazard radius",
-            "display-text": "Set hazard radius to {0} tiles",
+            "display-text": "{my}: Set hazard radius to {0} tiles",
             "description": "Set the radius in tiles for circular/rectangular hazard influence. Tiles within this radius of a hazard will have their pathfinding cost increased.",
             "params": {
               "tiles": {
@@ -368,7 +378,7 @@
           },
           "SetRePathThreshold": {
             "list-name": "Set re-path threshold",
-            "display-text": "Set re-path threshold to {0} tiles",
+            "display-text": "{my}: Set re-path threshold to {0} tiles",
             "description": "Set how many tiles the character can drift from the path before automatic re-pathing triggers. Higher values = more tolerance for deviation.",
             "params": {
               "tiles": {
@@ -379,7 +389,7 @@
           },
           "SetTileHazard": {
             "list-name": "Set tile hazard severity",
-            "display-text": "Set tile hazard at ({0}, {1}) to {2}",
+            "display-text": "{my}: Set tile hazard at ({0}, {1}) to {2}",
             "description": "Set the hazard severity for a specific tile. Higher values make the AI avoid this tile more strongly. 0 = no hazard. Hazard avoidance is automatically enabled when any hazard is added. Use this to mark dangerous areas like spikes or lava.",
             "params": {
               "gx": {
@@ -398,7 +408,7 @@
           },
           "SetTileState": {
             "list-name": "Set tile state",
-            "display-text": "Set tile at ({0}, {1}) to {2}",
+            "display-text": "{my}: Set tile at ({0}, {1}) to {2}",
             "description": "Set the state of a tile at the specified grid coordinates. Use this to mark tiles as solid obstacles, clear space, jump-thru platforms, areas to avoid, or slopes.",
             "params": {
               "gx": {
@@ -427,7 +437,7 @@
           },
           "SetTileStateWorld": {
             "list-name": "Set tile state at world position",
-            "display-text": "Set tile at world ({0}, {1}) to {2}",
+            "display-text": "{my}: Set tile at world ({0}, {1}) to {2}",
             "description": "Set the state of a tile at the specified world coordinates. The world position is automatically converted to grid coordinates.",
             "params": {
               "x": {
@@ -456,7 +466,7 @@
           },
           "UsePathfindingObstacleMap": {
             "list-name": "Use Pathfinding obstacle map",
-            "display-text": "Use Pathfinding obstacle map [Auto-regenerate: {0}]",
+            "display-text": "{my}: Use Pathfinding obstacle map [Auto-regenerate: {0}]",
             "description": "Use the obstacle map from the Pathfinding behavior instead of a custom map. Enable auto-regenerate to automatically rebuild the graph when the Pathfinding map changes.",
             "params": {
               "autoRegen": {
@@ -470,9 +480,9 @@
             }
           },
           "FindPath": {
-            "list-name": "Find path to position",
-            "display-text": "Find path to ({0}, {1}) [Ground correction: {2}] [Mode: {3}] [Jump positioning: {4}]",
-            "description": "Calculate a path from the character's position to the target coordinates. Use this when you want the AI to navigate to a specific point. Requires: Navigation graph must be generated first.",
+            "list-name": "Find path to position (advanced)",
+            "display-text": "{my}: Find path to ({0}, {1}) [Ground correction: {2}] [Mode: {3}] [Jump positioning: {4}]",
+            "description": "Calculate a path to the target coordinates with full control over ground correction, path mode, and jump positioning. For the common case, the simpler 'Find path' or 'Find path to object' actions are recommended.",
             "params": {
               "x": {
                 "name": "X",
@@ -509,9 +519,35 @@
               }
             }
           },
+          "FindPathTo": {
+            "list-name": "Find path",
+            "display-text": "{my}: Find path to ({0}, {1})",
+            "description": "Calculate a path to a position using sensible defaults: start and target snap to the nearest walkable ground, and if the exact target is unreachable the character paths as close as possible (never fails outright). This is the recommended action for most games. Use 'Find path to position (advanced)' for full control over ground correction, mode, and jump positioning.",
+            "params": {
+              "x": {
+                "name": "X",
+                "desc": "Target X position in pixels"
+              },
+              "y": {
+                "name": "Y",
+                "desc": "Target Y position in pixels"
+              }
+            }
+          },
+          "FindPathToObject": {
+            "list-name": "Find path to object",
+            "display-text": "{my}: Find path to {0}",
+            "description": "Calculate a path to another object's position (e.g. the player) using sensible defaults: start and target snap to the nearest walkable ground, and if the exact target is unreachable the character paths as close as possible (never fails outright). Uses the first picked instance of the object.",
+            "params": {
+              "target": {
+                "name": "Target object",
+                "desc": "The object to path toward (first picked instance)"
+              }
+            }
+          },
           "JumpTowardPosition": {
             "list-name": "Jump toward position",
-            "display-text": "Jump toward ({0}, {1})",
+            "display-text": "{my}: Jump toward ({0}, {1})",
             "description": "Immediately jump toward a target position. The character jumps from its current position with full strength, moving horizontally toward the target. No pathfinding is involved — the character simply lunges at the target. Use for: jump attacks, stomps, lunges. Triggers 'On jump toward executed' when the jump starts. The character must be on the floor to jump.",
             "params": {
               "x": {
@@ -526,13 +562,13 @@
           },
           "RegenerateGraph": {
             "list-name": "Regenerate navigation graph",
-            "display-text": "Regenerate navigation graph",
+            "display-text": "{my}: Regenerate navigation graph",
             "description": "Rebuild the navigation graph from scratch. Use after modifying the level layout, adding/removing obstacles, or changing platform positions.",
             "params": {}
           },
           "SetAutoControl": {
             "list-name": "Set auto-control",
-            "display-text": "Set auto-control: {0}",
+            "display-text": "{my}: Set auto-control: {0}",
             "description": "Toggle auto-movement on/off. When enabled, the behavior automatically controls the Platform behavior to follow paths. When disabled, you control movement yourself using path data expressions.",
             "params": {
               "enabled": {
@@ -547,7 +583,7 @@
           },
           "SetCoyoteTime": {
             "list-name": "Set coyote time",
-            "display-text": "Set coyote time to {0} seconds",
+            "display-text": "{my}: Set coyote time to {0} seconds",
             "description": "Set the coyote time window in seconds. The AI can jump within this window after walking off a ledge. Set to 0 to disable coyote time.",
             "params": {
               "seconds": {
@@ -558,7 +594,7 @@
           },
           "SetLedgeLeniency": {
             "list-name": "Set ledge leniency",
-            "display-text": "Set ledge leniency to {0} pixels",
+            "display-text": "{my}: Set ledge leniency to {0} pixels",
             "description": "Set how many pixels past a platform edge the AI can walk before stopping (0 = strict stop). Increase for more natural-looking patrol movement near edges. Only used when ledge restriction is enabled.",
             "params": {
               "pixels": {
@@ -569,7 +605,7 @@
           },
           "SetLedgeRestriction": {
             "list-name": "Set ledge restriction",
-            "display-text": "Set ledge restriction: {0}",
+            "display-text": "{my}: Set ledge restriction: {0}",
             "description": "Prevents AI characters from walking off platform edges when they have no reason to leave. Useful for patrol guards that should stay on their platform, or NPCs that shouldn't wander off rooftops. This only stops characters from casually walking off edges — if the AI's path requires a jump or fall to reach its goal, it will still leave the platform.",
             "params": {
               "enabled": {
@@ -584,7 +620,7 @@
           },
           "SetPathStrategy": {
             "list-name": "Set path strategy",
-            "display-text": "Set path strategy to {0}",
+            "display-text": "{my}: Set path strategy to {0}",
             "description": "Change how the AI picks the best route when multiple paths exist. Balanced: weighs distance and difficulty equally. Shortest Distance: always takes the fastest route. Safest Route: avoids jumps and falls. Simplest Path: fewest waypoints.",
             "params": {
               "strategy": {
@@ -601,7 +637,7 @@
           },
           "SetRePathCooldown": {
             "list-name": "Set re-path cooldown",
-            "display-text": "Set re-path cooldown to {0} seconds",
+            "display-text": "{my}: Set re-path cooldown to {0} seconds",
             "description": "Set the minimum time in seconds between automatic re-path attempts. Lower values = more responsive re-pathing but more CPU usage. Default is 0.5 seconds.",
             "params": {
               "seconds": {
@@ -612,7 +648,7 @@
           },
           "SetStrictJumpPositioning": {
             "list-name": "Set strict jump positioning",
-            "display-text": "Set strict jump positioning: {0}",
+            "display-text": "{my}: Set strict jump positioning: {0}",
             "description": "Toggle whether this AI character slows down and carefully positions itself before jumping or falling during pathfinding. This does NOT affect walking off edges (use 'Set ledge restriction' for that). Use this to change behavior at runtime — for example, disable when a boss enters 'rage mode' for reckless movement, or enable when an NPC needs to carefully cross a narrow bridge.",
             "params": {
               "enabled": {
@@ -627,13 +663,13 @@
           },
           "StopPathfinding": {
             "list-name": "Stop pathfinding",
-            "display-text": "Stop pathfinding",
+            "display-text": "{my}: Stop pathfinding",
             "description": "Stop the character immediately and clear the current path. Use when you want to cancel AI navigation and regain manual control.",
             "params": {}
           },
           "SetMaxPathsPerTick": {
             "list-name": "Set max paths per tick",
-            "display-text": "Set max paths per tick to {0}",
+            "display-text": "{my}: Set max paths per tick to {0}",
             "description": "Set how many pathfinding requests can be processed per game tick. Higher values reduce latency but increase CPU cost per frame. Default is 1.",
             "params": {
               "count": {
@@ -644,7 +680,7 @@
           },
           "AddElevatorStop": {
             "list-name": "Add elevator stop",
-            "display-text": "Add elevator stop to group {0} at ({1}, {2}) [Speed: {3}] [Tag: {4}]",
+            "display-text": "{my}: Add elevator stop to group {0} at ({1}, {2}) [Speed: {3}] [Tag: {4}]",
             "description": "Add a stop to an elevator group. Automatically creates two-way gradual portals between this stop and all other stops in the same group. Cost is auto-calculated from distance and speed. Use a unique group name (e.g. 'elevator_A') for each elevator. Use PortalExitX/PortalExitY in 'On portal entry' to determine which floor the AI is heading to.",
             "params": {
               "groupId": {
@@ -671,7 +707,7 @@
           },
           "AddElevatorStopFromObject": {
             "list-name": "Add elevator stop from object",
-            "display-text": "Add elevator stop to group {0} at {1} [Speed: {2}] [Tag: {3}]",
+            "display-text": "{my}: Add elevator stop to group {0} at {1} [Speed: {2}] [Tag: {3}]",
             "description": "Add an elevator stop using an object's position. Same as 'Add elevator stop' but uses the object's current X/Y. The object serves as a floor marker.",
             "params": {
               "groupId": {
@@ -694,7 +730,7 @@
           },
           "AddGradualPortal": {
             "list-name": "Add gradual portal",
-            "display-text": "Add {0} gradual portal from ({1}, {2}) to ({3}, {4}) [Cost: {5}] [Speed: {6}] [Tag: {7}]",
+            "display-text": "{my}: Add {0} gradual portal from ({1}, {2}) to ({3}, {4}) [Cost: {5}] [Speed: {6}] [Tag: {7}]",
             "description": "Add a portal that gradually moves the AI from entry to exit at the given speed. The character moves in a straight line (any direction — vertical, horizontal, or diagonal). Platform behavior is disabled during movement. Use for: elevators, lifts, moving platforms, ziplines.",
             "params": {
               "direction": {
@@ -737,7 +773,7 @@
           },
           "AddGradualPortalFromObjects": {
             "list-name": "Add gradual portal from objects",
-            "display-text": "Add {0} gradual portal from {1} to {2} [Cost: {3}] [Speed: {4}] [Tag: {5}]",
+            "display-text": "{my}: Add {0} gradual portal from {1} to {2} [Cost: {3}] [Speed: {4}] [Tag: {5}]",
             "description": "Add a gradual portal using two objects. Character moves from entry object to exit object at the given speed. Use for: linking elevator sprites, rope endpoints, etc.",
             "params": {
               "direction": {
@@ -772,7 +808,7 @@
           },
           "AddInstantPortal": {
             "list-name": "Add instant portal",
-            "display-text": "Add {0} instant portal from ({1}, {2}) to ({3}, {4}) [Cost: {5}] [Tag: {6}]",
+            "display-text": "{my}: Add {0} instant portal from ({1}, {2}) to ({3}, {4}) [Cost: {5}] [Tag: {6}]",
             "description": "Add a portal that instantly teleports the AI from the entry to the exit. Use for: teleporters, doors, warp zones, or any portal where the character disappears and reappears at the exit. Use 'On portal entry' with 'Pause at portal' to play animations before the teleport happens.",
             "params": {
               "direction": {
@@ -811,7 +847,7 @@
           },
           "AddInstantPortalFromObjects": {
             "list-name": "Add instant portal from objects",
-            "display-text": "Add {0} instant portal from {1} to {2} [Cost: {3}] [Tag: {4}]",
+            "display-text": "{my}: Add {0} instant portal from {1} to {2} [Cost: {3}] [Tag: {4}]",
             "description": "Add an instant portal using two objects as entry and exit positions. The objects' current X/Y positions are used. Use for: linking door sprites, warp pad objects, etc.",
             "params": {
               "direction": {
@@ -842,25 +878,25 @@
           },
           "ClearAllPortals": {
             "list-name": "Clear all portals",
-            "display-text": "Clear all portals",
+            "display-text": "{my}: Clear all portals",
             "description": "Remove all portals from the navigation graph. Useful when resetting the level or switching layouts.",
             "params": {}
           },
           "CompletePortal": {
             "list-name": "Complete portal",
-            "display-text": "Complete portal",
+            "display-text": "{my}: Complete portal",
             "description": "Finish a paused portal without executing its built-in movement. Use this when you've already moved the character yourself (e.g., custom animation, physics launch, manual position set). The AI will continue pathfinding from wherever the character is now. Also works mid-traverse to cut a gradual portal short.",
             "params": {}
           },
           "PauseAtPortal": {
             "list-name": "Pause at portal",
-            "display-text": "Pause at portal",
+            "display-text": "{my}: Pause at portal",
             "description": "Call INSIDE 'On portal entry' to pause the AI before the portal executes. The character stops at the entry point and waits. Use this to play animations, open doors, trigger screen transitions, or run any custom events before the portal activates. Call 'Resume portal' to execute the built-in behavior, or 'Complete portal' if you moved the character yourself.",
             "params": {}
           },
           "RemovePortal": {
             "list-name": "Remove portal by ID",
-            "display-text": "Remove portal with ID {0}",
+            "display-text": "{my}: Remove portal with ID {0}",
             "description": "Remove a portal by its ID. The portal connection is removed from the navigation graph immediately.",
             "params": {
               "portalId": {
@@ -871,7 +907,7 @@
           },
           "RemovePortalAtObject": {
             "list-name": "Remove portal at object",
-            "display-text": "Remove portal at {0}",
+            "display-text": "{my}: Remove portal at {0}",
             "description": "Remove the portal closest to this object. Works with both entry and exit positions — for two-way portals, either endpoint object can be used.",
             "params": {
               "object": {
@@ -882,7 +918,7 @@
           },
           "RemovePortalsByTag": {
             "list-name": "Remove portals by tag",
-            "display-text": "Remove all portals tagged {0}",
+            "display-text": "{my}: Remove all portals tagged {0}",
             "description": "Remove every portal whose tag matches the given string. Connections are removed from the navigation graph immediately. Use this to deactivate a group of related portals — for example, removing all 'door' portals when a room is sealed, or clearing 'floor_2' portals when a floor is destroyed.",
             "params": {
               "tag": {
@@ -893,13 +929,13 @@
           },
           "ResumePortal": {
             "list-name": "Resume portal",
-            "display-text": "Resume portal",
+            "display-text": "{my}: Resume portal",
             "description": "Continue portal execution after pausing with 'Pause at portal'. For instant portals: teleports the character to the exit. For gradual portals: begins moving the character toward the exit. Use this when you want the portal's built-in movement to handle the transition.",
             "params": {}
           },
           "SetPortalCost": {
             "list-name": "Set portal cost",
-            "display-text": "Set portal {0} cost to {1}",
+            "display-text": "{my}: Set portal {0} cost to {1}",
             "description": "Change how 'expensive' a portal is for the AI to use. Lower cost = preferred, higher cost = avoided.",
             "params": {
               "portalId": {
@@ -914,7 +950,7 @@
           },
           "SetPortalIgnoreHazards": {
             "list-name": "Set portal ignore hazards",
-            "display-text": "Set portal {0} ignore hazards: {1}",
+            "display-text": "{my}: Set portal {0} ignore hazards: {1}",
             "description": "Set whether a portal ignores nearby hazards when calculating its pathfinding cost.",
             "params": {
               "portalId": {
@@ -933,7 +969,7 @@
           },
           "SetPortalSpeed": {
             "list-name": "Set portal speed",
-            "display-text": "Set portal {0} speed to {1}",
+            "display-text": "{my}: Set portal {0} speed to {1}",
             "description": "Change the movement speed of a gradual portal (pixels per second). Has no effect on instant portals.",
             "params": {
               "portalId": {
@@ -948,7 +984,7 @@
           },
           "SetPortalTag": {
             "list-name": "Set portal tag",
-            "display-text": "Set portal {0} tag to {1}",
+            "display-text": "{my}: Set portal {0} tag to {1}",
             "description": "Assign a string tag to a portal. Tags are used to group portals so they can be removed together with 'Remove portals by tag'. A portal can only have one tag at a time — calling this again replaces the previous tag.",
             "params": {
               "portalId": {
@@ -963,7 +999,7 @@
           },
           "TeleportToPosition": {
             "list-name": "Teleport to position",
-            "display-text": "Teleport to ({0}, {1})",
+            "display-text": "{my}: Teleport to ({0}, {1})",
             "description": "Instantly move the character to the given position. Can be used anywhere — inside portal events, on button press, on collision, etc. Suppresses re-pathing for one tick to prevent the AI from thinking it's lost. Useful with 'Pause at portal' + 'Complete portal' for fully custom portal behavior.",
             "params": {
               "x": {
@@ -978,7 +1014,7 @@
           },
           "SetMultiAgentAvoidance": {
             "list-name": "Set multi-agent avoidance",
-            "display-text": "Set multi-agent avoidance: {0}",
+            "display-text": "{my}: Set multi-agent avoidance: {0}",
             "description": "Enable or disable path-level multi-agent avoidance. When enabled, agents try to avoid choosing overlapping paths when multiple agents share the same navigation map.",
             "params": {
               "enabled": {
@@ -995,7 +1031,7 @@
         "conditions": {
           "IsNodeLedge": {
             "list-name": "Is node a ledge",
-            "display-text": "Node at ({0}, {1}) is a ledge",
+            "display-text": "{my}: Node at ({0}, {1}) is a ledge",
             "description": "True if the node at the given grid coordinates is a ledge node (left or right ledge).",
             "params": {
               "gx": {
@@ -1010,7 +1046,7 @@
           },
           "IsPositionHazardous": {
             "list-name": "Is position hazardous",
-            "display-text": "Is position ({0}, {1}) hazardous",
+            "display-text": "{my}: Is position ({0}, {1}) hazardous",
             "description": "Check if a specific world position is within any hazard area (circle, rect, or tile). Returns true if any hazard affects this position.",
             "params": {
               "x": {
@@ -1025,43 +1061,43 @@
           },
           "IsSettingUpPathfinding": {
             "list-name": "Is setting up Pathfinding",
-            "display-text": "Is setting up Pathfinding map",
+            "display-text": "{my}: Is setting up Pathfinding map",
             "description": "Check if the behavior is currently waiting for the Pathfinding obstacle map to initialize. Returns true during async setup.",
             "params": {}
           },
           "OnObstacleMapCreated": {
             "list-name": "On obstacle map created",
-            "display-text": "On obstacle map created",
+            "display-text": "{my}: On obstacle map created",
             "description": "Triggered when a custom obstacle map is successfully created. Use this to start configuring tiles after map creation.",
             "params": {}
           },
           "OnObstacleMapRemoved": {
             "list-name": "On obstacle map removed",
-            "display-text": "On obstacle map removed",
+            "display-text": "{my}: On obstacle map removed",
             "description": "Triggered when the obstacle map is cleared or removed. Use this to clean up related data or reset systems.",
             "params": {}
           },
           "OnPathfindingMapFailed": {
             "list-name": "On Pathfinding map failed",
-            "display-text": "On Pathfinding map failed",
+            "display-text": "{my}: On Pathfinding map failed",
             "description": "Triggered when the Pathfinding behavior's obstacle map fails to initialize. Use this to implement fallback error handling.",
             "params": {}
           },
           "OnPathfindingMapReady": {
             "list-name": "On Pathfinding map ready",
-            "display-text": "On Pathfinding map ready",
+            "display-text": "{my}: On Pathfinding map ready",
             "description": "Triggered when the Pathfinding behavior's obstacle map is ready for use. Use this to start graph generation after Pathfinding initialization.",
             "params": {}
           },
           "OnPathfindingMapTimeout": {
             "list-name": "On Pathfinding map timeout",
-            "display-text": "On Pathfinding map timeout",
+            "display-text": "{my}: On Pathfinding map timeout",
             "description": "Triggered when waiting for the Pathfinding obstacle map times out. Use this to handle slow or stuck initialization.",
             "params": {}
           },
           "TileHasState": {
             "list-name": "Tile has state",
-            "display-text": "Tile at ({0}, {1}) has state {2}",
+            "display-text": "{my}: Tile at ({0}, {1}) has state {2}",
             "description": "Check if a tile at the given grid position has the specified state. Use this to query tile properties before actions.",
             "params": {
               "gx": {
@@ -1088,7 +1124,7 @@
           },
           "TileHasStateWorld": {
             "list-name": "Tile has state at world position",
-            "display-text": "Tile at world ({0}, {1}) has state {2}",
+            "display-text": "{my}: Tile at world ({0}, {1}) has state {2}",
             "description": "Check if a tile at the given world position has the specified state. World coordinates are automatically converted to grid coordinates.",
             "params": {
               "x": {
@@ -1115,31 +1151,31 @@
           },
           "HasPath": {
             "list-name": "Has active path",
-            "display-text": "Has active path",
+            "display-text": "{my}: Has active path",
             "description": "Check if the character currently has an active pathfinding path. Returns true while navigating, false when idle or path is complete.",
             "params": {}
           },
           "IsAtIsland": {
             "list-name": "Is at island",
-            "display-text": "Is at island",
+            "display-text": "{my}: Is at island",
             "description": "Check if the character is standing on a single-tile platform (isolated platform). Use this to detect precarious positions or trigger special behaviors.",
             "params": {}
           },
           "IsAtLedge": {
             "list-name": "Is at ledge",
-            "display-text": "Is at ledge",
+            "display-text": "{my}: Is at ledge",
             "description": "Check if the character is currently standing on a ledge node (edge of a platform). Use this to trigger ledge-specific behaviors or animations.",
             "params": {}
           },
           "IsPlatformEnabled": {
             "list-name": "Is platform enabled",
-            "display-text": "Platform behavior is enabled",
+            "display-text": "{my}: Platform behavior is enabled",
             "description": "Check if the associated Platform behavior is currently enabled. Returns false if Platform behavior is disabled or not found.",
             "params": {}
           },
           "NodeExistsGrid": {
             "list-name": "Node exists at grid position",
-            "display-text": "Node exists at grid ({0}, {1})",
+            "display-text": "{my}: Node exists at grid ({0}, {1})",
             "description": "Check if a navigation node exists at the specified grid coordinates. Use this to validate positions before pathfinding or placing objects.",
             "params": {
               "gx": {
@@ -1154,7 +1190,7 @@
           },
           "NodeExistsWorld": {
             "list-name": "Node exists at world position",
-            "display-text": "Node exists at world ({0}, {1})",
+            "display-text": "{my}: Node exists at world ({0}, {1})",
             "description": "Check if a navigation node exists at the specified world coordinates. Use this to validate world positions before pathfinding.",
             "params": {
               "x": {
@@ -1169,85 +1205,85 @@
           },
           "OnGraphGenerated": {
             "list-name": "On navigation graph generated",
-            "display-text": "On navigation graph generated",
+            "display-text": "{my}: On navigation graph generated",
             "description": "Triggered when the navigation graph has been successfully generated. Use this to start pathfinding operations after map setup.",
             "params": {}
           },
           "OnJumpTowardLaunched": {
             "list-name": "On jump toward launched",
-            "display-text": "On jump toward launched",
+            "display-text": "{my}: On jump toward launched",
             "description": "Triggered when the 'Jump toward position' action launches the character. Use this to play attack animations, spawn effects, or apply damage. The target position is available via JumpTowardTargetX/Y expressions.",
             "params": {}
           },
           "OnPathComplete": {
             "list-name": "On path complete",
-            "display-text": "On path complete",
+            "display-text": "{my}: On path complete",
             "description": "Triggered when the AI arrives at the final destination. Use this to trigger arrival animations, next actions, or goal completion logic.",
             "params": {}
           },
           "OnPathFailed": {
             "list-name": "On path failed",
-            "display-text": "On path failed",
+            "display-text": "{my}: On path failed",
             "description": "Triggered when pathfinding fails to find a valid path to the target. Use this to handle unreachable destinations or implement fallback behaviors.",
             "params": {}
           },
           "OnPathFound": {
             "list-name": "On path found",
-            "display-text": "On path found",
+            "display-text": "{my}: On path found",
             "description": "Triggered when a path has been successfully calculated. Use this to start custom actions when pathfinding succeeds.",
             "params": {}
           },
           "OnRePathTriggered": {
             "list-name": "On re-path triggered",
-            "display-text": "On re-path triggered",
+            "display-text": "{my}: On re-path triggered",
             "description": "Triggered when automatic re-pathing occurs due to the character drifting too far from the path. Use this to monitor navigation accuracy.",
             "params": {}
           },
           "OnWaypointReached": {
             "list-name": "On waypoint reached",
-            "display-text": "On waypoint reached",
+            "display-text": "{my}: On waypoint reached",
             "description": "Triggered each time the character reaches a waypoint along the path. Use this to play footstep sounds, particle effects, or update animations.",
             "params": {}
           },
           "OnWaypointStuck": {
             "list-name": "On waypoint stuck",
-            "display-text": "On waypoint stuck",
+            "display-text": "{my}: On waypoint stuck",
             "description": "Triggered when the character has been stuck at a waypoint for too long (exceeds Max Waypoint Time). The path is automatically cancelled. Use this to handle stuck situations or repath.",
             "params": {}
           },
           "IsPathPending": {
             "list-name": "Is path pending",
-            "display-text": "Is path pending",
+            "display-text": "{my}: Is path pending",
             "description": "True when a pathfinding request has been submitted but not yet resolved. Use to show a 'thinking' state or delay actions until the path arrives.",
             "params": {}
           },
           "IsAtPortal": {
             "list-name": "Is at portal",
-            "display-text": "Is at portal",
+            "display-text": "{my}: Is at portal",
             "description": "True when the AI is paused at a portal entry (after 'Pause at portal' was called but before 'Resume portal' or 'Complete portal'). Use to check if the character is waiting at a portal.",
             "params": {}
           },
           "IsTraversingPortal": {
             "list-name": "Is traversing portal",
-            "display-text": "Is traversing portal",
+            "display-text": "{my}: Is traversing portal",
             "description": "True when the AI is currently moving through a gradual portal (elevator, ladder, etc.). Platform behavior is disabled during traversal.",
             "params": {}
           },
           "OnPortalComplete": {
             "list-name": "On portal complete",
-            "display-text": "On portal complete",
+            "display-text": "{my}: On portal complete",
             "description": "Triggered when portal execution finishes — after an instant teleport completes, a gradual movement reaches the exit, or 'Complete portal' is called. Use this for post-portal effects like opening doors at the exit, playing arrival animations, etc.",
             "params": {}
           },
           "OnPortalEntry": {
             "list-name": "On portal entry",
-            "display-text": "On portal entry",
+            "display-text": "{my}: On portal entry",
             "description": "Triggered when the AI arrives at a portal entry point, BEFORE the portal executes. Use 'Pause at portal' inside this event to delay execution and run your own events first (animations, sounds, screen effects). If you don't pause, the portal executes immediately. Use CurrentPortalID to identify which portal was reached.",
             "params": {}
           },
           "IsMultiAgentAvoidanceEnabled": {
             "list-name": "Is multi-agent avoidance enabled",
-            "display-text": "Is multi-agent avoidance enabled",
+            "display-text": "{my}: Is multi-agent avoidance enabled",
             "description": "True if multi-agent avoidance is currently active.",
             "params": {}
           }

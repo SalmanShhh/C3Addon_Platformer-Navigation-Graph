@@ -1,6 +1,6 @@
 export const config = {
   listName: "Set portal ignore hazards",
-  displayText: "Set portal {0} ignore hazards: {1}",
+  displayText: "{my}: Set portal {0} ignore hazards: {1}",
   description: "Set whether a portal ignores nearby hazards when calculating its pathfinding cost.",
   params: [
     { id: "portalId", name: "Portal ID", desc: "The ID of the portal to configure", type: "number", initialValue: "0" },

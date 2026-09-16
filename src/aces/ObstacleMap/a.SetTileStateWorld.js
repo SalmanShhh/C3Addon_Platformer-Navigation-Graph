@@ -1,6 +1,6 @@
 export const config = {
   listName: "Set tile state at world position",
-  displayText: "Set tile at world ({0}, {1}) to {2}",
+  displayText: "{my}: Set tile at world ({0}, {1}) to {2}",
   description: "Set the state of a tile at the specified world coordinates. The world position is automatically converted to grid coordinates.",
   params: [
     { id: "x", name: "X", desc: "World X position in pixels", type: "number", initialValue: "0" },

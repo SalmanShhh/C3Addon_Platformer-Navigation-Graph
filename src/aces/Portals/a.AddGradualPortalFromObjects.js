@@ -1,6 +1,6 @@
 export const config = {
   listName: "Add gradual portal from objects",
-  displayText: "Add {0} gradual portal from {1} to {2} [Cost: {3}] [Speed: {4}] [Tag: {5}]",
+  displayText: "{my}: Add {0} gradual portal from {1} to {2} [Cost: {3}] [Speed: {4}] [Tag: {5}]",
   description: "Add a gradual portal using two objects. Character moves from entry object to exit object at the given speed. Use for: linking elevator sprites, rope endpoints, etc.",
   params: [
     { id: "direction", name: "Direction", desc: "One-way: entry to exit only. Two-way: works in both directions.", type: "combo", initialValue: "two_way",

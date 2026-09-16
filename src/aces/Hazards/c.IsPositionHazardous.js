@@ -1,6 +1,6 @@
 export const config = {
   listName: "Is position hazardous",
-  displayText: "Is position ({0}, {1}) hazardous",
+  displayText: "{my}: Is position ({0}, {1}) hazardous",
   description: "Check if a specific world position is within any hazard area (circle, rect, or tile). Returns true if any hazard affects this position.",
   isInvertible: true,
   params: [

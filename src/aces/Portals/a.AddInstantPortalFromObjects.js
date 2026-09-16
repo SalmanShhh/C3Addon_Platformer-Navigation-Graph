@@ -1,6 +1,6 @@
 export const config = {
   listName: "Add instant portal from objects",
-  displayText: "Add {0} instant portal from {1} to {2} [Cost: {3}] [Tag: {4}]",
+  displayText: "{my}: Add {0} instant portal from {1} to {2} [Cost: {3}] [Tag: {4}]",
   description: "Add an instant portal using two objects as entry and exit positions. The objects' current X/Y positions are used. Use for: linking door sprites, warp pad objects, etc.",
   params: [
     { id: "direction", name: "Direction", desc: "One-way: entry to exit only. Two-way: works in both directions.", type: "combo", initialValue: "one_way",

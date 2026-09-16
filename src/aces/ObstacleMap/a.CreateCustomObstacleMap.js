@@ -1,6 +1,6 @@
 export const config = {
   listName: "Create custom obstacle map",
-  displayText: "Create custom obstacle map [Width: {0} tiles] [Height: {1} tiles]",
+  displayText: "{my}: Create custom obstacle map [Width: {0} tiles] [Height: {1} tiles]",
   description: "Create a custom obstacle map with the specified dimensions in tiles. All tiles are initialized to 'clear' state. Use this when not using the Pathfinding behavior's obstacle map.",
   params: [
     { id: "width", name: "Width", desc: "Width in tiles", type: "number", initialValue: "32" },

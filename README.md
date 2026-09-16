@@ -1,15 +1,28 @@
 <img src="./src/icon.svg" width="100" /><br>
 # Platformer Navigation Graph
 <i>Smart pathfinding for platformer games. Characters automatically jump across gaps, fall between platforms, and find optimal routes through complex levels. Includes instant portals (teleporters, doors) and gradual portals (elevators, ladders, ziplines) with pause/resume support for custom animations. Features hazard avoidance, multiple path strategies, coyote jumps, ledge restriction, and multi-agent support. Works with the built-in Platform behavior — just add the behavior and go.</i> <br>
-### Version 0.4.0.1
+### Version 0.5.0.0
 
-[<img src="https://placehold.co/200x50/4493f8/FFF?text=Download&font=montserrat" width="200"/>](https://github.com/SalmanShhh/Platformer-Navigation-Graph-V2/releases/download/salmanshh_platformer_navigationgraph-0.4.0.1.c3addon/salmanshh_platformer_navigationgraph-0.4.0.1.c3addon)
+[<img src="https://placehold.co/200x50/4493f8/FFF?text=Download&font=montserrat" width="200"/>](https://github.com/SalmanShhh/Platformer-Navigation-Graph-V2/releases/download/salmanshh_platformer_navigationgraph-0.5.0.0.c3addon/salmanshh_platformer_navigationgraph-0.5.0.0.c3addon)
 <br>
 <sub> [See all releases](https://github.com/SalmanShhh/Platformer-Navigation-Graph-V2/releases) </sub> <br>
 
-#### What's New in 0.4.0.1
+#### What's New in 0.5.0.0
+**Added:**
+- Auto-Build Graph property (Auto / From Pathfinding / From Solids): zero-event startup — the obstacle map and graph build themselves on layout start.
+- Tile Size auto-detect (0 = auto): reads the Pathfinding behavior's Cell Size or the solid tilemap's tile size, and propagates it to all shared-graph instances.
+- New simple 'Find path' (X, Y) and 'Find path to object' actions with sensible defaults (ground correction on, Nearest mode).
+- Time-sliced graph generation: large maps build across several ticks (~6ms per tick) instead of stalling a frame; any Find path call finishes an in-progress build synchronously first.
+
+**Changed:**
+- Old FindPath renamed to 'Find path to position (advanced)' — unchanged behavior, full parameter control.
+- Runtime split into maintainable modules (obstacle map, graph build, pathfinding, movement, portals, hazards, navigation manager).
+- Removed the dead legacy src/aces.js; ACE folder files are the single source of truth.
+- Guide.md fully rewritten: scenarios-first structure, complete ACE reference tables, system + game use cases (incl. fleeing and flee-to-cover), corrected scripting docs (on()/off() listener API).
+
 **Fixed:**
-Fix expression param. for Portal Tags
+- GraphData expressions IsNodeIsland / IsNodeLeftLedge / IsNodeRightLedge / IsTileJumpThru crashed at runtime (called methods that did not exist).
+- 'Node exists at grid/world position' conditions always returned false (stale string map key).
 
 <sub>[View full changelog](#changelog)</sub>
 
@@ -47,7 +60,7 @@ npm run dev
 | Property Name | Description | Type |
 | --- | --- | --- |
 | Enable Debug Logging | Show helpful debug messages in browser console (F12) to troubleshoot pathfinding issues. Disable for better performance in final game. | check |
-| Tile Size | Size of each grid tile in pixels. MUST match the Cell Size in your Pathfinding behavior! Smaller = more precise paths but slower performance. | integer |
+| Tile Size | Size of each grid tile in pixels. 0 = Auto-detect (recommended): reads the Cell Size from the Pathfinding behavior, or the tile size of your solid tilemap. If set manually, it MUST match your Pathfinding behavior's Cell Size / tilemap tile size. Smaller = more precise paths but slower performance. | integer |
 | Max Search Nodes | Maximum pathfinding effort before giving up. Higher = finds paths in larger levels but may cause lag. Lower = faster but may fail on complex paths. | integer |
 | Max Fall Distance | Maximum fall distance in pixels. 0 = auto-detect from Platform behavior. -1 = unlimited (any fall). Positive value = custom max in pixels. | integer |
 | Auto-Control Movement | When enabled, AI automatically controls the character (moves left/right, jumps). When disabled, you handle movement yourself using the path data. | check |
@@ -61,6 +74,7 @@ npm run dev
 | Ledge Leniency | How many pixels past a platform edge the AI is allowed to walk before stopping (0 = strict stop at edge). Increase for more natural-looking movement near edges. Only used when Ledge Restriction is enabled. | float |
 | Re-Path Threshold | How many tiles the character can deviate from its path before automatically recalculating. Useful when the character gets knocked off course. 0 = disabled. | float |
 | Hazard Radius | Tile radius for hazard cost falloff buffer zone. Nearby tiles within this radius of a hazard get cost penalties. 0 = no buffer, only exact hazard tiles affected. | integer |
+| Auto-Build Graph | Zero-event startup: automatically build the obstacle map and navigation graph on startup, no events needed. Auto: use the Pathfinding behavior's map if one is attached to this object, otherwise scan all objects with Solid/Jump-thru behaviors. From Pathfinding: always wait for the Pathfinding behavior's map. From Solids: always scan Solid/Jump-thru objects. Off: set the map up yourself with actions (legacy behavior — still picks up an attached Pathfinding behavior's map automatically). | combo |
 
 
 ---
@@ -93,7 +107,9 @@ npm run dev
 | Set tile state | Set the state of a tile at the specified grid coordinates. Use this to mark tiles as solid obstacles, clear space, jump-thru platforms, areas to avoid, or slopes. | Grid X             *(number)* <br>Grid Y             *(number)* <br>State             *(combo)* <br> |
 | Set tile state at world position | Set the state of a tile at the specified world coordinates. The world position is automatically converted to grid coordinates. | X             *(number)* <br>Y             *(number)* <br>State             *(combo)* <br> |
 | Use Pathfinding obstacle map | Use the obstacle map from the Pathfinding behavior instead of a custom map. Enable auto-regenerate to automatically rebuild the graph when the Pathfinding map changes. | Auto-regenerate             *(combo)* <br> |
-| Find path to position | Calculate a path from the character's position to the target coordinates. Use this when you want the AI to navigate to a specific point. Requires: Navigation graph must be generated first. | X             *(number)* <br>Y             *(number)* <br>Correct to ground             *(combo)* <br>Mode             *(combo)* <br>Jump Positioning             *(combo)* <br> |
+| Find path to position (advanced) | Calculate a path to the target coordinates with full control over ground correction, path mode, and jump positioning. For the common case, the simpler 'Find path' or 'Find path to object' actions are recommended. | X             *(number)* <br>Y             *(number)* <br>Correct to ground             *(combo)* <br>Mode             *(combo)* <br>Jump Positioning             *(combo)* <br> |
+| Find path | Calculate a path to a position using sensible defaults: start and target snap to the nearest walkable ground, and if the exact target is unreachable the character paths as close as possible (never fails outright). This is the recommended action for most games. Use 'Find path to position (advanced)' for full control over ground correction, mode, and jump positioning. | X             *(number)* <br>Y             *(number)* <br> |
+| Find path to object | Calculate a path to another object's position (e.g. the player) using sensible defaults: start and target snap to the nearest walkable ground, and if the exact target is unreachable the character paths as close as possible (never fails outright). Uses the first picked instance of the object. | Target object             *(object)* <br> |
 | Jump toward position | Immediately jump toward a target position. The character jumps from its current position with full strength, moving horizontally toward the target. No pathfinding is involved — the character simply lunges at the target. Use for: jump attacks, stomps, lunges. Triggers 'On jump toward executed' when the jump starts. The character must be on the floor to jump. | X             *(number)* <br>Y             *(number)* <br> |
 | Regenerate navigation graph | Rebuild the navigation graph from scratch. Use after modifying the level layout, adding/removing obstacles, or changing platform positions. |  |
 | Set auto-control | Toggle auto-movement on/off. When enabled, the behavior automatically controls the Platform behavior to follow paths. When disabled, you control movement yourself using path data expressions. | Enabled             *(combo)* <br> |
@@ -257,6 +273,25 @@ npm run dev
 
 ---
 ## Changelog
+
+### Version 0.5.0.0
+
+**Added:**
+- Auto-Build Graph property (Auto / From Pathfinding / From Solids): zero-event startup — the obstacle map and graph build themselves on layout start.
+- Tile Size auto-detect (0 = auto): reads the Pathfinding behavior's Cell Size or the solid tilemap's tile size, and propagates it to all shared-graph instances.
+- New simple 'Find path' (X, Y) and 'Find path to object' actions with sensible defaults (ground correction on, Nearest mode).
+- Time-sliced graph generation: large maps build across several ticks (~6ms per tick) instead of stalling a frame; any Find path call finishes an in-progress build synchronously first.
+
+**Changed:**
+- Old FindPath renamed to 'Find path to position (advanced)' — unchanged behavior, full parameter control.
+- Runtime split into maintainable modules (obstacle map, graph build, pathfinding, movement, portals, hazards, navigation manager).
+- Removed the dead legacy src/aces.js; ACE folder files are the single source of truth.
+- Guide.md fully rewritten: scenarios-first structure, complete ACE reference tables, system + game use cases (incl. fleeing and flee-to-cover), corrected scripting docs (on()/off() listener API).
+
+**Fixed:**
+- GraphData expressions IsNodeIsland / IsNodeLeftLedge / IsNodeRightLedge / IsTileJumpThru crashed at runtime (called methods that did not exist).
+- 'Node exists at grid/world position' conditions always returned false (stale string map key).
+---
 
 ### Version 0.4.0.1
 

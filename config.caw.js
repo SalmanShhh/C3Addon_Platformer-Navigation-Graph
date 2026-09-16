@@ -98,10 +98,10 @@ export const properties = [
     type: PROPERTY_TYPE.INTEGER,
     id: "cell_size",
     name: "Tile Size",
-    desc: "Size of each grid tile in pixels. MUST match the Cell Size in your Pathfinding behavior! Smaller = more precise paths but slower performance.",
+    desc: "Size of each grid tile in pixels. 0 = Auto-detect (recommended): reads the Cell Size from the Pathfinding behavior, or the tile size of your solid tilemap. If set manually, it MUST match your Pathfinding behavior's Cell Size / tilemap tile size. Smaller = more precise paths but slower performance.",
     options: {
-      initialValue: 32,
-      minValue: 8,
+      initialValue: 0,
+      minValue: 0,
       maxValue: 128
     }
   },
@@ -258,6 +258,23 @@ export const properties = [
       initialValue: 2,
       minValue: 0,
       maxValue: 10
+    }
+  },
+
+  // Property [15]
+  {
+    type: PROPERTY_TYPE.COMBO,
+    id: "auto_build",
+    name: "Auto-Build Graph",
+    desc: "Zero-event startup: automatically build the obstacle map and navigation graph on startup, no events needed. Auto: use the Pathfinding behavior's map if one is attached to this object, otherwise scan all objects with Solid/Jump-thru behaviors. From Pathfinding: always wait for the Pathfinding behavior's map. From Solids: always scan Solid/Jump-thru objects. Off: set the map up yourself with actions (legacy behavior — still picks up an attached Pathfinding behavior's map automatically).",
+    options: {
+      initialValue: "off",
+      items: [
+        { off: "Off (manual setup)" },
+        { auto: "Auto (recommended)" },
+        { pathfinding: "From Pathfinding behavior" },
+        { solids: "From Solid/Jump-thru objects" }
+      ]
     }
   }
 ];

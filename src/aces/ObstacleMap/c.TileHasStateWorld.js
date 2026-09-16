@@ -1,6 +1,6 @@
 export const config = {
   listName: "Tile has state at world position",
-  displayText: "Tile at world ({0}, {1}) has state {2}",
+  displayText: "{my}: Tile at world ({0}, {1}) has state {2}",
   description: "Check if a tile at the given world position has the specified state. World coordinates are automatically converted to grid coordinates.",
   isInvertible: true,
   params: [

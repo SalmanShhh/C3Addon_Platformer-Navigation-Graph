@@ -1,6 +1,6 @@
 export const config = {
   listName: "Log graph stats",
-  displayText: "Log graph stats to console",
+  displayText: "{my}: Log graph stats to console",
   description: "Print navigation graph statistics to the browser console. Useful for debugging — shows node count, connection count, portal count, etc."
 };
 

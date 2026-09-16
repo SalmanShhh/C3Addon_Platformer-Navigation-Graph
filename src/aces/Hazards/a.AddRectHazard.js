@@ -1,6 +1,6 @@
 export const config = {
   listName: "Add rectangle hazard",
-  displayText: "Add rectangle hazard at ({0}, {1}) [Size: {2} x {3}] [Severity: {4}]",
+  displayText: "{my}: Add rectangle hazard at ({0}, {1}) [Size: {2} x {3}] [Severity: {4}]",
   description: "Add a rectangular hazard area. The AI will avoid this area based on severity. Hazard avoidance is automatically enabled. Returns a hazard ID for later removal. Use for static danger zones like spike pits.",
   params: [
     { id: "x", name: "X", desc: "World X position (center)", type: "number", initialValue: "0" },

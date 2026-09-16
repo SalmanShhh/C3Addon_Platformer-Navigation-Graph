@@ -1,6 +1,6 @@
 export const config = {
   listName: "Mark slope region",
-  displayText: "Mark slope from ({0},{1}) to ({2},{3}) as {4}",
+  displayText: "{my}: Mark slope from ({0},{1}) to ({2},{3}) as {4}",
   description: "Mark a diagonal region of tiles as slope. Specify the start and end grid corners. All tiles along the diagonal will be marked as slope with the given direction.",
   params: [
     { id: "startGx", name: "Start X", desc: "Starting grid X", type: "number", initialValue: "0" },

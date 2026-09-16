@@ -1,6 +1,6 @@
 export const config = {
   listName: "Build obstacle map from layout",
-  displayText: "Build obstacle map [{0}×{1} px]",
+  displayText: "{my}: Build obstacle map [{0}×{1} px]",
   description: "Create an empty obstacle map grid from layout pixel dimensions. No Pathfinding behavior required. Follow with ScanSolidObjectsIntoObstacleMap and ScanJumpThruObjectsIntoObstacleMap to fill it.",
   params: [
     { id: "layoutWidth",  name: "Layout width (px)",  desc: "Total layout width in pixels",  type: "number", initialValue: "1280" },

@@ -1,6 +1,6 @@
 export const config = {
   listName: "Is traversing portal",
-  displayText: "Is traversing portal",
+  displayText: "{my}: Is traversing portal",
   description: "True when the AI is currently moving through a gradual portal (elevator, ladder, etc.). Platform behavior is disabled during traversal.",
   isInvertible: true
 };

@@ -1,6 +1,6 @@
 export const config = {
   listName: "Tile has state",
-  displayText: "Tile at ({0}, {1}) has state {2}",
+  displayText: "{my}: Tile at ({0}, {1}) has state {2}",
   description: "Check if a tile at the given grid position has the specified state. Use this to query tile properties before actions.",
   isInvertible: true,
   params: [

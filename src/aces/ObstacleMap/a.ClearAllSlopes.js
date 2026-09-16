@@ -1,6 +1,6 @@
 export const config = {
   listName: "Clear all slope markings",
-  displayText: "Clear all slope markings",
+  displayText: "{my}: Clear all slope markings",
   description: "Remove all slope markings from the obstacle map. Slopes will be treated as regular solid tiles. Use this to reset slope data."
 };
 

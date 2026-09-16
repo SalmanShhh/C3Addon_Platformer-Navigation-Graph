@@ -1,6 +1,6 @@
 export const config = {
   listName: "Add instant portal",
-  displayText: "Add {0} instant portal from ({1}, {2}) to ({3}, {4}) [Cost: {5}] [Tag: {6}]",
+  displayText: "{my}: Add {0} instant portal from ({1}, {2}) to ({3}, {4}) [Cost: {5}] [Tag: {6}]",
   description: "Add a portal that instantly teleports the AI from the entry to the exit. Use for: teleporters, doors, warp zones, or any portal where the character disappears and reappears at the exit. Use 'On portal entry' with 'Pause at portal' to play animations before the teleport happens.",
   params: [
     { id: "direction", name: "Direction", desc: "One-way: entry to exit only. Two-way: works in both directions.", type: "combo", initialValue: "one_way",

@@ -10,5 +10,5 @@ export const config = {
 export const expose = true;
 
 export default function (gx, gy) {
-  return this.aceGetIsNodeIsland(gx, gy);
+  return this.aceIsNodeIsland(gx, gy);
 }

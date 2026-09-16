@@ -1,6 +1,6 @@
 export const config = {
   listName: "Node exists at world position",
-  displayText: "Node exists at world ({0}, {1})",
+  displayText: "{my}: Node exists at world ({0}, {1})",
   description: "Check if a navigation node exists at the specified world coordinates. Use this to validate world positions before pathfinding.",
   isInvertible: true,
   params: [

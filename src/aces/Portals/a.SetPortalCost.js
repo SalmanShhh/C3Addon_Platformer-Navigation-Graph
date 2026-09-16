@@ -1,6 +1,6 @@
 export const config = {
   listName: "Set portal cost",
-  displayText: "Set portal {0} cost to {1}",
+  displayText: "{my}: Set portal {0} cost to {1}",
   description: "Change how 'expensive' a portal is for the AI to use. Lower cost = preferred, higher cost = avoided.",
   params: [
     { id: "portalId", name: "Portal ID", desc: "The ID of the portal to configure", type: "number", initialValue: "0" },

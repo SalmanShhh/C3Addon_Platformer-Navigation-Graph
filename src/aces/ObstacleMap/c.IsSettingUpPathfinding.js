@@ -1,6 +1,6 @@
 export const config = {
   listName: "Is setting up Pathfinding",
-  displayText: "Is setting up Pathfinding map",
+  displayText: "{my}: Is setting up Pathfinding map",
   description: "Check if the behavior is currently waiting for the Pathfinding obstacle map to initialize. Returns true during async setup.",
   isInvertible: true
 };

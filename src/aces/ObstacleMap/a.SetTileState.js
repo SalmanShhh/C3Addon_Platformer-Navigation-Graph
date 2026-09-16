@@ -1,6 +1,6 @@
 export const config = {
   listName: "Set tile state",
-  displayText: "Set tile at ({0}, {1}) to {2}",
+  displayText: "{my}: Set tile at ({0}, {1}) to {2}",
   description: "Set the state of a tile at the specified grid coordinates. Use this to mark tiles as solid obstacles, clear space, jump-thru platforms, areas to avoid, or slopes.",
   params: [
     { id: "gx", name: "Grid X", desc: "Grid X coordinate (tile number)", type: "number", initialValue: "0" },
