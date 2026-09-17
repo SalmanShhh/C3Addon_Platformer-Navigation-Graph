@@ -37,11 +37,11 @@ export const files = {
   cordovaResourceFiles: [],
 };
 
-// categories that are not filled will use the folder name
+// categories that are not filled will use the folder name.
+// Category layout mirrors the built-in Pathfinding behavior's groups
+// (Pathfinding / Movement / Obstacles / Costs→Hazards), plus Portals and Debug.
 export const aceCategories = {
-  ObstacleMap: "Obstacle Map",
-  GraphData: "Graph Data",
-  SharedNavigation: "Shared Navigation",
+  ObstacleMap: "Obstacles",
 };
 
 export const info = {
@@ -98,9 +98,9 @@ export const properties = [
     type: PROPERTY_TYPE.INTEGER,
     id: "cell_size",
     name: "Tile Size",
-    desc: "Size of each grid tile in pixels. 0 = Auto-detect (recommended): reads the Cell Size from the Pathfinding behavior, or the tile size of your solid tilemap. If set manually, it MUST match your Pathfinding behavior's Cell Size / tilemap tile size. Smaller = more precise paths but slower performance.",
+    desc: "Size of each grid tile in pixels. MUST match your tilemap's tile size / Pathfinding behavior's Cell Size — a mismatch misaligns the graph and characters walk into walls. Set to 0 to auto-detect it (reads the Pathfinding behavior's Cell Size, or the solid tilemap's tile size). Smaller = more precise paths but slower performance.",
     options: {
-      initialValue: 0,
+      initialValue: 32,
       minValue: 0,
       maxValue: 128
     }
@@ -140,21 +140,6 @@ export const properties = [
   // Property [5]
   {
     type: PROPERTY_TYPE.COMBO,
-    id: "graph_mode",
-    name: "Graph Mode",
-    desc: "How navigation data is stored. Shared = all characters use same map (efficient). Per-Instance = each character has own map (rare use cases only).",
-    options: {
-      initialValue: "shared",
-      items: [
-        { instance: "Per-Instance" },
-        { shared: "Shared (recommended)" }
-      ]
-    }
-  },
-
-  // Property [6]
-  {
-    type: PROPERTY_TYPE.COMBO,
     id: "path_strategy",
     name: "Path Strategy",
     desc: "How the AI picks the best route when multiple paths exist. Balanced: weighs distance and difficulty equally, good for most platformers and adventure games. Shortest Distance: always takes the fastest route even with risky jumps, ideal for speedrunner games and time trials. Safest Route: avoids jumps and falls when possible, great for stealth games, escort missions, or fragile NPCs. Simplest Path: fewest waypoints for predictable movement, best for simple enemies and tower defense creeps.",
@@ -169,7 +154,7 @@ export const properties = [
     }
   },
 
-  // Property [7]
+  // Property [6]
   {
     type: PROPERTY_TYPE.CHECK,
     id: "smooth_paths",
@@ -178,7 +163,7 @@ export const properties = [
     options: { initialValue: true }
   },
 
-  // Property [8]
+  // Property [7]
   {
     type: PROPERTY_TYPE.FLOAT,
     id: "max_waypoint_time",
@@ -191,7 +176,7 @@ export const properties = [
     }
   },
 
-  // Property [9]
+  // Property [8]
   {
     type: PROPERTY_TYPE.FLOAT,
     id: "coyote_time",
@@ -204,7 +189,7 @@ export const properties = [
     }
   },
 
-  // Property [10]
+  // Property [9]
   {
     type: PROPERTY_TYPE.CHECK,
     id: "strict_positioning",
@@ -213,7 +198,7 @@ export const properties = [
     options: { initialValue: true }
   },
 
-  // Property [11]
+  // Property [10]
   {
     type: PROPERTY_TYPE.CHECK,
     id: "ledge_restriction",
@@ -222,7 +207,7 @@ export const properties = [
     options: { initialValue: false }
   },
 
-  // Property [12]
+  // Property [11]
   {
     type: PROPERTY_TYPE.FLOAT,
     id: "ledge_leniency",
@@ -235,7 +220,7 @@ export const properties = [
     }
   },
 
-  // Property [13]
+  // Property [12]
   {
     type: PROPERTY_TYPE.FLOAT,
     id: "repath_threshold",
@@ -248,7 +233,7 @@ export const properties = [
     }
   },
 
-  // Property [14]
+  // Property [13]
   {
     type: PROPERTY_TYPE.INTEGER,
     id: "hazard_radius",
@@ -261,14 +246,16 @@ export const properties = [
     }
   },
 
-  // Property [15]
+  // Property [14]
   {
     type: PROPERTY_TYPE.COMBO,
     id: "auto_build",
     name: "Auto-Build Graph",
-    desc: "Zero-event startup: automatically build the obstacle map and navigation graph on startup, no events needed. Auto: use the Pathfinding behavior's map if one is attached to this object, otherwise scan all objects with Solid/Jump-thru behaviors. From Pathfinding: always wait for the Pathfinding behavior's map. From Solids: always scan Solid/Jump-thru objects. Off: set the map up yourself with actions (legacy behavior — still picks up an attached Pathfinding behavior's map automatically).",
+    desc: "Zero-event startup: automatically build the obstacle map and navigation graph on startup, no events needed. Auto (default): use the Pathfinding behavior's map if one is attached to this object, otherwise scan all objects with Solid/Jump-thru behaviors. Explicit map-setup actions in 'On start of layout' always take precedence. From Pathfinding: always wait for the Pathfinding behavior's map. From Solids: always scan Solid/Jump-thru objects. Off: set the map up yourself with actions (still picks up an attached Pathfinding behavior's map automatically).",
     options: {
-      initialValue: "off",
+      // NOTE: items order must never change (combo values are stored by index).
+      // Only initialValue may change.
+      initialValue: "auto",
       items: [
         { off: "Off (manual setup)" },
         { auto: "Auto (recommended)" },
@@ -276,5 +263,35 @@ export const properties = [
         { solids: "From Solid/Jump-thru objects" }
       ]
     }
+  },
+
+  // Property [15]
+  {
+    type: PROPERTY_TYPE.TEXT,
+    id: "map_tag",
+    name: "Map Tag",
+    desc: "Instances with the same map tag on a layout share one navigation map and graph. Leave empty to share with everyone (recommended). Give special characters their own tag (e.g. 'ghost' for wall-phasing enemies, 'flyer' for airborne ones), then set up that tag's obstacle map, portals, and hazards on an instance carrying that tag. Each tag builds and stores its own map, so use few tags.",
+    options: {
+      initialValue: ""
+    }
+  },
+
+  // Property [16]
+  {
+    type: PROPERTY_TYPE.CHECK,
+    id: "detect_slopes",
+    name: "Detect Slopes",
+    desc: "During solid scanning (including Auto-Build), probe each partially-solid tile's collision shape and automatically register 45° and 22.5° slope surfaces as slopes — no tile ID lists needed. Tiles whose shape doesn't match a supported slope angle stay solid, so this is safe to leave on. Requires tiles/sprites to have actual sloped collision polygons. Turn off to register slopes yourself with the slope actions only.",
+    options: { initialValue: true }
+  },
+
+  // Property [17] — keep LAST: the Enabled toggle conventionally sits at the
+  // bottom of a behavior's properties in C3.
+  {
+    type: PROPERTY_TYPE.CHECK,
+    id: "enabled",
+    name: "Enabled",
+    desc: "Whether the behavior starts active. While disabled, the character stops following paths and Find path actions are ignored; the current path, graph, and settings are kept and everything resumes when re-enabled. Toggle at runtime with the 'Set enabled' action.",
+    options: { initialValue: true }
   }
 ];

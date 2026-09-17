@@ -858,6 +858,7 @@ export default {
 
   /** Immediately jump toward a target position from the current position. No pathfinding involved. */
   aceJumpTowardPosition(targetX, targetY) {
+    if (!this.navEnabled) return;
     if (!this.platformBehavior) return;
 
     const onFloor = this.platformBehavior.isOnFloor;
@@ -890,6 +891,24 @@ export default {
   // ============================================================================
   // MOVEMENT - Settings Actions
   // ============================================================================
+
+  /** Enables or disables this behavior. Disabling freezes navigation (the
+   *  current path, graph, and settings are kept; re-enabling resumes), cancels
+   *  any in-flight graph build this instance owns so another instance can take
+   *  over, and drops this instance's queued path request. */
+  aceSetBehaviorEnabled(enabled) {
+    if (this.navEnabled === enabled) return;
+    this.navEnabled = enabled;
+    if (!enabled) {
+      this._cancelGraphBuild();
+      globalNavManager.removeQueuedRequest(this);
+    }
+  },
+
+  /** Returns whether this behavior is currently enabled. */
+  aceIsBehaviorEnabled() {
+    return this.navEnabled;
+  },
 
   /** Enables or disables automatic platform control (simulating input to follow the path). */
   aceSetAutoControl(enabled) {
@@ -964,11 +983,16 @@ export default {
     return this.multiAgentAvoidance || false;
   },
 
+  /** Returns the map tag this instance navigates with ("" = the default shared map). */
+  aceGetMapTag() {
+    return this.mapTag || "";
+  },
+
   /** Returns the number of other pathfinding agents within 3 cells of this character. Returns 0 if avoidance is disabled. */
   aceGetNearbyAgentCount() {
-    if (!this.multiAgentAvoidance || !this.useSharedGraph) return 0;
+    if (!this.multiAgentAvoidance) return 0;
     const others = globalNavManager.getOtherInstancePositions(
-      this.layoutUID,
+      this.navKey,
       this
     );
     let count = 0;

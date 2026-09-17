@@ -1,6 +1,6 @@
 export const config = {
-  listName: "Is node a ledge",
-  displayText: "{my}: Node at ({0}, {1}) is a ledge",
+  listName: "Is graph node a ledge",
+  displayText: "{my}: Graph node at ({0}, {1}) is a ledge",
   description: "True if the node at the given grid coordinates is a ledge node (left or right ledge).",
   isInvertible: true,
   params: [

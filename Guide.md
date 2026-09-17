@@ -70,7 +70,7 @@ Platformer Navigation Graph automates all of it. It scans your level geometry in
 | **Waypoint** | One step in a calculated path. Each waypoint has a world position and an action such as `walk_left`, `jump`, `fall_right`, or `portal_instant`. |
 | **Portal** | A shortcut connection the graph cannot express with jump or fall arcs. Instant portals teleport; gradual portals move the character at a set speed (elevators, ziplines). |
 | **Hazard** | A marked danger area (circle, rectangle, or tile) that raises pathfinding cost nearby, so the AI prefers safer routes without being hard-blocked. |
-| **Shared graph** | The default graph mode. All instances on a layout read one graph, so building it once serves every agent. |
+| **Shared map** | Instances with the same Map Tag on a layout read one obstacle map and graph, so building it once serves every agent. The empty default tag means everyone shares. |
 
 ---
 
@@ -79,17 +79,18 @@ Platformer Navigation Graph automates all of it. It scans your level geometry in
 ### Quick start (zero setup events)
 
 1. Select your character sprite. In the Properties panel, add both the built-in **Platform** behavior and **Platformer Navigation Graph**.
-2. In the behavior properties, set **Auto-Build Graph** to **Auto**.
-3. Add one event:
+2. Add one event:
 
 ```
 Event: Every 0.5 seconds
   Action: Enemy -> PlatformerNavGraph -> Find path  Player.X, Player.Y
 ```
 
-That is the whole setup. On startup the behavior builds the obstacle map automatically: from the Pathfinding behavior's map if one is attached to the character, otherwise by scanning every object that has an enabled **Solid** or **Jump-thru** behavior. **Tile Size** defaults to auto-detect (from the Pathfinding behavior's Cell Size, or your solid tilemap's tile size), and jump physics are read from the Platform behavior. The simple `Find path` action snaps start and target to walkable ground and paths as close as possible when the exact target is unreachable, so it never fails outright.
+That is the whole setup; the defaults do the rest. On startup, **Auto-Build Graph** (default Auto) builds the obstacle map automatically: from the Pathfinding behavior's map if one is attached to the character, otherwise by scanning every object that has an enabled **Solid** or **Jump-thru** behavior. **Detect Slopes** (default on) registers slope tiles automatically from their collision shapes. Jump physics are read from the Platform behavior, and the simple `Find path` action snaps start and target to walkable ground and paths as close as possible when the exact target is unreachable, so it never fails outright.
 
-If your level has slope tiles, register them once at startup (see [Slopes](#8-slopes)). The graph rebuilds itself automatically when slopes are registered:
+One property to check: **Tile Size** defaults to 32 px. If your level grid uses a different tile size, set it to match, or set it to 0 to auto-detect from the Pathfinding behavior or your solid tilemap.
+
+If your slope tiles do not carry sloped collision polygons (so automatic detection cannot see them), register them manually once at startup instead (see [Slopes](#8-slopes)); the graph rebuilds itself when slopes are registered:
 
 ```
 Event: On start of layout
@@ -123,7 +124,7 @@ Event: Enemy -> PlatformerNavGraph -> On navigation graph generated
   Action: Enemy -> PlatformerNavGraph -> FindPath  Player.X, Player.Y, "Yes", "Reach", "Default"
 ```
 
-**A note on Tile Size.** With a manual value, Tile Size MUST match the Cell Size of your Pathfinding behavior (or your tilemap's tile size). A mismatch misaligns the graph with your geometry, and characters will try to walk through walls. Leaving Tile Size at 0 (auto) avoids the problem entirely.
+**A note on Tile Size.** Tile Size (default 32) MUST match the Cell Size of your Pathfinding behavior (or your tilemap's tile size). A mismatch misaligns the graph with your geometry, and characters will try to walk through walls. Setting Tile Size to 0 (auto-detect) avoids the problem entirely.
 
 With **Auto-Control Movement** enabled (the default), the character starts moving the moment `On path found` fires.
 
@@ -138,11 +139,10 @@ Graph generation is time-sliced. On big maps the build spreads across several ti
 | Property | Type | Default | Description |
 |---|---|---|---|
 | **Enable Debug Logging** | Boolean | On | Logs graph stats, path results, and movement decisions to the browser console (F12). Turn off in release builds for performance. |
-| **Tile Size** | Integer (0 to 128) | 0 (Auto) | Grid resolution in pixels. 0 auto-detects from the Pathfinding behavior's Cell Size or your solid tilemap's tile size (recommended). A manual value must match them exactly. |
+| **Tile Size** | Integer (0 to 128) | 32 | Grid resolution in pixels. Must match your tilemap's tile size / Pathfinding Cell Size exactly. Set to 0 to auto-detect it from the Pathfinding behavior or the solid tilemap. |
 | **Max Search Nodes** | Integer (100 to 10000) | 2000 | How many graph nodes A* may visit before giving up. Raise for very large open levels; lower to cap worst-case path cost. |
 | **Max Fall Distance** | Integer | 0 | Maximum safe fall in pixels. 0 auto-detects from Platform physics. -1 means unlimited. A positive value is an explicit override. |
 | **Auto-Control Movement** | Boolean | On | When on, the behavior drives the Platform behavior automatically. When off, path data is exposed through expressions for manual movement. |
-| **Graph Mode** | Combo | Shared | Shared: all instances on the layout use one graph (recommended). Per-Instance: each character keeps its own graph (rare, memory-heavy). |
 | **Path Strategy** | Combo | Balanced | How the AI picks between valid routes: Balanced, Shortest Distance, Safest Route, or Simplest Path. See [Movement Control](#7-movement-control). |
 | **Smooth Paths** | Boolean | On | Removes redundant waypoints so characters take direct walks instead of zigzagging between tile centers. |
 | **Max Waypoint Time** | Float (1 to 30) | 5.0 | Seconds before the behavior gives up on a waypoint and fires `On waypoint stuck`. |
@@ -152,16 +152,19 @@ Graph generation is time-sliced. On big maps the build spreads across several ti
 | **Ledge Leniency** | Float (0 to 64) | 0 | Pixels past a ledge edge the character may walk before stopping. Only applies with Ledge Restriction on. |
 | **Re-Path Threshold** | Float (0 to 20) | 3.0 | Tiles of drift from the path before automatic re-pathing fires. 0 disables automatic re-pathing. |
 | **Hazard Radius** | Integer (0 to 10) | 2 | Tile radius of cost falloff around each hazard. Tiles inside the radius get a partial penalty even without touching the hazard. |
-| **Auto-Build Graph** | Combo | Off | Zero-event startup. Auto: use the attached Pathfinding behavior's map when present, otherwise scan all Solid/Jump-thru objects. From Pathfinding and From Solids force one source. Off: set the map up with actions. |
+| **Auto-Build Graph** | Combo | Auto | Zero-event startup. Auto: use the attached Pathfinding behavior's map when present, otherwise scan all Solid/Jump-thru objects; explicit setup actions always take precedence. From Pathfinding and From Solids force one source. Off: set the map up with actions only. |
+| **Map Tag** | Text | (empty) | Instances with the same tag on a layout share one navigation map. Empty = share with everyone. Give special characters (wall-phasing ghosts, flyers) their own tag. Each tag builds its own map, so use few tags. |
+| **Detect Slopes** | Boolean | On | During solid scanning (including Auto-Build), probe partially-solid tiles' collision shapes and register 45 and 22.5 degree surfaces as slopes automatically. Requires sloped collision polygons on the tiles. Unsupported angles stay solid. |
+| **Enabled** | Boolean | On | Whether the behavior starts active. Disabled freezes navigation (path, graph, and settings are kept; resumes on re-enable). Toggle at runtime with Set enabled. |
 
 ---
 ## 5. Obstacle Maps: Giving the Graph Level Data
 
 The navigation graph needs to know which tiles are solid, which are one-way platforms, and which are slopes. That information is the **obstacle map**, a grid of tile states the graph builder reads. There are four ways to provide one, from most to least automatic.
 
-### Auto-Build Graph (easiest)
+### Auto-Build Graph (the default)
 
-Set the **Auto-Build Graph** property to **Auto** and the behavior handles everything at startup with no events. If a Pathfinding behavior is attached to the character, its map is used; otherwise every object type with an enabled Solid or Jump-thru behavior is scanned into a layout-sized grid. Explicit setup actions in `On start of layout` always win over auto-build, because start-of-layout events run before the behavior's first tick.
+**Auto-Build Graph** defaults to **Auto**, so the behavior handles everything at startup with no events, straight out of the box. If a Pathfinding behavior is attached to the character, its map is used; otherwise every object type with an enabled Solid or Jump-thru behavior is scanned into a layout-sized grid. Explicit setup actions in `On start of layout` always win over auto-build, because start-of-layout events run before the behavior's first tick. Set the property to Off to disable automatic map building entirely.
 
 ```
 // No setup events at all. Just find paths:
@@ -169,7 +172,7 @@ Event: Every 0.5 seconds
   Action: Enemy -> PlatformerNavGraph -> Find path  Player.X, Player.Y
 ```
 
-Auto-build does not register slopes. Slope tiles scan as solid until you register them (see [Slopes](#8-slopes)), and the graph rebuilds automatically once you do.
+With **Detect Slopes** on (the default), auto-build also registers slope tiles automatically from their collision shapes. Slope tiles without sloped collision polygons scan as solid until you register them manually (see [Slopes](#8-slopes)), and the graph rebuilds automatically once you do.
 
 ### With or without the Pathfinding behavior
 
@@ -236,7 +239,7 @@ Event: On lava tile created
 
 Procedural stages work reliably when the map build runs after generation finishes. Follow these rules.
 
-**Rule 1: control the timing.** Auto-Build scans on the behavior's first tick, and On start of layout events run before that tick. If your generator finishes inside On start of layout, Auto-Build works as-is. If generation spans multiple frames, leave Auto-Build Graph Off and build explicitly when done.
+**Rule 1: control the timing.** Auto-Build scans on the behavior's first tick, and On start of layout events run before that tick. If your generator finishes inside On start of layout, Auto-Build works as-is. If generation spans multiple frames, set Auto-Build Graph to Off and build explicitly when done.
 
 **Rule 2 (recommended): write the obstacle map directly from generator data.** Your generator already knows which cells are solid, so skip the tilemap scan entirely. This is the fastest and most exact path, and it handles slopes and one-way platforms in the same loop:
 
@@ -278,16 +281,16 @@ Event: (before regenerating the level)
 
 ```
 Event: Enemy -> PlatformerNavGraph -> On navigation graph generated
-  Condition: Enemy.PlatformerNavGraph.NodeCount < 20
+  Condition: Enemy.PlatformerNavGraph.GraphNodeCount < 20
   // Degenerate level: too little walkable ground, regenerate
   Action: (regenerate with a new seed)
 
-Event: Enemy -> PlatformerNavGraph -> On path failed
+Event: Enemy -> PlatformerNavGraph -> On failed to find path
   Condition: (this was the spawn-to-exit test path)
   // Exit unreachable from spawn: regenerate or add a connecting corridor
 ```
 
-**Rule 5: spawn characters on walkable ground.** A character spawning mid-air or inside geometry gets `no_start_node` (ground correction searches about 10 tiles). Have the generator emit spawn points on floor cells, or check with `Node exists at world position` before spawning.
+**Rule 5: spawn characters on walkable ground.** A character spawning mid-air or inside geometry gets `no_start_node` (ground correction searches about 10 tiles). Have the generator emit spawn points on floor cells, or check with `Graph node exists at world position` before spawning.
 
 **Rule 6: cache repeatable seeds.** For daily seeds or revisitable floors, save the finished map once and reload it instantly on revisit (see the next section). The JSON carries slopes and tile hazards, so nothing needs re-registration.
 
@@ -339,7 +342,14 @@ Action: Enemy -> PlatformerNavGraph -> FindPath
 
 **Correct to ground** matters when the target might be mid-air (a jumping player). It snaps the target down to the nearest standing position so the path ends somewhere reachable.
 
-**Nearest mode** never fires `On path failed`. If the exact goal is unreachable, it paths to the closest reachable node instead. Use it for follow behavior where "get as close as possible" is always acceptable.
+**Nearest mode** never fires `On failed to find path`. If the exact goal is unreachable, it paths to the closest reachable node instead. Use it for follow behavior where "get as close as possible" is always acceptable. The `PathEndX` / `PathEndY` expressions tell you where the character will actually stop, which is how you detect that the exact target was out of reach:
+
+```
+Event: Enemy -> PlatformerNavGraph -> On path found
+  Condition: distance(Enemy.PlatformerNavGraph.PathEndX, Enemy.PlatformerNavGraph.PathEndY, Player.X, Player.Y) > 96
+  Action: Enemy -> PlayAnimation  "Frustrated"
+  // The path stops short of the player: react accordingly
+```
 
 **Jump positioning override** changes precision for this one path. Strict for narrow bridges over pits, Relaxed for chase sequences where speed beats precision.
 
@@ -349,12 +359,12 @@ Action: Enemy -> PlatformerNavGraph -> FindPath
 Event: Enemy -> PlatformerNavGraph -> On path found
   Action: Enemy -> PlayAnimation  "Run"
 
-Event: Enemy -> PlatformerNavGraph -> On path failed
+Event: Enemy -> PlatformerNavGraph -> On failed to find path
   Action: Enemy -> PlayAnimation  "Idle"
   // Common fail reasons: "no_start_node", "no_goal_node", "no_path", "search_exhausted"
   Action: Browser -> Log  Enemy.PlatformerNavGraph.PathFailReason
 
-Event: Enemy -> PlatformerNavGraph -> On path complete
+Event: Enemy -> PlatformerNavGraph -> On arrived
   Action: Enemy -> PlatformerNavGraph -> Find path  Player.X, Player.Y
   // Arrived. Immediately re-path to keep chasing.
 ```
@@ -375,7 +385,7 @@ Event: Enemy -> PlatformerNavGraph -> On waypoint reached
 
 ```
 Event: Boss in range of player
-  Action: Boss -> PlatformerNavGraph -> StopPathfinding
+  Action: Boss -> PlatformerNavGraph -> Stop
   Action: Boss -> PlatformerNavGraph -> JumpTowardPosition  Player.X, Player.Y
 
 Event: Boss -> PlatformerNavGraph -> On jump toward launched
@@ -394,7 +404,7 @@ With auto-control off, you drive movement yourself from path data:
 
 ```
 Event: Every tick
-  Condition: Enemy -> PlatformerNavGraph -> Has active path
+  Condition: Enemy -> PlatformerNavGraph -> Is moving along path
   Local var action = Enemy.PlatformerNavGraph.CurrentPathAction(Enemy.PlatformerNavGraph.CurrentWaypoint)
   Condition: action = "walk_right"
   Action: Enemy -> Platform -> Simulate input "Right"
@@ -505,7 +515,13 @@ Action: Enemy -> PlatformerNavGraph -> MarkSlopeRegion  2, 8, 6, 4, "Slope right
 
 ### Automatic slope detection
 
-`AutoDetectSlopeTiles` classifies tiles by their collision polygon shape: triangles become 45 degree slopes, trapezoids become gentle slopes. It requires custom collision polygons on the tiles and depends on runtime access to tile polygon data, which is not guaranteed on every Construct version. When the data is unavailable it logs a warning and does nothing, so treat it as a convenience with `MapSlopeTilesFromTilemap` as the reliable fallback.
+There are two hands-off options, both built on the documented collision API (they probe the shapes characters actually collide with, so they cannot disagree with the physics):
+
+**The Detect Slopes property** (on by default): slope detection happens during every solid scan, including Auto-Build. Partially-solid tiles are probed at three columns; a straight surface dropping one tile across the cell registers as a 45 degree slope, half a tile as a gentle slope, and anything else (half-blocks, decorations, unsupported angles) stays solid. Combined with Auto-Build Graph, a slope-heavy level needs zero setup events. This also classifies the diagonal edge cells of rotated solid sprites, so a 45 degree sprite ramp becomes walkable automatically.
+
+**The AutoDetectSlopeTiles action**: the same probe classification run on demand against one tilemap, for projects that keep manual control of the scan sequence. Results are cached per tile shape, and flipped tile placements classify correctly on their own.
+
+Both require slope tiles to have actual sloped collision polygons set in the C3 editor. A slope drawn in the art but carrying a square collision polygon probes as flat and stays solid, which matches how the character would actually collide with it. `MapSlopeTilesFromTilemap` with explicit tile IDs remains available as the manual override.
 
 ### Unregistered slope tiles
 
@@ -596,6 +612,18 @@ Event: Enemy -> PlatformerNavGraph -> On portal complete
   Action: ElevatorCar -> PlayAnimation  "Arrive"
 ```
 
+### Moving portals
+
+`SetPortalPositionFromObjects` moves an existing portal in place, keeping its ID, type, cost, speed, and tags, and re-wires its graph connections immediately (the re-wire is microseconds, so a timer-driven mover is fine):
+
+```
+Event: Every 0.25 seconds
+  Action: Enemy -> PlatformerNavGraph -> SetPortalPositionFromObjects  dronePortalId, DroneEntry, DroneExit
+  // A teleporter drone that drifts around the level; routes adapt on each re-path
+```
+
+A character already traversing the portal keeps its original destination; moving a portal never teleports anyone.
+
 ### Modifying and removing portals
 
 ```
@@ -675,7 +703,20 @@ Expression: Enemy.PlatformerNavGraph.HazardSeverity(x, y)
 // Total severity at a position, useful for driving visual warnings
 ```
 
-Hazard changes take effect on the next graph build or hazard cost update. After adding or removing hazards mid-game, re-path so agents pick up the new costs.
+Hazard changes take effect automatically: any add, remove, or change re-bakes node costs once per map before the next tick's movement or the next path search, no matter how many hazards changed or how many instances share the map. Re-path only when you want an already-moving character to reconsider its current route.
+
+### Moving hazards
+
+For hazards that move, use a **tracked hazard**: one action, and it follows the object automatically every tick with no per-frame events. Path costs update only when the object actually moves, and the hazard removes itself when its object is destroyed:
+
+```
+Event: Saw -> On created
+  Action: Enemy -> PlatformerNavGraph -> AddTrackedHazard  Saw, 64, 30
+  Set sawHazardId = Enemy.PlatformerNavGraph.LastHazardID
+  // That's all. The hazard follows the saw and cleans itself up on destroy.
+```
+
+Tracking is single-flight per map (one update pass per tick regardless of instance count) and each hazard only touches its own area during re-bakes, so hundreds of tracked hazards stay cheap even when they move every frame. The real limit is **path staleness**, not cost: a path computed now is followed for seconds, so avoidance through the cost system suits hazards that move slower than characters re-path (patrolling saws, spreading fire, drifting gas). For fast movers like projectiles, cost-based avoidance is the wrong tool: react in events instead (a dodge with `JumpTowardPosition`, or `Stop` plus manual evasion) and re-path afterward.
 
 ---
 
@@ -683,9 +724,36 @@ Hazard changes take effect on the next graph build or hazard cost update. After 
 
 ### One graph, many agents
 
-With **Graph Mode** set to Shared (the default), every instance on the layout reads the same navigation graph. The build cost is paid once no matter how many enemies you spawn.
+Every instance on the layout reads the same navigation graph (per map tag). The build cost is paid once no matter how many enemies you spawn.
 
-Scanning and graph building are **single-flight**: with hundreds of instances carrying the behavior, exactly one instance performs the scan and build per layout while the rest wait on the shared result. Instances spawned after the graph is built inherit it immediately without triggering a rebuild, so wave spawners are safe. The one configuration to avoid at scale is Graph Mode = Per-Instance, which really does give every instance its own map and build.
+Scanning and graph building are **single-flight**: with hundreds of instances carrying the behavior, exactly one instance performs the scan and build per map while the rest wait on the shared result. The map data itself (obstacle, slope, and hazard grids) is also **one copy per map**, shared by reference to every instance. Setup actions are deduplicated too: because event actions run once per picked instance, calling `UsePathfindingObstacleMap` on a type with 50 instances would repeat the copy 50 times, so the addon runs it once and the other 49 adopt the result. Instances spawned after the graph is built inherit both the graph and the map data immediately, without triggering a rebuild, so wave spawners are safe.
+
+One rule keeps many agents on one map honest: **one movement class per map**. The graph's jump and fall connections are computed from the physics of the instance that built it, so characters with meaningfully different jump strength, gravity, or size should get their own Map Tag (see below). With Debug Logging on, the addon warns when an instance's jump physics differ more than about 20 percent from the graph it is sharing.
+
+### Map tags: several shared maps on one layout
+
+Sometimes different characters need different views of the same level: a wall-phasing ghost, a flyer that ignores floors, a giant that cannot fit through one-tile corridors. The **Map Tag** property handles this. Instances with the same tag share one navigation map; the empty default tag is the ordinary everyone-shares map.
+
+```
+// Ghost sprites: Map Tag property = "ghost"
+// Everything else: Map Tag left empty
+
+Event: On start of layout
+  // Normal enemies use Auto-Build as usual (default tag map).
+  // Build the ghost map by hand on a ghost instance: only boundary walls are solid.
+  Action: Ghost -> PlatformerNavGraph -> BuildObstacleMapFromLayout  Layout.Width, Layout.Height
+  Action: Ghost -> PlatformerNavGraph -> ScanSolidObjectsIntoObstacleMap  TilemapBoundary
+  Action: Ghost -> PlatformerNavGraph -> GenerateNavigationGraph
+```
+
+Rules of thumb:
+
+- **Each tag is a full map**: its own obstacle map, graph, build, and savegame payload. Two or three tags are cheap; ten are not.
+- **Set up each tag's map on an instance carrying that tag.** Map actions (scans, tile states, slopes) affect the calling instance's map. Auto-Build works per tag too, but a special tag usually exists precisely because it needs a different source.
+- **Portals and hazards are per tag.** A door portal added by a default-tag instance does not exist in the ghost map; register it from a ghost instance too if ghosts should use it.
+- **Watch for typos.** A misspelled tag silently creates a separate, unconfigured map, and that character will have no paths. With Debug Logging on, the console lists the active tags on the layout whenever a new tag appears; the debugger also shows each instance's tag.
+- **Multi-agent avoidance is per tag**: agents only avoid others on the same map.
+- The `MapTag` expression returns the instance's tag for event logic and debugging.
 
 ### Per-tick path budget
 
@@ -695,13 +763,13 @@ When many agents request paths on the same tick, `SetMaxPathsPerTick` spreads th
 Event: On start of layout
   Action: AnyEnemy -> PlatformerNavGraph -> SetMaxPathsPerTick  4
 
-Condition: AnyEnemy -> PlatformerNavGraph -> Path is pending
+Condition: AnyEnemy -> PlatformerNavGraph -> Is calculating path
 // True while this agent's request is still queued
 ```
 
 ### Multi-agent avoidance
 
-With avoidance enabled, agents share positions through a spatial hash and A* penalizes routes that pass close to other agents, so crowds fan out across parallel routes instead of stacking on one path. Requires Shared graph mode.
+With avoidance enabled, agents share positions through a spatial hash and A* penalizes routes that pass close to other agents, so crowds fan out across parallel routes instead of stacking on one path. Avoidance is per map tag: agents only avoid others on the same map.
 
 ```
 Event: On start of layout
@@ -723,6 +791,8 @@ Expression: AnyEnemy.PlatformerNavGraph.NearbyAgentCount
 ---
 ## 12. Actions Reference
 
+Categories mirror the built-in Pathfinding behavior's groups: Pathfinding (finding routes), Movement (following them), Obstacles (level data), plus Hazards, Portals, and Debug.
+
 ### Pathfinding
 
 | Action | Description |
@@ -730,18 +800,29 @@ Expression: AnyEnemy.PlatformerNavGraph.NearbyAgentCount
 | **Find path** X, Y | Path to a position with sensible defaults: ground correction on, Nearest mode so it never fails outright. The recommended action for most games. |
 | **Find path to object** Target | Same defaults as Find path, but reads the position of the target object's first picked instance. |
 | **FindPath (advanced)** X, Y, CorrectToGround, Mode, JumpPositioning | Full-control pathing. CorrectToGround snaps to solid ground; Mode Reach fails when no complete path exists; JumpPositioning overrides precision per path. |
-| **StopPathfinding** | Immediately stop the character and clear the active path. |
-| **JumpTowardPosition** X, Y | Launch the character directly at the target with a full jump. Not pathfinding; used for lunges and attacks. Works mid-air with double jump. |
-| **RegenerateGraph** | Rebuild the navigation graph from the current obstacle map. Use after level changes. |
+| **Stop** | Immediately stop the character and clear the active path. |
+| **SetPathStrategy** Strategy | Switch the route weighting: Balanced, Shortest Distance, Safest Route, Simplest Path. |
+| **SetRePathThreshold** Tiles | Tiles of drift that trigger automatic re-pathing. |
+| **SetRePathCooldown** Seconds | Minimum time between automatic re-path attempts. |
+| **SetMaxPathsPerTick** Count | Limit A* calculations per tick; extra requests queue. 0 means unlimited. |
+| **SetMultiAgentAvoidance** Enabled | Toggle multi-agent path avoidance (agents on the same map fan out instead of stacking). |
+
+### Movement
+
+| Action | Description |
+|---|---|
+| **SetEnabled** State | Enable or disable the whole behavior. Disabled freezes navigation with all state kept; Find path is ignored while disabled, map setup actions still work. |
 | **SetAutoControl** Enabled | Toggle whether the behavior drives the Platform behavior automatically. |
+| **JumpTowardPosition** X, Y | Launch the character directly at the target with a full jump. Not pathfinding; used for lunges and attacks. Works mid-air with double jump. |
 | **SetCoyoteTime** Seconds | Set the jump window after walking off a ledge. 0 disables coyote jumps. |
 | **SetStrictJumpPositioning** Enabled | Toggle careful pre-jump centering for this character. |
 | **SetLedgeRestriction** Enabled | Toggle whether the character stops at platform edges. |
 | **SetLedgeLeniency** Pixels | How far past a ledge edge the character may walk (needs Ledge Restriction on). |
-| **SetRePathCooldown** Seconds | Minimum time between automatic re-path attempts. |
-| **SetPathStrategy** Strategy | Switch the route weighting: Balanced, Shortest Distance, Safest Route, Simplest Path. |
+| **SetMaxJumpHeight** Pixels | Override the auto-detected maximum jump height. Regenerate the graph afterwards. |
+| **SetMaxJumpDistance** Pixels | Override the auto-detected maximum horizontal jump distance. Regenerate the graph afterwards. |
+| **SetMaxFallDistance** Pixels | Override the maximum fall distance used for fall connections. Regenerate the graph afterwards. |
 
-### Obstacle Map
+### Obstacles
 
 | Action | Description |
 |---|---|
@@ -751,15 +832,13 @@ Expression: AnyEnemy.PlatformerNavGraph.NearbyAgentCount
 | **ScanJumpThruObjectsIntoObstacleMap** Objects | Mark one-way platforms (enabled Jump-thru behavior) into the map. |
 | **CreateCustomObstacleMap** Width, Height | Create an empty map with explicit tile dimensions, for fully manual tile setup. |
 | **GenerateNavigationGraph** | Build the navigation graph from the current obstacle map. Fires On navigation graph generated when done. |
+| **RegenerateGraph** | Rebuild the navigation graph from the current obstacle map. Use after level changes. |
 | **SetTileState** GridX, GridY, State | Set one tile: Solid, Clear, Jump-thru, Avoid, or a slope type. |
 | **SetTileStateWorld** X, Y, State | Same as SetTileState using world pixel coordinates. |
 | **MarkSlopeRegion** StartX, StartY, EndX, EndY, Direction | Mark a diagonal run of tiles as a slope type. |
 | **MapSlopeTilesFromTilemap** Tilemap, LeftIDs, RightIDs, GentleLeftIDs, GentleRightIDs | Scan a tilemap and mark the given tile IDs as slopes. Comma-separated ID strings; flipped placements auto-mirror. |
-| **AutoDetectSlopeTiles** Tilemap | Classify slope tiles by their collision polygon shape (triangles = 45 degrees, trapezoids = gentle). Needs custom collision polygons; falls back with a console warning when polygon data is unavailable. |
+| **AutoDetectSlopeTiles** Tilemap | Register slope tiles by probing their collision shapes with the documented collision API (45 and 22.5 degree surfaces). Needs sloped collision polygons; unsupported shapes stay solid. |
 | **ClearAllSlopes** | Remove every slope marking and mark the graph for rebuild. |
-| **SetTileHazard** GridX, GridY, Severity | Set the danger level of one tile. 0 removes the hazard. |
-| **SetRePathThreshold** Tiles | Tiles of drift that trigger automatic re-pathing. |
-| **SetHazardRadius** Tiles | Cost falloff radius around each hazard. |
 | **LoadObstacleMapFromJSON** JSON | Restore a map (obstacles, slopes, tile hazards, tile size) saved with the ObstacleMapJSON expression. |
 | **ClearObstacleMap** | Remove the obstacle map and all associated data. |
 
@@ -777,6 +856,8 @@ Expression: AnyEnemy.PlatformerNavGraph.NearbyAgentCount
 | **RemovePortalAtObject** Object | Remove the portal whose entry or exit is closest to the object. |
 | **RemovePortalsByTag** Tag | Remove every portal whose tag string contains the tag token. |
 | **ClearAllPortals** | Remove all portals and their graph connections. |
+| **SetPortalPosition** ID, EntryX, EntryY, ExitX, ExitY | Move a portal in place, preserving ID, type, cost, speed, and tags. Connections re-wire immediately. |
+| **SetPortalPositionFromObjects** ID, EntryObj, ExitObj | Move a portal to two objects' positions. Combine with a timer for moving teleporters. |
 | **SetPortalCost** ID, Cost | Change a portal's pathfinding cost. Higher cost means less preferred; very high effectively locks it. |
 | **SetPortalSpeed** ID, Speed | Change a gradual portal's traversal speed in pixels per second. |
 | **SetPortalIgnoreHazards** ID, Ignore | Whether the portal's connection ignores hazard cost multipliers. |
@@ -792,35 +873,19 @@ Expression: AnyEnemy.PlatformerNavGraph.NearbyAgentCount
 |---|---|
 | **AddRectHazard** X, Y, Width, Height, Severity | Mark a rectangle (top-left at X, Y) as dangerous. |
 | **AddCircleHazard** X, Y, Radius, Severity | Mark a circle (center at X, Y) as dangerous. Good for explosions and AOE. |
+| **AddTrackedHazard** Object, Radius, Severity | Add a circular hazard that follows an object automatically every tick. Removes itself when the object is destroyed. |
+| **ClearAllTrackedHazards** | Remove every tracked (object-following) hazard. Static and tile hazards are untouched. |
 | **RemoveHazard** ID | Remove one shape hazard by ID. |
 | **ClearAllHazards** | Remove all circle and rect hazards. Tile hazards are untouched. |
 | **ClearAllHazardTiles** | Reset all tile hazard severities. Shape hazards are untouched. |
+| **SetTileHazard** GridX, GridY, Severity | Set the danger level of one tile. 0 removes the hazard. |
+| **SetHazardRadius** Tiles | Cost falloff radius around each hazard. |
 
-### Configuration
-
-| Action | Description |
-|---|---|
-| **SetMaxJumpHeight** Pixels | Override the auto-detected maximum jump height. Regenerate the graph afterwards. |
-| **SetMaxJumpDistance** Pixels | Override the auto-detected maximum horizontal jump distance. Regenerate the graph afterwards. |
-| **SetMaxFallDistance** Pixels | Override the maximum fall distance used for fall connections. Regenerate the graph afterwards. |
-
-### Performance
-
-| Action | Description |
-|---|---|
-| **SetMaxPathsPerTick** Count | Limit A* calculations per tick; extra requests queue. 0 means unlimited. |
-
-### Graph Data
+### Debug
 
 | Action | Description |
 |---|---|
 | **LogGraphStats** | Print node, connection, ledge, slope, portal, and hazard counts to the browser console. |
-
-### Shared Navigation
-
-| Action | Description |
-|---|---|
-| **SetMultiAgentAvoidance** Enabled | Toggle multi-agent path avoidance. Requires Shared graph mode. |
 
 ---
 
@@ -828,12 +893,13 @@ Expression: AnyEnemy.PlatformerNavGraph.NearbyAgentCount
 
 | Condition | Description |
 |---|---|
-| **Has active path** | True while the character is following a path. |
+| **Is enabled** | True while this behavior is enabled (property or Set enabled action). |
+| **Is moving along path** | True while the character is following a path. |
 | **Is platform enabled** | True if the attached Platform behavior is currently enabled. |
 | **Is at ledge** | True when the character stands on a ledge node (platform edge). |
 | **Is at island** | True when the character stands on a single-tile isolated platform. |
-| **Node exists at grid position** GridX, GridY | True if a navigation node exists at these grid coordinates. |
-| **Node exists at world position** X, Y | True if a navigation node exists at this world position. |
+| **Graph node exists at grid position** GridX, GridY | True if a navigation node exists at these grid coordinates. |
+| **Graph node exists at world position** X, Y | True if a navigation node exists at this world position. |
 | **Is node at ledge** GridX, GridY | True if the node at these coordinates is a left or right ledge. |
 | **Is at portal** | True while paused at a portal entry (after PauseAtPortal, before Resume or Complete). |
 | **Is traversing portal** | True while moving through a gradual portal. The Platform behavior is disabled during this. |
@@ -842,7 +908,7 @@ Expression: AnyEnemy.PlatformerNavGraph.NearbyAgentCount
 | **Is setting up Pathfinding** | True while waiting for the Pathfinding behavior's async map build. |
 | **Is position hazardous** X, Y | True if any hazard (circle, rect, or tile) affects the position. |
 | **Is multi-agent avoidance enabled** | True if avoidance is active. |
-| **Path is pending** | True while this agent's path request is queued behind the per-tick budget. |
+| **Is calculating path** | True while this agent's path request is queued behind the per-tick budget. |
 
 ---
 
@@ -860,21 +926,29 @@ Expression: AnyEnemy.PlatformerNavGraph.NearbyAgentCount
 | **CurrentPathAction(i)** | String | Action of waypoint i: `walk_left`, `walk_right`, `jump`, `fall`, `fall_left`, `fall_right`, `coyote_jump`, `fall_through`, `portal_instant`, `portal_gradual`. |
 | **PathFailReason** | String | Last failure: `no_start_node`, `no_goal_node`, `no_path`, `search_exhausted`, or empty on success. |
 | **PathCost** | Number | Total cost of the current path. |
-| **PathTargetX(type) / PathTargetY(type)** | Number | Path target position. Pass "original" or "corrected". |
-| **PathTargetGridX / PathTargetGridY** | Number | Path target grid coordinates after correction. |
+| **PathEndX / PathEndY** | Number | The calculated path's final position (the last waypoint), where the character will actually end up. In Nearest mode this can differ from the requested target. |
+| **TargetX / TargetY** | Number | The REQUESTED target position, as passed to the last Find path. Use PathEndX/Y for where the path actually ends. |
+| **TargetGridX / TargetGridY** | Number | The requested target's grid cell (after ground correction). |
 | **AngleToWaypoint** | Number | Angle in degrees from the character to the current waypoint. |
 | **DistanceToWaypoint** | Number | Pixel distance to the current waypoint. |
-| **NodeCount** | Number | Total nodes in the navigation graph. |
-| **NodeWorldX(gx, gy) / NodeWorldY(gx, gy)** | Number | World position of the node at grid coordinates. |
-| **EstimatedVelocityX** | Number | Estimated horizontal velocity from position deltas. |
-| **StoppingDistance** | Number | Braking distance at current Platform speed. |
+| **PathStrategy** | String | Active strategy: `balanced`, `shortest`, `safest`, `simplest`. |
+| **RePathThreshold / RePathCooldown** | Number | Current re-path settings. |
+| **MaxPathsPerTick** | Number | Current per-tick path budget. 0 means unlimited. |
+| **PathQueueSize** | Number | Pending queued path requests. |
+| **NearbyAgentCount** | Number | Path-following agents within three tiles (avoidance must be on). |
+
+### Movement
+
+| Expression | Returns | Description |
+|---|---|---|
 | **CoyoteTime / CoyoteTimer** | Number | Coyote setting and live countdown. |
 | **StrictJumpPositioning / LedgeRestriction** | Number | 1 when enabled, 0 when not. |
 | **LedgeLeniency** | Number | Current leniency in pixels. |
 | **JumpTowardTargetX / JumpTowardTargetY** | Number | Target of the active jump-toward. |
-| **PathStrategy** | String | Active strategy: `balanced`, `shortest`, `safest`, `simplest`. |
+| **EstimatedVelocityX** | Number | Estimated horizontal velocity from position deltas. |
+| **StoppingDistance** | Number | Braking distance at current Platform speed. |
 
-### Obstacle Map
+### Obstacles
 
 | Expression | Returns | Description |
 |---|---|---|
@@ -886,8 +960,7 @@ Expression: AnyEnemy.PlatformerNavGraph.NearbyAgentCount
 | **SlopeDirection(gx, gy)** | String | `left`, `right`, `gentle_left`, `gentle_right`, or `none`. |
 | **WorldToGridX(x) / WorldToGridY(y)** | Number | Convert world pixels to grid coordinates. |
 | **WaitTickCount** | Number | Ticks spent waiting for the Pathfinding map. Debug aid. |
-| **HazardRadius** | Number | Current hazard falloff radius in tiles. |
-| **RePathThreshold / RePathCooldown** | Number | Current re-path settings. |
+| **MapTag** | String | The map tag this instance navigates with. Empty string is the default shared map. |
 
 ### Portals
 
@@ -909,37 +982,34 @@ Expression: AnyEnemy.PlatformerNavGraph.NearbyAgentCount
 
 | Expression | Returns | Description |
 |---|---|---|
-| **HazardCount** | Number | Active shape hazards (circles and rects). |
+| **LastHazardID** | Number | ID of the most recently added shape hazard. Read right after adding, store to remove or track later. 0 if none. |
+| **HazardCount** | Number | Active shape hazards (circles and rects), including tracked ones. |
+| **TrackedHazardCount** | Number | Active tracked (object-following) hazards. |
 | **PositionIsHazardous(x, y)** | Number | 1 if hazardous, 0 if safe. |
 | **HazardSeverity(x, y)** | Number | Highest severity affecting the position. |
 | **TileHazardSeverity(gx, gy)** | Number | Tile-only severity at grid coordinates. |
+| **HazardRadius** | Number | Current hazard falloff radius in tiles. |
 
-### Graph Data
+### Debug
 
 | Expression | Returns | Description |
 |---|---|---|
-| **NodeAtIndexX(i) / NodeAtIndexY(i)** | Number | World position of the i-th node in the graph array. |
-| **NodeAtIndexGridX(i) / NodeAtIndexGridY(i)** | Number | Grid coordinates of the i-th node. |
-| **NodeAtIndexIsLeftLedge(i) / NodeAtIndexIsRightLedge(i)** | Number | 1 if the i-th node has that ledge flag. |
-| **NodeAtIndexIsSlope(i)** | Number | 1 if the i-th node is a slope node. |
-| **NodeAtIndexConnectionCount(i)** | Number | Connections leaving the i-th node. |
-| **NodeConnectionCount(gx, gy)** | Number | Connections leaving the node at grid coordinates. |
-| **NodeConnectionTargetX(gx, gy, i) / NodeConnectionTargetY(gx, gy, i)** | Number | Target position of the i-th connection. |
-| **NodeConnectionAction(gx, gy, i)** | String | Action of the i-th connection. |
-| **NodeConnectionCost(gx, gy, i)** | Number | Cost of the i-th connection. |
-| **NearestNodeX(x, y) / NearestNodeY(x, y)** | Number | World position of the nearest node to a point. |
-| **NearestNodeGridX(x, y) / NearestNodeGridY(x, y)** | Number | Grid coordinates of the nearest node. |
-| **IsNodeLeftLedge(gx, gy) / IsNodeRightLedge(gx, gy)** | Number | 1 if the node has that ledge flag. |
-| **IsNodeIsland(gx, gy)** | Number | 1 if the node is a single-tile island. |
+| **GraphNodeCount** | Number | Total nodes in the navigation graph. |
+| **GraphNodeWorldX(gx, gy) / GraphNodeWorldY(gx, gy)** | Number | World position of the node at grid coordinates. |
+| **GraphNodeAtIndexX(i) / GraphNodeAtIndexY(i)** | Number | World position of the i-th node in the graph array. |
+| **GraphNodeAtIndexGridX(i) / GraphNodeAtIndexGridY(i)** | Number | Grid coordinates of the i-th node. |
+| **GraphNodeAtIndexIsLeftLedge(i) / GraphNodeAtIndexIsRightLedge(i)** | Number | 1 if the i-th node has that ledge flag. |
+| **GraphNodeAtIndexIsSlope(i)** | Number | 1 if the i-th node is a slope node. |
+| **GraphNodeAtIndexConnectionCount(i)** | Number | Connections leaving the i-th node. |
+| **GraphNodeConnectionCount(gx, gy)** | Number | Connections leaving the node at grid coordinates. |
+| **GraphNodeConnectionTargetX(gx, gy, i) / GraphNodeConnectionTargetY(gx, gy, i)** | Number | Target position of the i-th connection. |
+| **GraphNodeConnectionAction(gx, gy, i)** | String | Action of the i-th connection. |
+| **GraphNodeConnectionCost(gx, gy, i)** | Number | Cost of the i-th connection. |
+| **NearestGraphNodeX(x, y) / NearestGraphNodeY(x, y)** | Number | World position of the nearest node to a point. |
+| **NearestGraphNodeGridX(x, y) / NearestGraphNodeGridY(x, y)** | Number | Grid coordinates of the nearest node. |
+| **IsGraphNodeLeftLedge(gx, gy) / IsGraphNodeRightLedge(gx, gy)** | Number | 1 if the node has that ledge flag. |
+| **IsGraphNodeIsland(gx, gy)** | Number | 1 if the node is a single-tile island. |
 | **IsTileJumpThru(gx, gy)** | Number | 1 if the tile is a jump-thru platform. |
-
-### Shared Navigation, Performance, and Debug
-
-| Expression | Returns | Description |
-|---|---|---|
-| **NearbyAgentCount** | Number | Path-following agents within three tiles (avoidance must be on). |
-| **MaxPathsPerTick** | Number | Current per-tick path budget. 0 means unlimited. |
-| **PathQueueSize** | Number | Pending queued path requests. |
 | **PlatformMaxSpeed** | Number | Max speed read from the Platform behavior. |
 | **PlatformJumpStrength** | Number | Jump strength read from the Platform behavior. |
 | **CalculatedJumpHeight** | Number | Auto-calculated maximum jump height in pixels. |
@@ -952,8 +1022,8 @@ Expression: AnyEnemy.PlatformerNavGraph.NearbyAgentCount
 | Trigger | When it fires |
 |---|---|
 | **On path found** | A path was calculated. With auto-control on, the character is already moving. |
-| **On path failed** | No path could be found. Check PathFailReason. |
-| **On path complete** | The character reached the final destination. |
+| **On failed to find path** | No path could be found. Check PathFailReason. |
+| **On arrived** | The character reached the final destination. |
 | **On navigation graph generated** | The graph build finished. Safe to path and add portals. |
 | **On waypoint reached** | The character arrived at one waypoint. |
 | **On jump toward launched** | JumpTowardPosition fired its jump. |
@@ -1029,7 +1099,7 @@ Scenario: a custom animation state machine needs to own the Platform inputs.
 ```
 // Property: Auto-Control Movement = Off
 Event: Every tick
-  Condition: NPC -> PlatformerNavGraph -> Has active path
+  Condition: NPC -> PlatformerNavGraph -> Is moving along path
   Local var a = NPC.PlatformerNavGraph.CurrentPathAction(NPC.PlatformerNavGraph.CurrentWaypoint)
   Condition: a = "walk_left"
   Action: NPC -> Platform -> Simulate input "Left"
@@ -1166,7 +1236,7 @@ Event: On start of layout
 Event: Guard -> PlatformerNavGraph -> On navigation graph generated
   Action: Guard -> PlatformerNavGraph -> FindPath  PatrolA.X, PatrolA.Y, "Yes", "Reach", "Default"
 
-Event: Guard -> PlatformerNavGraph -> On path complete
+Event: Guard -> PlatformerNavGraph -> On arrived
   Condition: abs(Guard.X - PatrolA.X) < 32
   Action: Guard -> PlatformerNavGraph -> FindPath  PatrolB.X, PatrolB.Y, "Yes", "Reach", "Default"
   Else
@@ -1254,7 +1324,7 @@ Event: Every tick
   Condition: bossState = "chase"
   Condition: distance(Boss.X, Boss.Y, Player.X, Player.Y) <= 200
   Set bossState = "attack"
-  Action: Boss -> PlatformerNavGraph -> StopPathfinding
+  Action: Boss -> PlatformerNavGraph -> Stop
   Action: Boss -> PlatformerNavGraph -> JumpTowardPosition  Player.X, Player.Y
 
 Event: Boss -> Platform -> On landed
@@ -1291,7 +1361,7 @@ Event: On start of layout
   Action: AnyGoblin -> PlatformerNavGraph -> SetMaxPathsPerTick  4
   Action: AnyGoblin -> PlatformerNavGraph -> SetMultiAgentAvoidance  "Enabled"
 
-Event: AnyGoblin -> PlatformerNavGraph -> On path complete
+Event: AnyGoblin -> PlatformerNavGraph -> On arrived
   Action: AnyGoblin -> PlatformerNavGraph -> Find path to object  Player
 ```
 
@@ -1324,7 +1394,7 @@ The JSON carries slopes and tile hazards too, so nothing needs re-registration a
 ```
 // Property: Auto-Control Movement = Off
 Event: Every tick
-  Condition: NPC -> PlatformerNavGraph -> Has active path
+  Condition: NPC -> PlatformerNavGraph -> Is moving along path
   Local var a = NPC.PlatformerNavGraph.CurrentPathAction(NPC.PlatformerNavGraph.CurrentWaypoint)
   Condition: a = "walk_right"
   Action: NPC -> Platform -> Simulate input "Right"
@@ -1336,13 +1406,13 @@ Event: Every tick
 
 ### 12. Diagnosing a failing path
 
-**Scenario:** On path failed keeps firing and you need to know why.
+**Scenario:** On failed to find path keeps firing and you need to know why.
 
 ```
-Event: Enemy -> PlatformerNavGraph -> On path failed
+Event: Enemy -> PlatformerNavGraph -> On failed to find path
   Action: Browser -> Log  "fail: " & Enemy.PlatformerNavGraph.PathFailReason
-  Action: Browser -> Log  "nearest node: " & Enemy.PlatformerNavGraph.NearestNodeX(Enemy.X, Enemy.Y)
-    & "," & Enemy.PlatformerNavGraph.NearestNodeY(Enemy.X, Enemy.Y)
+  Action: Browser -> Log  "nearest node: " & Enemy.PlatformerNavGraph.NearestGraphNodeX(Enemy.X, Enemy.Y)
+    & "," & Enemy.PlatformerNavGraph.NearestGraphNodeY(Enemy.X, Enemy.Y)
   Action: Enemy -> PlatformerNavGraph -> LogGraphStats
 ```
 
@@ -1505,7 +1575,7 @@ Event: Every 0.5 seconds
 Event: Every 0.5 seconds
   Condition: Enemy.Health < 25
   Condition: distance(Enemy.X, Enemy.Y, Player.X, Player.Y) >= 300
-  Action: Enemy -> PlatformerNavGraph -> StopPathfinding
+  Action: Enemy -> PlatformerNavGraph -> Stop
   Action: Enemy -> PlayAnimation  "Cower"
   // Safe distance reached: stop running until the player closes in again
 ```
@@ -1548,7 +1618,7 @@ Event: (same tick, after the loop)
   Local var dir = Enemy.X < Player.X ? -1 : 1
   Action: Enemy -> PlatformerNavGraph -> FindPath  clamp(Enemy.X + dir * fleeRange, 64, LayoutWidth - 64), Enemy.Y, "Yes", "Nearest", "Relaxed"
 
-Event: Enemy -> PlatformerNavGraph -> On path complete
+Event: Enemy -> PlatformerNavGraph -> On arrived
   Condition: Enemy.Health < 25
   Action: Enemy -> PlayAnimation  "Hide"
   // Arrived at cover: hold position until the player closes in again
@@ -1725,7 +1795,7 @@ const action = nav.CurrentPathAction(idx);   // "walk_left", "jump", ...
 const cost   = nav.PathCost();
 const reason = nav.PathFailReason();
 
-const nodes  = nav.NodeCount();
+const nodes  = nav.GraphNodeCount();
 const source = nav.ObstacleMapSource();       // "pathfinding", "custom", "collision"
 const tile   = nav.GridTileSize();            // resolved tile size when auto
 
@@ -1827,7 +1897,7 @@ With Auto-Build Graph set in the editor, no map setup call is needed here; add `
 
 ## 20. Tips and Common Mistakes
 
-- **Leave Tile Size at 0 (auto) unless you have a reason not to.** A manual value that does not match the Pathfinding Cell Size or tilemap tile size misaligns the whole graph, and characters walk into walls. Auto-detection removes the failure mode entirely.
+- **Tile Size must match your grid.** The default is 32 px; if your tilemap or Pathfinding Cell Size differs, set Tile Size to match or set it to 0 to auto-detect. A mismatch misaligns the whole graph, and characters walk into walls.
 
 - **Add portals after `On navigation graph generated`.** Portals connect to graph nodes, so they need a graph to connect to. Registered portals survive rebuilds automatically, but adding one before any graph exists logs a warning and does nothing.
 
@@ -1847,4 +1917,4 @@ With Auto-Build Graph set in the editor, no map setup call is needed here; add `
 
 - **Turn off Enable Debug Logging for release builds.** Console output is expensive, particularly on mobile, and the property defaults to on for development convenience.
 
-- **Auto-Build Graph is off by default for compatibility.** Existing projects keep their event-driven setup untouched. New projects should switch it to Auto and delete their setup events.
+- **Auto-Build Graph defaults to Auto so the addon works the moment it is added.** Explicit setup actions in On start of layout always take precedence, so event-driven projects keep working unchanged. Set it to Off if your project builds its map later than layout start (for example after multi-frame procedural generation).

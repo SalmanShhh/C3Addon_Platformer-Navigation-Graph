@@ -61,9 +61,10 @@ export default {
         ? this.obstacleMap[belowIndex] === 2
         : false;
 
-    const hazardMultiplier = this.enableHazards
-      ? this._getHazardSeverity(x, y)
-      : 1.0;
+    // Hazard costs are baked in one hazard-outer pass at build finalize
+    // (_updateHazardCosts), not per node here — per-node queries against
+    // every hazard made builds O(nodes × hazards).
+    const hazardMultiplier = 1.0;
 
     return {
       x,
@@ -146,7 +147,7 @@ export default {
   _cancelGraphBuild() {
     if (this._graphBuild) {
       this._graphBuild = null;
-      globalNavManager.releaseBuild(this.layoutUID, this);
+      globalNavManager.releaseBuild(this.navKey, this);
     }
   },
 
@@ -186,8 +187,8 @@ export default {
     if (this.isWaitingForPathfindingMap) return false;
 
     // Graph Manager (SPOT, no Platform): inherit jump params from first Platform agent
-    if (!this.platformBehavior && this.useSharedGraph) {
-      const params = globalNavManager.getAgentParams(this.layoutUID);
+    if (!this.platformBehavior) {
+      const params = globalNavManager.getAgentParams(this.navKey);
       if (params) {
         if (!this._jumpParamsOverridden) {
           this.maxJumpHeight = params.maxJumpHeight;
@@ -202,6 +203,17 @@ export default {
       } else if (!this._jumpParamsOverridden) {
         this._log("Graph Manager: waiting for Platform agent to register params");
         return false; // Delay graph build
+      }
+    }
+
+    // Cancel any OTHER instance's in-flight build for this map before clearing
+    // the shared graph it is stepping — two builds mutating the same graph
+    // would corrupt each other (e.g. slope registration restarting a build
+    // that a different instance started via auto-build).
+    {
+      const owner = globalNavManager.buildOwners.get(this._getNavKey());
+      if (owner && owner !== this && owner._graphBuild) {
+        owner._cancelGraphBuild();
       }
     }
 
@@ -225,9 +237,7 @@ export default {
       nodeIndex: 0,
       phaseCount: 0,
     };
-    if (this.useSharedGraph) {
-      globalNavManager.claimBuild(this.layoutUID, this);
-    }
+    globalNavManager.claimBuild(this.navKey, this);
     return true;
   },
 
@@ -271,22 +281,47 @@ export default {
 
     this._markGraphAsGenerated();
 
-    // Record what capabilities this graph was built with so late-joining
-    // instances with different capabilities can trigger a rebuild.
-    if (this.useSharedGraph) {
-      globalNavManager.setGraphCapabilities(this.layoutUID, {
-        doubleJump: this.platformProps.isDoubleJumpEnabled,
-      });
-    }
+    // Record what this graph was built with: capabilities let late joiners
+    // trigger a rebuild (double jump), and the physics numbers power the
+    // mismatch warning for characters that should be on their own Map Tag.
+    globalNavManager.setGraphCapabilities(this.navKey, {
+      doubleJump: this.platformProps.isDoubleJumpEnabled,
+      maxJumpHeight: this.maxJumpHeight,
+      maxJumpDistance: this.maxJumpDistance,
+    });
+    this._syncMapStateToSubscribers();
 
     this._graphBuild = null;
-    globalNavManager.releaseBuild(this.layoutUID, this);
+    globalNavManager.releaseBuild(this.navKey, this);
 
     const wallMs = performance.now() - build.startTime;
     this._log(`Graph generated: ${build.workMs.toFixed(2)}ms of work over ${build.ticks} tick(s) (${wallMs.toFixed(2)}ms wall)`);
 
     // this makes sure the trigger condition is called once the graph is generated.
     this._trigger("OnGraphGenerated");
+  },
+
+  /** Shares the builder's map state (by reference) with every same-map
+   *  subscriber, so there is one copy of the obstacle/slope/hazard data per
+   *  shared map, every instance's gridKey() addresses the graph correctly, and
+   *  movement-time map reads see real data. Also warns (debug, once) when a
+   *  subscriber's jump physics differ substantially from what this graph was
+   *  built with — that character belongs on its own Map Tag. */
+  _syncMapStateToSubscribers() {
+    const subs = globalNavManager.subscribers.get(this.navKey);
+    if (!subs) return;
+    for (const inst of subs) {
+      if (inst === this) continue;
+      inst._adoptMapStateFrom(this);
+      if (!inst._physicsMismatchWarned && inst._initialized && inst.platformBehavior && this.maxJumpHeight > 0) {
+        const dh = Math.abs(this.maxJumpHeight - inst.maxJumpHeight) / this.maxJumpHeight;
+        const dd = Math.abs(this.maxJumpDistance - inst.maxJumpDistance) / Math.max(this.maxJumpDistance, 1);
+        if (dh > 0.2 || dd > 0.2) {
+          inst._physicsMismatchWarned = true;
+          inst._warn(`Jump physics differ ~${Math.round(Math.max(dh, dd) * 100)}% from the physics this map's graph was built with — paths may include jumps this character can't make (or miss ones it could). Give different movement classes their own Map Tag.`);
+        }
+      }
+    }
   },
 
   // ============================================================================

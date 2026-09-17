@@ -33,20 +33,26 @@ export default function (parentClass) {
       this.maxSearchNodes = properties[2];
       this.maxFallDistanceSetting = properties[3];
       this.autoControl = properties[4];
-      this.graphMode = properties[5];
       const strategyMap = ["balanced", "shortest", "safest", "simplest"];
-      this.pathStrategy = strategyMap[properties[6]] || "balanced";
-      this.smoothPaths = properties[7];
-      this.maxWaypointTime = properties[8];
-      this.coyoteTime = properties[9];
-      this.strictPositioning = properties[10];
-      this.ledgeRestriction = properties[11];
-      this.ledgeLeniency = properties[12];
-      this.rePathThreshold = properties[13];
-      this.hazardRadius = properties[14];
+      this.pathStrategy = strategyMap[properties[5]] || "balanced";
+      this.smoothPaths = properties[6];
+      this.maxWaypointTime = properties[7];
+      this.coyoteTime = properties[8];
+      this.strictPositioning = properties[9];
+      this.ledgeRestriction = properties[10];
+      this.ledgeLeniency = properties[11];
+      this.rePathThreshold = properties[12];
+      this.hazardRadius = properties[13];
       // Auto-Build Graph: zero-event startup mode
       const autoBuildMap = ["off", "auto", "pathfinding", "solids"];
-      this.autoBuildMode = autoBuildMap[properties[15]] || "off";
+      this.autoBuildMode = autoBuildMap[properties[14]] || "off";
+      // Map Tag: instances with the same tag on a layout share one navigation
+      // map/graph. "" (default) shares with everyone.
+      this.mapTag = typeof properties[15] === "string" ? properties[15].trim() : "";
+      // Detect Slopes: classify slope tiles from collision-shape probes during scans
+      this.detectSlopes = !!properties[16];
+      // Enabled: standard behavior toggle. Disabled = frozen (state kept)
+      this.navEnabled = properties[17] !== false;
       // Auto-enabled when portals/hazards are added via ACEs
       this.enablePortals = true;
       this.enableHazards = false;
@@ -61,13 +67,12 @@ export default function (parentClass) {
       this.singleJumpDistance = 192;
       this.maxFallDistance = 256;
 
-      this.useSharedGraph = this.graphMode === "shared";
-
       this._initializeState();
 
       // Instance properties and behaviors are acquired on the first tick,
       // not in the constructor, because the instance is not fully initialized yet
       this.layoutUID = null;
+      this.navKey = null; // layoutUID + "|" + mapTag — key for all shared nav state
       this.platformBehavior = null;
       this.pathfindingBehavior = null;
       this._initialized = false;
@@ -78,7 +83,6 @@ export default function (parentClass) {
 
     /** Resets all runtime state (graph, path, portals, hazards, movement flags) to defaults. */
     _initializeState() {
-      this.navGraph = new Map();
       this.graphGenerated = false;
       this.obstacleMap = null;
       this.obstacleMapSource = null;
@@ -121,7 +125,7 @@ export default function (parentClass) {
       };
 
       this.hazards = new Map();
-      this.nextHazardId = 1;
+      this.lastHazardId = 0;
 
       this.portals = new Map();
       this.nextPortalId = 1;
@@ -170,6 +174,7 @@ export default function (parentClass) {
       this.multiAgentAvoidance = false;
       this.pathPending = false;
       this._jumpParamsOverridden = false;
+      this._physicsMismatchWarned = false;
 
       this.isWaitingForPathfindingMap = false;
       this.waitTickCount = 0;
@@ -202,7 +207,10 @@ export default function (parentClass) {
       // First-tick initialization: acquire layout UID, behaviors, and graph mode
       if (!this._initialized) {
         this._initialized = true;
-        this.layoutUID = this.instance.layout.uid;
+        // ILayout has no uid in the documented API (it read undefined) —
+        // the layout NAME is documented and unique per project.
+        this.layoutUID = this.instance.layout.name;
+        this.navKey = this.layoutUID + "|" + this.mapTag;
         this.characterHeight = Math.abs(this.instance.height);
         this.characterWidth = Math.abs(this.instance.width);
         this._log(`Character dimensions: ${this.characterWidth}x${this.characterHeight}px (instance: ${this.instance.width}x${this.instance.height})`);
@@ -213,18 +221,28 @@ export default function (parentClass) {
           this._readPlatformProperties();
           this._calculateJumpParametersFromPlatform();
           this._log(`Double jump: ${this.platformProps.isDoubleJumpEnabled ? "ENABLED" : "disabled"} | Jump sustain: ${this.platformProps.jumpSustain}ms`);
-          // Register agent params for Graph Manager support (SPOT-only)
-          if (this.useSharedGraph) {
-            globalNavManager.registerAgentParams(this.layoutUID, {
-              maxJumpHeight: this.maxJumpHeight,
-              maxJumpDistance: this.maxJumpDistance,
-              maxFallDistance: this.maxFallDistance,
-              singleJumpHeight: this.singleJumpHeight,
-              singleJumpDistance: this.singleJumpDistance,
-              characterHeight: this.characterHeight,
-              characterWidth: this.characterWidth,
-              platformProps: { ...this.platformProps }
-            });
+          // Register agent params for Graph Manager support (SPOT)
+          globalNavManager.registerAgentParams(this.navKey, {
+            maxJumpHeight: this.maxJumpHeight,
+            maxJumpDistance: this.maxJumpDistance,
+            maxFallDistance: this.maxFallDistance,
+            singleJumpHeight: this.singleJumpHeight,
+            singleJumpDistance: this.singleJumpDistance,
+            characterHeight: this.characterHeight,
+            characterWidth: this.characterWidth,
+            platformProps: { ...this.platformProps }
+          });
+          // Late spawner joining an already-built graph: warn (debug, once)
+          // when this instance's jump physics differ substantially from the
+          // graph's build physics — it belongs on its own Map Tag.
+          const caps = globalNavManager.getGraphCapabilities(this.navKey);
+          if (caps && caps.maxJumpHeight > 0 && !this._physicsMismatchWarned) {
+            const dh = Math.abs(caps.maxJumpHeight - this.maxJumpHeight) / caps.maxJumpHeight;
+            const dd = Math.abs(caps.maxJumpDistance - this.maxJumpDistance) / Math.max(caps.maxJumpDistance, 1);
+            if (dh > 0.2 || dd > 0.2) {
+              this._physicsMismatchWarned = true;
+              this._warn(`Jump physics differ ~${Math.round(Math.max(dh, dd) * 100)}% from the physics this map's graph was built with — paths may include jumps this character can't make (or miss ones it could). Give different movement classes their own Map Tag.`);
+            }
           }
         }
       }
@@ -243,6 +261,12 @@ export default function (parentClass) {
     if (!this.pathfindingBehavior) {
         this.pathfindingBehavior = this._getPathfindingBehavior();
     }
+
+      // Behavior disabled: initialization and subscriptions above stay live so
+      // re-enabling resumes seamlessly, but no navigation work happens. Note a
+      // frozen gradual-portal traversal stays frozen (Platform stays disabled)
+      // until this behavior is re-enabled.
+      if (!this.navEnabled) return;
 
     // If either behavior is present but disabled, skip all processing and log a warning
       if (this.platformBehavior && !this.platformBehavior.isEnabled) {
@@ -269,6 +293,12 @@ export default function (parentClass) {
         }
       }
 
+      // Refresh tracked (object-following) hazards, then re-bake stale hazard
+      // costs. Both are once per map per tick regardless of instance count —
+      // the stamps/flags are per map and the first instance does the work.
+      this._updateTrackedHazardsIfOwner();
+      this._applyHazardCostsIfDirty();
+
       if (this.platformBehavior) {
         this._updateCoyoteTime(dt);
       }
@@ -294,8 +324,9 @@ export default function (parentClass) {
             const dir = this.jumpTowardTargetX < this.instance.x ? "left" : "right";
             this.platformBehavior.simulateControl(dir);
           }
-          // Sustain jump while rising
-          if (this.platformProps.jumpSustain > 0 && this.platformBehavior.isRising) {
+          // Sustain jump while moving upwards. isJumping is the documented
+          // "currently moving upwards" flag (isRising does not exist in the API).
+          if (this.platformProps.jumpSustain > 0 && this.platformBehavior.isJumping) {
             this.platformBehavior.simulateControl("jump");
           }
         }
@@ -324,12 +355,9 @@ export default function (parentClass) {
       super._release();
       this._cancelGraphBuild();
       globalNavManager.removeQueuedRequest(this);
-      if (this.useSharedGraph && this.layoutUID !== null) {
-        globalNavManager.unsubscribe(this.layoutUID, this);
-      } else if (!this.useSharedGraph && this.layoutUID !== null) {
-        globalNavManager.releasePerInstanceUsage(this.layoutUID);
+      if (this.navKey !== null) {
+        globalNavManager.unsubscribe(this.navKey, this);
       }
-      this.navGraph.clear();
       this.portals.clear();
       this.hazards.clear();
       if (this.portalState === "traversing" && this.platformBehavior) {
@@ -355,7 +383,7 @@ export default function (parentClass) {
         singleJumpDistance: this.singleJumpDistance,
         maxFallDistance: this.maxFallDistance,
         autoControl: this.autoControl,
-        graphMode: this.graphMode,
+        navEnabled: this.navEnabled,
         enablePortals: this.enablePortals,
         smoothPaths: this.smoothPaths,
         maxWaypointTime: this.maxWaypointTime,
@@ -404,6 +432,7 @@ export default function (parentClass) {
         slopeMap: this.slopeMap ? Array.from(this.slopeMap) : null,
         hazardMap: this.hazardMap ? Array.from(this.hazardMap) : null,
         hazards: Array.from(this.hazards.values()),
+        lastHazardId: this.lastHazardId,
         portals: Array.from(this.portals.values()),
         lastPortalId: this.lastPortalId,
         portalState: this.portalState,
@@ -449,7 +478,7 @@ export default function (parentClass) {
       this.singleJumpDistance = o.singleJumpDistance || o.maxJumpDistance;
       this.maxFallDistance = o.maxFallDistance;
       this.autoControl = o.autoControl;
-      this.graphMode = o.graphMode;
+      this.navEnabled = o.navEnabled !== undefined ? o.navEnabled : true;
       this.enablePortals = o.enablePortals;
       this.smoothPaths = o.smoothPaths;
       this.maxWaypointTime = o.maxWaypointTime;
@@ -497,13 +526,14 @@ export default function (parentClass) {
       this._jumpParamsOverridden = o._jumpParamsOverridden || false;
 
       this.hazards.clear();
-      this.nextHazardId = 1;
       if (o.hazards) {
         for (const h of o.hazards) {
           this.hazards.set(h.id, h);
-          this.nextHazardId = Math.max(this.nextHazardId, h.id + 1);
+          // Global counter: never re-issue an ID a loaded hazard already uses
+          globalNavManager.nextHazardId = Math.max(globalNavManager.nextHazardId, h.id + 1);
         }
       }
+      this.lastHazardId = o.lastHazardId || 0;
 
       this.portals.clear();
       this.nextPortalId = 1;
@@ -578,6 +608,7 @@ export default function (parentClass) {
           { name: "$nodes", value: graph.size },
           { name: "$gridSize", value: `${this.gridWidth}x${this.gridHeight}` },
           { name: "$obstacleSource", value: this.obstacleMapSource || "none" },
+          { name: "$mapTag", value: this.mapTag || "(default)" },
         ]
       }, {
         title: prefix + " - Pathfinding",
@@ -608,6 +639,7 @@ export default function (parentClass) {
       }, {
         title: prefix + " - Settings",
         properties: [
+          { name: "$navEnabled", value: this.navEnabled },
           { name: "$cellSize", value: this.cellSize },
           { name: "$maxJumpHeight", value: Math.round(this.maxJumpHeight) },
           { name: "$maxJumpDistance", value: Math.round(this.maxJumpDistance) },
@@ -670,7 +702,13 @@ export default function (parentClass) {
             this.platformBehavior.isDoubleJumpEnabled;
         }
         if (this.platformBehavior.jumpSustain !== undefined) {
-          this.platformProps.jumpSustain = this.platformBehavior.jumpSustain;
+          // The scripting docs give jumpSustain in SECONDS while the editor
+          // property (and this addon's math) uses milliseconds. Normalize by
+          // magnitude: a value under 10 can only be seconds (nobody sustains a
+          // jump 10+ seconds, and millisecond values are 16+).
+          const rawSustain = this.platformBehavior.jumpSustain;
+          this.platformProps.jumpSustain =
+            rawSustain > 0 && rawSustain < 10 ? rawSustain * 1000 : rawSustain;
         }
         if (this.platformBehavior.ceilingCollisionMode !== undefined) {
           this.platformProps.ceilingCollisionMode =
@@ -782,6 +820,17 @@ export default function (parentClass) {
       return gy * this.gridWidth + gx;
     }
 
+    /** Returns the shared-state key (layoutUID|mapTag), computing it lazily.
+     *  Needed because On-start-of-layout actions run BEFORE the first tick,
+     *  when the tick-time initialization has not set navKey yet. */
+    _getNavKey() {
+      if (this.navKey === null && this.instance) {
+        this.layoutUID = this.instance.layout.name; // documented; ILayout has no uid
+        this.navKey = this.layoutUID + "|" + this.mapTag;
+      }
+      return this.navKey;
+    }
+
     /** Returns the Euclidean distance between two points. */
     distance(x1, y1, x2, y2) {
       const dx = x2 - x1;
@@ -789,88 +838,75 @@ export default function (parentClass) {
       return Math.sqrt(dx * dx + dy * dy);
     }
 
-    /** Returns the active navigation graph (shared across instances or per-instance, based on graph mode). */
+    /** Returns this instance's navigation graph (shared per nav key). */
     _getNavigationGraph() {
-      if (this.useSharedGraph) {
-        return globalNavManager.getSharedGraph(this.layoutUID);
-      }
-      return this.navGraph;
+      return globalNavManager.getSharedGraph(this.navKey);
     }
 
-    /** Returns the portals Map (shared or per-instance). */
+    /** Returns the portals Map (shared per nav key).
+     *  Portals are per map tag: a door portal added by a "ghost"-tagged instance
+     *  exists only in the ghost map. Falls back to the own map before the first
+     *  tick subscribes this instance. */
     _getPortalsMap() {
-      if (this.useSharedGraph) {
-        const subs = globalNavManager.subscribers.get(this.layoutUID);
-        if (subs && subs.size > 0) {
-          return subs.values().next().value.portals;
-        }
+      const subs = globalNavManager.subscribers.get(this.navKey);
+      if (subs && subs.size > 0) {
+        return subs.values().next().value.portals;
       }
       return this.portals;
     }
 
-    /** Returns the hazards Map (shared or per-instance). */
+    /** Returns the hazards Map (shared per nav key), like portals. */
     _getHazardsMap() {
-      if (this.useSharedGraph) {
-        const subs = globalNavManager.subscribers.get(this.layoutUID);
-        if (subs && subs.size > 0) {
-          return subs.values().next().value.hazards;
-        }
+      const subs = globalNavManager.subscribers.get(this.navKey);
+      if (subs && subs.size > 0) {
+        return subs.values().next().value.hazards;
       }
       return this.hazards;
     }
 
     /** Returns true if the navigation graph needs to be regenerated. */
     _needsGraphRegeneration() {
-      if (this.useSharedGraph) {
-        // Another instance is already running an incremental build for this layout
-        if (globalNavManager.isBuildInProgress(this.layoutUID)) return false;
+      // Another instance is already running an incremental build for this map
+      if (globalNavManager.isBuildInProgress(this.navKey)) return false;
 
-        // Graph Manager without Platform: delay until agent params are available
-        if (!this.platformBehavior && !this._jumpParamsOverridden) {
-          const params = globalNavManager.getAgentParams(this.layoutUID);
-          if (!params) return false; // Wait for a Platform agent to register
-        }
-
-        if (globalNavManager.needsRegeneration(this.layoutUID)) return true;
-
-        // Check capability mismatch: if this instance has double jump but the
-        // shared graph was built without it, the graph is missing double-jump
-        // connections and needs rebuilding.
-        if (this.platformProps.isDoubleJumpEnabled) {
-          const caps = globalNavManager.getGraphCapabilities(this.layoutUID);
-          if (caps && !caps.doubleJump) {
-            this._log("Shared graph missing double-jump connections — rebuilding");
-            return true;
-          }
-        }
-
-        return false;
+      // Graph Manager without Platform: delay until agent params are available
+      if (!this.platformBehavior && !this._jumpParamsOverridden) {
+        const params = globalNavManager.getAgentParams(this.navKey);
+        if (!params) return false; // Wait for a Platform agent to register
       }
-      return !this.graphGenerated;
+
+      if (globalNavManager.needsRegeneration(this.navKey)) return true;
+
+      // Check capability mismatch: if this instance has double jump but the
+      // shared graph was built without it, the graph is missing double-jump
+      // connections and needs rebuilding.
+      if (this.platformProps.isDoubleJumpEnabled) {
+        const caps = globalNavManager.getGraphCapabilities(this.navKey);
+        if (caps && !caps.doubleJump) {
+          this._log("Shared graph missing double-jump connections — rebuilding");
+          return true;
+        }
+      }
+
+      return false;
     }
 
-    /** Marks the graph as generated for this instance (or all shared subscribers). */
+    /** Marks the graph as generated for all same-map subscribers. */
     _markGraphAsGenerated() {
-      if (this.useSharedGraph) {
-        globalNavManager.markGraphAsGenerated(this.layoutUID);
-      } else {
-        this.graphGenerated = true;
-      }
+      globalNavManager.markGraphAsGenerated(this.navKey);
     }
 
-    /** Subscribes this instance to the shared graph manager if using shared mode.
-     *  Per-Instance mode at scale is almost always an accident (every instance
-     *  builds and stores its own full graph), so warn once when the count grows. */
+    /** Subscribes this instance to its nav key's shared graph. */
     _initializeGraphMode() {
-      if (this.useSharedGraph) {
-        globalNavManager.subscribe(this.layoutUID, this);
-      } else {
-        const count = globalNavManager.notePerInstanceUsage(this.layoutUID);
-        if (count === 9) {
-          this._warn(
-            `${count}+ instances are using Per-Instance graph mode on this layout — each one builds and stores its own navigation graph. ` +
-            `Switch the Graph Mode property to "Shared" unless each character genuinely needs a different obstacle map.`
-          );
+      // Log when a NEW map tag first becomes active on this layout: a typo in
+      // the Map Tag property silently creates a separate, unconfigured map,
+      // and this listing is how that gets diagnosed.
+      const isNewMap = !globalNavManager.subscribers.has(this.navKey);
+      globalNavManager.subscribe(this.navKey, this);
+      if (isNewMap && this.enableDebug) {
+        const tags = globalNavManager.getActiveTagsForLayout(this.layoutUID);
+        if (tags.length > 1 || this.mapTag !== "") {
+          this._log(`Map tag "${this.mapTag || "(default)"}" active — tags on this layout: ${tags.join(", ")}`);
         }
       }
     }

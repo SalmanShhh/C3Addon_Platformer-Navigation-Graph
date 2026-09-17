@@ -94,102 +94,140 @@ class SpatialHash {
 
 // ===========================
 // NavigationManager Singleton
+//
+// Shared navigation state is keyed by a "nav key": `layoutName + "|" + mapTag`.
+// Instances with the same Map Tag on the same layout share one graph, one set
+// of portals/hazards, and one build. The default tag ("") gives layout-wide
+// sharing. Every instance goes through the manager (the old Per-Instance graph
+// mode was removed in 0.6.0.0 in favor of Map Tags).
 // ===========================
 class NavigationManager {
   constructor() {
-    this.sharedGraphs = new Map();
-    this.subscribers = new Map();
-    this.graphCapabilities = new Map(); // per-layout: { doubleJump: bool }
+    this.sharedGraphs = new Map();        // navKey → graph Map
+    this.subscribers = new Map();         // navKey → Set of instances
+    this.graphCapabilities = new Map();   // navKey → { doubleJump: bool }
 
-    // Time-sliced path queue
+    // Time-sliced path queue (global across all maps — the budget is per tick,
+    // not per map)
     this.pathQueue = [];
     this.maxPathsPerTick = 0; // 0 = unlimited (backward-compatible)
     this._pathsThisTick = 0;
     this._lastResetTime = 0;
 
-    // Spatial hash for multi-agent avoidance
-    this._agentSpatialHash = null;
-    this._agentHashLastBuild = 0;
+    // Spatial hashes for multi-agent avoidance, per nav key. Multiple maps can
+    // be active on the same tick (different tags), so a single cached hash
+    // would leak agents between maps.
+    this._agentSpatialHashes = new Map(); // navKey → { hash, time }
 
     // Graph Manager: shared agent params
-    this.sharedAgentParams = new Map(); // layoutUID → { maxJumpHeight, ... }
+    this.sharedAgentParams = new Map();   // navKey → { maxJumpHeight, ... }
 
-    // Incremental (chunked) graph builds: layoutUID → owning instance
+    // Incremental (chunked) graph builds: navKey → owning instance
     this.buildOwners = new Map();
 
-    // Per-Instance graph mode usage per layout, for the scale warning
-    this.perInstanceCounts = new Map();
+    // Maps whose baked node hazard costs are stale (hazards added/removed/
+    // changed since the last _updateHazardCosts). Applied lazily before the
+    // next tick's path following or the next A* search.
+    this.hazardCostsDirty = new Set(); // of navKey
+
+    // Global hazard ID counter. Hazard maps are shared per nav key, so a
+    // per-instance counter would let two instances allocate the same ID and
+    // silently overwrite each other's hazards.
+    this.nextHazardId = 1;
+
+    // Single-flight stamp for the per-tick tracked-hazard update: navKey →
+    // gameTime of the last update, so only one instance per map does the work.
+    this.trackedUpdateStamp = new Map();
+
+    // Same-tick dedupe of map-setup actions. Event-sheet actions run once per
+    // picked instance, so N picked instances would redo the same setup N times;
+    // the first caller claims it and the rest adopt its result.
+    this.setupStamps = new Map(); // navKey#action → { time, owner }
   }
 
-  /** Counts a Per-Instance-mode instance for its layout; returns the new count.
-   *  Used to warn when Per-Instance mode is (probably accidentally) used at scale. */
-  notePerInstanceUsage(layoutUID) {
-    const n = (this.perInstanceCounts.get(layoutUID) || 0) + 1;
-    this.perInstanceCounts.set(layoutUID, n);
-    return n;
-  }
-
-  /** Removes a Per-Instance-mode instance from its layout's count. */
-  releasePerInstanceUsage(layoutUID) {
-    const n = (this.perInstanceCounts.get(layoutUID) || 0) - 1;
-    if (n <= 0) this.perInstanceCounts.delete(layoutUID);
-    else this.perInstanceCounts.set(layoutUID, n);
-  }
-
-  /** Returns (or creates) the shared navigation graph Map for a given layout. */
-  getSharedGraph(layoutUID) {
-    if (!this.sharedGraphs.has(layoutUID)) {
-      this.sharedGraphs.set(layoutUID, new Map());
+  /** Returns (or creates) the shared navigation graph Map for a nav key. */
+  getSharedGraph(navKey) {
+    if (!this.sharedGraphs.has(navKey)) {
+      this.sharedGraphs.set(navKey, new Map());
     }
-    return this.sharedGraphs.get(layoutUID);
+    return this.sharedGraphs.get(navKey);
   }
 
-  /** Registers an instance as a subscriber to the shared graph for its layout.
+  /** Registers an instance as a subscriber to its nav key's shared graph.
    *  Late joiners (instances spawned after the graph was built) inherit the
    *  existing graph instead of forcing a full rebuild — otherwise every spawn
    *  in a wave would trigger a rebuild storm. The capability-mismatch check in
    *  _needsGraphRegeneration (e.g. double jump) still requests a rebuild when
    *  the new instance genuinely needs connections the graph lacks. */
-  subscribe(layoutUID, instance) {
-    if (!this.subscribers.has(layoutUID)) {
-      this.subscribers.set(layoutUID, new Set());
+  subscribe(navKey, instance) {
+    if (!this.subscribers.has(navKey)) {
+      this.subscribers.set(navKey, new Set());
     }
-    this.subscribers.get(layoutUID).add(instance);
+    this.subscribers.get(navKey).add(instance);
     // graphCapabilities is recorded when a shared build completes, so its
-    // presence means a built graph already exists for this layout.
-    if (this.graphCapabilities.has(layoutUID)) {
+    // presence means a built graph already exists for this nav key.
+    if (this.graphCapabilities.has(navKey)) {
       instance.graphGenerated = true;
-    }
-  }
-
-  /** Removes an instance from the shared graph subscribers; cleans up the graph when no subscribers remain. */
-  unsubscribe(layoutUID, instance) {
-    const subs = this.subscribers.get(layoutUID);
-    if (subs) {
-      subs.delete(instance);
-      if (subs.size === 0) {
-        this.subscribers.delete(layoutUID);
-        this.sharedGraphs.delete(layoutUID);
-        this.graphCapabilities.delete(layoutUID);
-        this.sharedAgentParams.delete(layoutUID);
-        this.buildOwners.delete(layoutUID);
+      // Also adopt the built map's state (grid dims + map references) from an
+      // existing subscriber — without gridWidth, gridKey() cannot address the
+      // shared graph's nodes, and movement-time map reads would see nothing.
+      for (const other of this.subscribers.get(navKey)) {
+        if (other !== instance && other.obstacleMap) {
+          instance._adoptMapStateFrom(other);
+          break;
+        }
       }
     }
   }
 
+  /** Removes an instance from its nav key's subscribers; cleans up that map's
+   *  state when no subscribers remain. */
+  unsubscribe(navKey, instance) {
+    const subs = this.subscribers.get(navKey);
+    if (subs) {
+      subs.delete(instance);
+      if (subs.size === 0) {
+        this.subscribers.delete(navKey);
+        this.sharedGraphs.delete(navKey);
+        this.graphCapabilities.delete(navKey);
+        this.sharedAgentParams.delete(navKey);
+        this.buildOwners.delete(navKey);
+        this._agentSpatialHashes.delete(navKey);
+        this.hazardCostsDirty.delete(navKey);
+        this.trackedUpdateStamp.delete(navKey);
+        for (const key of this.setupStamps.keys()) {
+          if (key.startsWith(navKey + "#")) this.setupStamps.delete(key);
+        }
+      }
+    }
+  }
+
+  /** Returns all active map tags on a layout (from live subscriber keys).
+   *  Used for the debug listing that makes tag typos diagnosable. */
+  getActiveTagsForLayout(layoutUID) {
+    const prefix = layoutUID + "|";
+    const tags = [];
+    for (const key of this.subscribers.keys()) {
+      if (key.startsWith(prefix)) {
+        tags.push(key.slice(prefix.length) || '(default)');
+      }
+    }
+    return tags;
+  }
+
   /** Records the capabilities the graph was built with (e.g. double jump). */
-  setGraphCapabilities(layoutUID, capabilities) {
-    this.graphCapabilities.set(layoutUID, { ...capabilities });
+  setGraphCapabilities(navKey, capabilities) {
+    this.graphCapabilities.set(navKey, { ...capabilities });
   }
 
   /** Returns the capabilities the graph was built with, or null if not yet built. */
-  getGraphCapabilities(layoutUID) {
-    return this.graphCapabilities.get(layoutUID) || null;
+  getGraphCapabilities(navKey) {
+    return this.graphCapabilities.get(navKey) || null;
   }
 
-  /** Sets graphGenerated=true on all subscriber instances for a layout. */
-  markGraphAsGenerated(layoutUID) {
-    const subs = this.subscribers.get(layoutUID);
+  /** Sets graphGenerated=true on all subscriber instances for a nav key. */
+  markGraphAsGenerated(navKey) {
+    const subs = this.subscribers.get(navKey);
     if (subs) {
       for (const inst of subs) {
         inst.graphGenerated = true;
@@ -197,9 +235,9 @@ class NavigationManager {
     }
   }
 
-  /** Returns true if any subscriber for this layout has not yet generated its graph. */
-  needsRegeneration(layoutUID) {
-    const subs = this.subscribers.get(layoutUID);
+  /** Returns true if any subscriber for this nav key has not yet generated its graph. */
+  needsRegeneration(navKey) {
+    const subs = this.subscribers.get(navKey);
     if (!subs || subs.size === 0) return false;
     for (const inst of subs) {
       if (!inst.graphGenerated) return true;
@@ -207,26 +245,26 @@ class NavigationManager {
     return false;
   }
 
-  /** Claims ownership of an in-progress incremental graph build for a layout. */
-  claimBuild(layoutUID, instance) {
-    this.buildOwners.set(layoutUID, instance);
+  /** Claims ownership of an in-progress incremental graph build for a nav key. */
+  claimBuild(navKey, instance) {
+    this.buildOwners.set(navKey, instance);
   }
 
   /** Releases build ownership (only if this instance is the current owner). */
-  releaseBuild(layoutUID, instance) {
-    if (this.buildOwners.get(layoutUID) === instance) {
-      this.buildOwners.delete(layoutUID);
+  releaseBuild(navKey, instance) {
+    if (this.buildOwners.get(navKey) === instance) {
+      this.buildOwners.delete(navKey);
     }
   }
 
-  /** Returns true if an incremental graph build is in progress for this layout. */
-  isBuildInProgress(layoutUID) {
-    return this.buildOwners.has(layoutUID);
+  /** Returns true if an incremental graph build is in progress for this nav key. */
+  isBuildInProgress(navKey) {
+    return this.buildOwners.has(navKey);
   }
 
-  /** Synchronously completes any in-progress incremental build for this layout. */
-  finishBuildFor(layoutUID) {
-    const owner = this.buildOwners.get(layoutUID);
+  /** Synchronously completes any in-progress incremental build for this nav key. */
+  finishBuildFor(navKey) {
+    const owner = this.buildOwners.get(navKey);
     if (owner && owner._graphBuild) {
       owner._finishGraphBuildNow();
     }
@@ -281,40 +319,43 @@ class NavigationManager {
     this.pathQueue = [];
   }
 
-  /** Builds a spatial hash of agent positions once per frame (lazy, on first A* query). */
-  getAgentSpatialHash(layoutUID, cellSize) {
+  /** Builds a spatial hash of agent positions once per frame per nav key
+   *  (lazy, on first A* query). Only agents on the same map avoid each other. */
+  getAgentSpatialHash(navKey, cellSize) {
     const now = performance.now();
-    if (!this._agentSpatialHash || now - this._agentHashLastBuild > 1) {
-      const hash = new SpatialHash(cellSize * 2);
-      const subs = this.subscribers.get(layoutUID);
-      if (subs) {
-        for (const inst of subs) {
-          if (inst.hasPath) hash.insert(inst.instance.x, inst.instance.y);
-        }
-      }
-      this._agentSpatialHash = hash;
-      this._agentHashLastBuild = now;
+    const cached = this._agentSpatialHashes.get(navKey);
+    if (cached && now - cached.time <= 1) {
+      return cached.hash;
     }
-    return this._agentSpatialHash;
+    const hash = new SpatialHash(cellSize * 2);
+    const subs = this.subscribers.get(navKey);
+    if (subs) {
+      for (const inst of subs) {
+        if (inst.hasPath) hash.insert(inst.instance.x, inst.instance.y);
+      }
+    }
+    this._agentSpatialHashes.set(navKey, { hash, time: now });
+    return hash;
   }
 
   /** Registers agent parameters (jump/fall/dimensions) from a Platform-bearing instance. */
-  registerAgentParams(layoutUID, params) {
-    const existing = this.sharedAgentParams.get(layoutUID);
+  registerAgentParams(navKey, params) {
+    const existing = this.sharedAgentParams.get(navKey);
     if (!existing || params.maxJumpHeight > existing.maxJumpHeight) {
-      this.sharedAgentParams.set(layoutUID, { ...params });
+      this.sharedAgentParams.set(navKey, { ...params });
     }
   }
 
-  /** Returns registered agent parameters for a layout, or null if none registered. */
-  getAgentParams(layoutUID) {
-    return this.sharedAgentParams.get(layoutUID) || null;
+  /** Returns registered agent parameters for a nav key, or null if none registered. */
+  getAgentParams(navKey) {
+    return this.sharedAgentParams.get(navKey) || null;
   }
 
-  /** Collects world positions of all other path-following instances (for multi-agent avoidance). */
-  getOtherInstancePositions(layoutUID, excludeInstance) {
+  /** Collects world positions of all other path-following instances on the
+   *  same nav key (for multi-agent avoidance). */
+  getOtherInstancePositions(navKey, excludeInstance) {
     const positions = [];
-    const subs = this.subscribers.get(layoutUID);
+    const subs = this.subscribers.get(navKey);
     if (subs) {
       for (const inst of subs) {
         if (inst !== excludeInstance && inst.hasPath) {

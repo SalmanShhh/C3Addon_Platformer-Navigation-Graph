@@ -156,6 +156,37 @@ export default {
     }
   },
 
+  /** Moves a portal in place, preserving its ID, type, cost, speed, and tags.
+   *  Old graph connections are removed (resolved from the OLD coordinates)
+   *  before the coordinates change, then fresh connections are wired at the
+   *  new position. A character mid-traversal keeps its captured exit target;
+   *  the move never teleports anyone. Cheap enough to call on a timer for
+   *  moving teleporters. */
+  aceSetPortalPosition(portalId, entryX, entryY, exitX, exitY) {
+    const portalsMap = this._getPortalsMap();
+    const portal = portalsMap.get(portalId);
+    if (!portal) return;
+    this._removePortalConnections(portalId, portal);
+    portal.entryX = entryX;
+    portal.entryY = entryY;
+    portal.exitX = exitX;
+    portal.exitY = exitY;
+    if (this.graphGenerated) {
+      this._connectPortalToGraph(portal);
+    }
+  },
+
+  /** Moves a portal to two objects' current positions (first picked instances). */
+  aceSetPortalPositionFromObjects(portalId, entryObjectClass, exitObjectClass) {
+    const entryInst = entryObjectClass.getFirstPickedInstance();
+    const exitInst = exitObjectClass.getFirstPickedInstance();
+    if (!entryInst || !exitInst) {
+      this._warn("Set portal position from objects: could not find picked instances");
+      return;
+    }
+    this.aceSetPortalPosition(portalId, entryInst.x, entryInst.y, exitInst.x, exitInst.y);
+  },
+
   /** Updates a portal's pathfinding cost and reconnects it to the graph. */
   aceSetPortalCost(portalId, cost) {
     const portalsMap = this._getPortalsMap();

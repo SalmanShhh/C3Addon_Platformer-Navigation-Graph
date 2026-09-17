@@ -4,7 +4,9 @@ export const config = {
   description: "Enable or disable path-level multi-agent avoidance. When enabled, agents try to avoid choosing overlapping paths when multiple agents share the same navigation map.",
   params: [
     { id: "enabled", name: "Enabled", desc: "Enable or disable multi-agent avoidance", type: "combo", initialValue: "yes",
-      items: [{ yes: "Yes" }, { no: "No" }]
+      // Item order is immutable (combo values stored by index); labels normalized
+      // to Enabled/Disabled to match the other state toggles.
+      items: [{ yes: "Enabled" }, { no: "Disabled" }]
     }
   ]
 };

@@ -65,7 +65,17 @@ Real-time avoidance of moving objects (enemies, projectiles) during path executi
 
 ---
 
-## Moving Hazard Avoidance
+## Moving Hazard Avoidance — SHIPPED in 0.6.0.0 (Option A, baked variant)
+
+> Status: implemented as AddTrackedHazard / ClearAllTrackedHazards /
+> TrackedHazardCount. Deviation from the design below: costs stay BAKED rather
+> than evaluated per A* query — the 0.6.0.0 hazard-outer re-bake made baking
+> cheap enough (O(nodes + hazard area), once per map per tick, only when a
+> tracked object moved past a quarter-cell). Positions refresh in a
+> single-flight per-map tick pass via the documented getInstanceByUid, with
+> auto-removal on destroy. The per-query approach below remains the fallback
+> if a future game needs per-instance hazard perception (different agents
+> fearing different objects).
 
 Extending the static hazard system (circles, rects, tile severities) to track objects whose positions change at runtime — bouncing fireballs, patrol-zone enemies, projectiles, moving spike traps.
 
@@ -155,7 +165,7 @@ Exposing graph data to behavior tree plugins for complex AI decision-making.
 - Path results already accessible for custom decision logic
 
 ### C3 Scripting APIs
-- All existing ACE expressions (`NodeCount`, `WaypointX(i)`, `WaypointY(i)`, `PathLength`, `CurrentAction`, etc.) are accessible from behavior tree plugins via the standard C3 expression system — no additional scripting layer needed for basic integration
+- All existing ACE expressions (`GraphNodeCount`, `WaypointX(i)`, `WaypointY(i)`, `PathLength`, `CurrentAction`, etc.) are accessible from behavior tree plugins via the standard C3 expression system — no additional scripting layer needed for basic integration
 - `runtime.objects.MyAgent.getAllInstances()` — behavior tree plugins can iterate agents and read navigation state via expressions or direct instance property access
 - `IBehaviorInstance.instance` — behavior trees accessing the addon behavior instance can read `instance.x` / `instance.y` and cross-reference with navigation expressions
 
@@ -572,7 +582,15 @@ Graph patch work (incremental updates, hazard cost recalculation) currently runs
 
 ---
 
-## Map Tags (replace the Shared / Per-Instance mode)
+## Map Tags (replace the Shared / Per-Instance mode) — SHIPPED in 0.6.0.0
+
+> Status: implemented in 0.6.0.0 as the "Map Tag" text property (per-tag graphs,
+> portals, hazards, cell size, avoidance, and build single-flighting; MapTag
+> expression; typo debug listing). The Graph Mode property and Per-Instance mode
+> were then REMOVED outright in the same version (pre-release breaking change),
+> unifying everything on the shared manager path. Remaining from this design:
+> an optional "all tags" flag for portal registration. The original rationale
+> and trade-offs are kept below.
 
 The Graph Mode combo conflates two different things: a performance choice (share the build) and a semantic choice (this character sees different walls, e.g. a wall-phasing ghost). That is why sharing cannot be safely automated by instance count: the addon cannot observe which semantics the designer wants, and a mode that flips mid-game when a spawn threshold is crossed would make behavior timing-dependent.
 
@@ -606,3 +624,35 @@ The Graph Mode combo conflates two different things: a performance choice (share
 
 ### Interim mitigation (shipped 0.5.1.0)
 - Per-Instance mode logs a one-time warning at 9+ instances on a layout, pointing users back to Shared mode.
+
+---
+
+## Arbitrary-Angle Surfaces (continuous surface sampling — "slopes v3")
+
+Today the slope system supports exactly two shapes: 1:1 (45 degrees) and 2:1 ("gentle"). That is a representation limit, not a detection limit — the 0.6.0.0 probe classifier already measures real surface heights but has nowhere to store anything between the two supported shapes. Unsupported angles degrade to stair-step solids that the AI climbs with micro-jump connections: functional, but visually hoppy on organic terrain (30-degree ramps, curved hills, rotated sprite terrain at odd angles).
+
+**Design: store a probed surface height per node instead of a slope type per tile.**
+
+- During node generation, for every walkable cell whose ground cell is partially solid, probe the surface height at the node's column (the `_probeColumnSurfaceHeight` machinery from 0.6.0.0, one probe per node). Store `surfaceY` on the node; full cells keep the tile-top surface as today.
+- **Walk connections generalize**: connect horizontally adjacent nodes (same row OR one row apart) whenever `|surfaceY_a - surfaceY_b| <= maxStepHeight` (a property, default around cellSize * 0.75, matching what the Platform behavior can climb). Cost = Euclidean distance between surface points, keeping the A* heuristic consistent (the same rule that fixed 45-degree slope costs).
+- **Arc checks generalize**: the jump/fall arc slope-blocking test compares `arcY > node.surfaceY` directly instead of recomputing surfaces from slope-type formulas. This DELETES the per-type surface formula code (slope_left/right/gentle half detection) rather than adding to it.
+- **Arrival detection generalizes**: the walk-only slope bypass compares against the node's stored surfaceY instead of the isSlope flag.
+- The slopeMap and typed slopes remain for save compatibility and the manual actions, but become an input that just bakes surfaceY values.
+
+### Pros
+- Any incline the Platform behavior can physically climb becomes smoothly walkable: 30-degree ramps, rotated sprite terrain, imported/generated organic geometry.
+- Replaces three special-cased subsystems (slope typing, per-type surface formulas, gentle half detection) with one number per node — likely a net code REDUCTION.
+- Detection becomes fully automatic for every shape; MapSlopeTilesFromTilemap and the angle tolerance bands stop mattering.
+- Probing cost is one column scan per partial-ground node, one-time per build, cacheable per tile shape.
+
+### Cons / open problems
+- Touches the three most bug-dense areas of the addon at once (connection building, arc checks, arrival detection) — the memory files document years of hard-won fixes keyed to the typed-slope model that must be re-verified (departure centering, slope bypass rules, ledge flags on slopes, phantom fall connections).
+- Movement execution needs care on steep inclines: walk input up a 40-degree surface may stall (the Platform behavior's own slope limit), needing the existing micro-jump dislodge as a systematic fallback rather than an edge-case hack.
+- maxStepHeight introduces a new tuning property with real gameplay meaning (what counts as climbable vs a wall).
+- Savegame format change: nodes carry surfaceY (rebuild-on-load already regenerates nodes, so likely free, but verify).
+- Jump landings on steep surfaces raise new arrival questions (landing on a 40-degree face vs a 45-degree tile is physically different).
+
+### Suggested path
+1. Prototype surfaceY storage + generalized walk connections behind a debug flag, leaving typed slopes untouched.
+2. Verify the memory-file slope invariants one by one on the new path (each documents its own repro).
+3. Cut the typed-slope special cases only after the generalized path passes the full slope test level.

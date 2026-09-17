@@ -8,15 +8,12 @@
         "description": "Smart pathfinding for platformer games. Characters automatically jump across gaps, fall between platforms, and find optimal routes through complex levels. Includes instant portals (teleporters, doors) and gradual portals (elevators, ladders, ziplines) with pause/resume support for custom animations. Features hazard avoidance, multiple path strategies, coyote jumps, ledge restriction, and multi-agent support. Works with the built-in Platform behavior — just add the behavior and go.",
         "help-url": "https://www.construct.net",
         "aceCategories": {
-          "Configuration": "Configuration",
-          "GraphData": "Graph Data",
+          "Debug": "Debug",
           "Hazards": "Hazards",
-          "ObstacleMap": "Obstacle Map",
+          "Movement": "Movement",
+          "ObstacleMap": "Obstacles",
           "Pathfinding": "Pathfinding",
-          "Performance": "Performance",
-          "Portals": "Portals",
-          "SharedNavigation": "Shared Navigation",
-          "Debug": "Debug"
+          "Portals": "Portals"
         },
         "properties": {
           "enable_debug": {
@@ -25,7 +22,7 @@
           },
           "cell_size": {
             "name": "Tile Size",
-            "desc": "Size of each grid tile in pixels. 0 = Auto-detect (recommended): reads the Cell Size from the Pathfinding behavior, or the tile size of your solid tilemap. If set manually, it MUST match your Pathfinding behavior's Cell Size / tilemap tile size. Smaller = more precise paths but slower performance."
+            "desc": "Size of each grid tile in pixels. MUST match your tilemap's tile size / Pathfinding behavior's Cell Size — a mismatch misaligns the graph and characters walk into walls. Set to 0 to auto-detect it (reads the Pathfinding behavior's Cell Size, or the solid tilemap's tile size). Smaller = more precise paths but slower performance."
           },
           "max_search_nodes": {
             "name": "Max Search Nodes",
@@ -38,14 +35,6 @@
           "auto_control": {
             "name": "Auto-Control Movement",
             "desc": "When enabled, AI automatically controls the character (moves left/right, jumps). When disabled, you handle movement yourself using the path data."
-          },
-          "graph_mode": {
-            "name": "Graph Mode",
-            "desc": "How navigation data is stored. Shared = all characters use same map (efficient). Per-Instance = each character has own map (rare use cases only).",
-            "items": {
-              "instance": "Per-Instance",
-              "shared": "Shared (recommended)"
-            }
           },
           "path_strategy": {
             "name": "Path Strategy",
@@ -91,49 +80,28 @@
           },
           "auto_build": {
             "name": "Auto-Build Graph",
-            "desc": "Zero-event startup: automatically build the obstacle map and navigation graph on startup, no events needed. Auto: use the Pathfinding behavior's map if one is attached to this object, otherwise scan all objects with Solid/Jump-thru behaviors. From Pathfinding: always wait for the Pathfinding behavior's map. From Solids: always scan Solid/Jump-thru objects. Off: set the map up yourself with actions (legacy behavior — still picks up an attached Pathfinding behavior's map automatically).",
+            "desc": "Zero-event startup: automatically build the obstacle map and navigation graph on startup, no events needed. Auto (default): use the Pathfinding behavior's map if one is attached to this object, otherwise scan all objects with Solid/Jump-thru behaviors. Explicit map-setup actions in 'On start of layout' always take precedence. From Pathfinding: always wait for the Pathfinding behavior's map. From Solids: always scan Solid/Jump-thru objects. Off: set the map up yourself with actions (still picks up an attached Pathfinding behavior's map automatically).",
             "items": {
               "off": "Off (manual setup)",
               "auto": "Auto (recommended)",
               "pathfinding": "From Pathfinding behavior",
               "solids": "From Solid/Jump-thru objects"
             }
+          },
+          "map_tag": {
+            "name": "Map Tag",
+            "desc": "Instances with the same map tag on a layout share one navigation map and graph. Leave empty to share with everyone (recommended). Give special characters their own tag (e.g. 'ghost' for wall-phasing enemies, 'flyer' for airborne ones), then set up that tag's obstacle map, portals, and hazards on an instance carrying that tag. Each tag builds and stores its own map, so use few tags."
+          },
+          "detect_slopes": {
+            "name": "Detect Slopes",
+            "desc": "During solid scanning (including Auto-Build), probe each partially-solid tile's collision shape and automatically register 45° and 22.5° slope surfaces as slopes — no tile ID lists needed. Tiles whose shape doesn't match a supported slope angle stay solid, so this is safe to leave on. Requires tiles/sprites to have actual sloped collision polygons. Turn off to register slopes yourself with the slope actions only."
+          },
+          "enabled": {
+            "name": "Enabled",
+            "desc": "Whether the behavior starts active. While disabled, the character stops following paths and Find path actions are ignored; the current path, graph, and settings are kept and everything resumes when re-enabled. Toggle at runtime with the 'Set enabled' action."
           }
         },
         "actions": {
-          "SetMaxFallDistance": {
-            "list-name": "Set max fall distance",
-            "display-text": "{my}: Set max fall distance to {0} px",
-            "description": "Override the maximum fall distance (in pixels) the AI is allowed to drop when pathfinding. Falls beyond this value will not be considered as valid connections. Calling this locks in the value.",
-            "params": {
-              "value": {
-                "name": "Distance",
-                "desc": "Maximum fall distance in pixels"
-              }
-            }
-          },
-          "SetMaxJumpDistance": {
-            "list-name": "Set max jump distance",
-            "display-text": "{my}: Set max jump distance to {0} px",
-            "description": "Override the maximum horizontal jump distance (in pixels) used to build navigation graph connections. Use this if the auto-detected value from the platform behavior is wrong for your setup. Calling this locks in the value — it won't be overridden by platform behavior properties.",
-            "params": {
-              "value": {
-                "name": "Distance",
-                "desc": "Maximum jump distance in pixels"
-              }
-            }
-          },
-          "SetMaxJumpHeight": {
-            "list-name": "Set max jump height",
-            "display-text": "{my}: Set max jump height to {0} px",
-            "description": "Override the maximum jump height (in pixels) used to build navigation graph connections. Use this if the auto-detected value from the platform behavior is wrong for your setup. Calling this locks in the value — it won't be overridden by platform behavior properties.",
-            "params": {
-              "value": {
-                "name": "Height",
-                "desc": "Maximum jump height in pixels"
-              }
-            }
-          },
           "LogGraphStats": {
             "list-name": "Log graph stats",
             "display-text": "{my}: Log graph stats to console",
@@ -190,6 +158,25 @@
               }
             }
           },
+          "AddTrackedHazard": {
+            "list-name": "Add tracked hazard (follows object)",
+            "display-text": "{my}: Add tracked hazard following {0} [Radius: {1}] [Severity: {2}]",
+            "description": "Add a circular hazard that follows an object's position automatically every tick — for moving dangers like patrolling saws, fireballs, or spreading flames. No per-frame events are needed: path costs update only when the object actually moves, and the hazard removes itself when the object is destroyed. Read the new hazard's ID with LastHazardID; RemoveHazard removes it like any other hazard.",
+            "params": {
+              "target": {
+                "name": "Object to follow",
+                "desc": "The hazard follows this object's position (first picked instance)"
+              },
+              "radius": {
+                "name": "Radius",
+                "desc": "Radius in pixels"
+              },
+              "severity": {
+                "name": "Severity",
+                "desc": "Hazard severity (higher = more dangerous)"
+              }
+            }
+          },
           "ClearAllHazards": {
             "list-name": "Clear all hazards",
             "display-text": "{my}: Clear all circle and rectangle hazards",
@@ -200,6 +187,12 @@
             "list-name": "Clear all tile hazards",
             "display-text": "{my}: Clear all tile hazards",
             "description": "Reset all tile hazard severities to 0. This does NOT remove circle/rect hazards. Use when you want to clear static tile dangers.",
+            "params": {}
+          },
+          "ClearAllTrackedHazards": {
+            "list-name": "Clear all tracked hazards",
+            "display-text": "{my}: Clear all tracked hazards",
+            "description": "Remove every tracked (object-following) hazard. Static circle/rect hazards and tile hazards are untouched.",
             "params": {}
           },
           "RemoveHazard": {
@@ -213,10 +206,170 @@
               }
             }
           },
+          "SetHazardRadius": {
+            "list-name": "Set hazard radius",
+            "display-text": "{my}: Set hazard radius to {0} tiles",
+            "description": "Set the radius in tiles for circular/rectangular hazard influence. Tiles within this radius of a hazard will have their pathfinding cost increased.",
+            "params": {
+              "tiles": {
+                "name": "Tiles",
+                "desc": "Radius in tiles"
+              }
+            }
+          },
+          "SetTileHazard": {
+            "list-name": "Set tile hazard severity",
+            "display-text": "{my}: Set tile hazard at ({0}, {1}) to {2}",
+            "description": "Set the hazard severity for a specific tile. Higher values make the AI avoid this tile more strongly. 0 = no hazard. Hazard avoidance is automatically enabled when any hazard is added. Use this to mark dangerous areas like spikes or lava.",
+            "params": {
+              "gx": {
+                "name": "Grid X",
+                "desc": "Grid X coordinate (tile number)"
+              },
+              "gy": {
+                "name": "Grid Y",
+                "desc": "Grid Y coordinate (tile number)"
+              },
+              "severity": {
+                "name": "Severity",
+                "desc": "Hazard severity (0 = none, higher = more dangerous)"
+              }
+            }
+          },
+          "JumpTowardPosition": {
+            "list-name": "Jump toward position",
+            "display-text": "{my}: Jump toward ({0}, {1})",
+            "description": "Immediately jump toward a target position. The character jumps from its current position with full strength, moving horizontally toward the target. No pathfinding is involved — the character simply lunges at the target. Use for: jump attacks, stomps, lunges. Triggers 'On jump toward executed' when the jump starts. The character must be on the floor to jump.",
+            "params": {
+              "x": {
+                "name": "X",
+                "desc": "Target X position in pixels"
+              },
+              "y": {
+                "name": "Y",
+                "desc": "Target Y position in pixels"
+              }
+            }
+          },
+          "SetAutoControl": {
+            "list-name": "Set auto-control",
+            "display-text": "{my}: Set auto-control: {0}",
+            "description": "Toggle auto-movement on/off. When enabled, the behavior automatically controls the Platform behavior to follow paths. When disabled, you control movement yourself using path data expressions.",
+            "params": {
+              "enabled": {
+                "name": "Enabled",
+                "desc": "Enable or disable auto-control",
+                "items": {
+                  "yes": "Enabled",
+                  "no": "Disabled"
+                }
+              }
+            }
+          },
+          "SetCoyoteTime": {
+            "list-name": "Set coyote time",
+            "display-text": "{my}: Set coyote time to {0} seconds",
+            "description": "Set the coyote time window in seconds. The AI can jump within this window after walking off a ledge. Set to 0 to disable coyote time.",
+            "params": {
+              "seconds": {
+                "name": "Seconds",
+                "desc": "Coyote time window in seconds"
+              }
+            }
+          },
+          "SetEnabled": {
+            "list-name": "Set enabled",
+            "display-text": "{my}: Set {0}",
+            "description": "Enable or disable this behavior. While disabled, the character stops following paths and Find path actions are ignored; the current path, graph, and settings are kept and everything resumes when re-enabled. Map setup actions (scans, tiles, portals, hazards) still work while disabled.",
+            "params": {
+              "state": {
+                "name": "State",
+                "desc": "Whether the behavior is active",
+                "items": {
+                  "enabled": "Enabled",
+                  "disabled": "Disabled"
+                }
+              }
+            }
+          },
+          "SetLedgeLeniency": {
+            "list-name": "Set ledge leniency",
+            "display-text": "{my}: Set ledge leniency to {0} pixels",
+            "description": "Set how many pixels past a platform edge the AI can walk before stopping (0 = strict stop). Increase for more natural-looking patrol movement near edges. Only used when ledge restriction is enabled.",
+            "params": {
+              "pixels": {
+                "name": "Pixels",
+                "desc": "Pixels past ledge edge before stopping"
+              }
+            }
+          },
+          "SetLedgeRestriction": {
+            "list-name": "Set ledge restriction",
+            "display-text": "{my}: Set ledge restriction: {0}",
+            "description": "Prevents AI characters from walking off platform edges when they have no reason to leave. Useful for patrol guards that should stay on their platform, or NPCs that shouldn't wander off rooftops. This only stops characters from casually walking off edges — if the AI's path requires a jump or fall to reach its goal, it will still leave the platform.",
+            "params": {
+              "enabled": {
+                "name": "Enabled",
+                "desc": "Enable or disable ledge restriction",
+                "items": {
+                  "yes": "Enabled",
+                  "no": "Disabled"
+                }
+              }
+            }
+          },
+          "SetMaxFallDistance": {
+            "list-name": "Set max fall distance",
+            "display-text": "{my}: Set max fall distance to {0} px",
+            "description": "Override the maximum fall distance (in pixels) the AI is allowed to drop when pathfinding. Falls beyond this value will not be considered as valid connections. Calling this locks in the value.",
+            "params": {
+              "value": {
+                "name": "Distance",
+                "desc": "Maximum fall distance in pixels"
+              }
+            }
+          },
+          "SetMaxJumpDistance": {
+            "list-name": "Set max jump distance",
+            "display-text": "{my}: Set max jump distance to {0} px",
+            "description": "Override the maximum horizontal jump distance (in pixels) used to build navigation graph connections. Use this if the auto-detected value from the platform behavior is wrong for your setup. Calling this locks in the value — it won't be overridden by platform behavior properties.",
+            "params": {
+              "value": {
+                "name": "Distance",
+                "desc": "Maximum jump distance in pixels"
+              }
+            }
+          },
+          "SetMaxJumpHeight": {
+            "list-name": "Set max jump height",
+            "display-text": "{my}: Set max jump height to {0} px",
+            "description": "Override the maximum jump height (in pixels) used to build navigation graph connections. Use this if the auto-detected value from the platform behavior is wrong for your setup. Calling this locks in the value — it won't be overridden by platform behavior properties.",
+            "params": {
+              "value": {
+                "name": "Height",
+                "desc": "Maximum jump height in pixels"
+              }
+            }
+          },
+          "SetStrictJumpPositioning": {
+            "list-name": "Set strict jump positioning",
+            "display-text": "{my}: Set strict jump positioning: {0}",
+            "description": "Toggle whether this AI character slows down and carefully positions itself before jumping or falling during pathfinding. This does NOT affect walking off edges (use 'Set ledge restriction' for that). Use this to change behavior at runtime — for example, disable when a boss enters 'rage mode' for reckless movement, or enable when an NPC needs to carefully cross a narrow bridge.",
+            "params": {
+              "enabled": {
+                "name": "Enabled",
+                "desc": "Enable or disable strict jump positioning",
+                "items": {
+                  "yes": "Enabled",
+                  "no": "Disabled"
+                }
+              }
+            }
+          },
           "AutoDetectSlopeTiles": {
             "list-name": "Auto-detect slope tiles from tilemap",
-            "display-text": "{my}: Auto-detect slope tiles from {0} by collision polygon shape",
-            "description": "Scan a Tilemap and automatically classify slope tiles by reading their per-tile collision polygon shapes. Triangular collision polygons (3 points) are classified as 45° slopes; trapezoidal polygons (4 non-rectangular points) are classified as 22.5° gentle slopes. Horizontally-flipped tile variants are detected and their slope direction is automatically mirrored.",
+            "display-text": "{my}: Auto-detect slope tiles from {0} by collision shape",
+            "description": "Scan a Tilemap and automatically register slope tiles by probing their collision shapes: surfaces at 45° become slopes, surfaces at 22.5° become gentle slopes, and flipped tile placements are handled automatically. Uses the documented collision API, so it works wherever collisions work. Requires slope tiles to have sloped collision polygons set in the C3 editor; tiles that don't match a supported angle stay solid. For fully hands-off slope detection during scanning, enable the 'Detect Slopes' property instead.",
             "params": {
               "tilemap": {
                 "name": "Tilemap",
@@ -343,6 +496,12 @@
               }
             }
           },
+          "RegenerateGraph": {
+            "list-name": "Regenerate navigation graph",
+            "display-text": "{my}: Regenerate navigation graph",
+            "description": "Rebuild the navigation graph from scratch. Use after modifying the level layout, adding/removing obstacles, or changing platform positions.",
+            "params": {}
+          },
           "ScanJumpThruObjectsIntoObstacleMap": {
             "list-name": "Scan jump-thru objects into obstacle map",
             "display-text": "{my}: Scan {0} (jump-thru) into obstacle map",
@@ -362,47 +521,6 @@
               "solidObjects": {
                 "name": "Solid objects",
                 "desc": "Objects with Solid behavior enabled (tilemaps or sprites)"
-              }
-            }
-          },
-          "SetHazardRadius": {
-            "list-name": "Set hazard radius",
-            "display-text": "{my}: Set hazard radius to {0} tiles",
-            "description": "Set the radius in tiles for circular/rectangular hazard influence. Tiles within this radius of a hazard will have their pathfinding cost increased.",
-            "params": {
-              "tiles": {
-                "name": "Tiles",
-                "desc": "Radius in tiles"
-              }
-            }
-          },
-          "SetRePathThreshold": {
-            "list-name": "Set re-path threshold",
-            "display-text": "{my}: Set re-path threshold to {0} tiles",
-            "description": "Set how many tiles the character can drift from the path before automatic re-pathing triggers. Higher values = more tolerance for deviation.",
-            "params": {
-              "tiles": {
-                "name": "Tiles",
-                "desc": "Threshold in tiles"
-              }
-            }
-          },
-          "SetTileHazard": {
-            "list-name": "Set tile hazard severity",
-            "display-text": "{my}: Set tile hazard at ({0}, {1}) to {2}",
-            "description": "Set the hazard severity for a specific tile. Higher values make the AI avoid this tile more strongly. 0 = no hazard. Hazard avoidance is automatically enabled when any hazard is added. Use this to mark dangerous areas like spikes or lava.",
-            "params": {
-              "gx": {
-                "name": "Grid X",
-                "desc": "Grid X coordinate (tile number)"
-              },
-              "gy": {
-                "name": "Grid Y",
-                "desc": "Grid Y coordinate (tile number)"
-              },
-              "severity": {
-                "name": "Severity",
-                "desc": "Hazard severity (0 = none, higher = more dangerous)"
               }
             }
           },
@@ -545,72 +663,25 @@
               }
             }
           },
-          "JumpTowardPosition": {
-            "list-name": "Jump toward position",
-            "display-text": "{my}: Jump toward ({0}, {1})",
-            "description": "Immediately jump toward a target position. The character jumps from its current position with full strength, moving horizontally toward the target. No pathfinding is involved — the character simply lunges at the target. Use for: jump attacks, stomps, lunges. Triggers 'On jump toward executed' when the jump starts. The character must be on the floor to jump.",
+          "SetMaxPathsPerTick": {
+            "list-name": "Set max paths per tick",
+            "display-text": "{my}: Set max paths per tick to {0}",
+            "description": "Set how many pathfinding requests can be processed per game tick. Higher values reduce latency but increase CPU cost per frame. Default is 1.",
             "params": {
-              "x": {
-                "name": "X",
-                "desc": "Target X position in pixels"
-              },
-              "y": {
-                "name": "Y",
-                "desc": "Target Y position in pixels"
+              "count": {
+                "name": "Count",
+                "desc": "Maximum number of paths to process per tick"
               }
             }
           },
-          "RegenerateGraph": {
-            "list-name": "Regenerate navigation graph",
-            "display-text": "{my}: Regenerate navigation graph",
-            "description": "Rebuild the navigation graph from scratch. Use after modifying the level layout, adding/removing obstacles, or changing platform positions.",
-            "params": {}
-          },
-          "SetAutoControl": {
-            "list-name": "Set auto-control",
-            "display-text": "{my}: Set auto-control: {0}",
-            "description": "Toggle auto-movement on/off. When enabled, the behavior automatically controls the Platform behavior to follow paths. When disabled, you control movement yourself using path data expressions.",
+          "SetMultiAgentAvoidance": {
+            "list-name": "Set multi-agent avoidance",
+            "display-text": "{my}: Set multi-agent avoidance: {0}",
+            "description": "Enable or disable path-level multi-agent avoidance. When enabled, agents try to avoid choosing overlapping paths when multiple agents share the same navigation map.",
             "params": {
               "enabled": {
                 "name": "Enabled",
-                "desc": "Enable or disable auto-control",
-                "items": {
-                  "yes": "Enabled",
-                  "no": "Disabled"
-                }
-              }
-            }
-          },
-          "SetCoyoteTime": {
-            "list-name": "Set coyote time",
-            "display-text": "{my}: Set coyote time to {0} seconds",
-            "description": "Set the coyote time window in seconds. The AI can jump within this window after walking off a ledge. Set to 0 to disable coyote time.",
-            "params": {
-              "seconds": {
-                "name": "Seconds",
-                "desc": "Coyote time window in seconds"
-              }
-            }
-          },
-          "SetLedgeLeniency": {
-            "list-name": "Set ledge leniency",
-            "display-text": "{my}: Set ledge leniency to {0} pixels",
-            "description": "Set how many pixels past a platform edge the AI can walk before stopping (0 = strict stop). Increase for more natural-looking patrol movement near edges. Only used when ledge restriction is enabled.",
-            "params": {
-              "pixels": {
-                "name": "Pixels",
-                "desc": "Pixels past ledge edge before stopping"
-              }
-            }
-          },
-          "SetLedgeRestriction": {
-            "list-name": "Set ledge restriction",
-            "display-text": "{my}: Set ledge restriction: {0}",
-            "description": "Prevents AI characters from walking off platform edges when they have no reason to leave. Useful for patrol guards that should stay on their platform, or NPCs that shouldn't wander off rooftops. This only stops characters from casually walking off edges — if the AI's path requires a jump or fall to reach its goal, it will still leave the platform.",
-            "params": {
-              "enabled": {
-                "name": "Enabled",
-                "desc": "Enable or disable ledge restriction",
+                "desc": "Enable or disable multi-agent avoidance",
                 "items": {
                   "yes": "Enabled",
                   "no": "Disabled"
@@ -646,37 +717,22 @@
               }
             }
           },
-          "SetStrictJumpPositioning": {
-            "list-name": "Set strict jump positioning",
-            "display-text": "{my}: Set strict jump positioning: {0}",
-            "description": "Toggle whether this AI character slows down and carefully positions itself before jumping or falling during pathfinding. This does NOT affect walking off edges (use 'Set ledge restriction' for that). Use this to change behavior at runtime — for example, disable when a boss enters 'rage mode' for reckless movement, or enable when an NPC needs to carefully cross a narrow bridge.",
+          "SetRePathThreshold": {
+            "list-name": "Set re-path threshold",
+            "display-text": "{my}: Set re-path threshold to {0} tiles",
+            "description": "Set how many tiles the character can drift from the path before automatic re-pathing triggers. Higher values = more tolerance for deviation.",
             "params": {
-              "enabled": {
-                "name": "Enabled",
-                "desc": "Enable or disable strict jump positioning",
-                "items": {
-                  "yes": "Enabled",
-                  "no": "Disabled"
-                }
+              "tiles": {
+                "name": "Tiles",
+                "desc": "Threshold in tiles"
               }
             }
           },
           "StopPathfinding": {
-            "list-name": "Stop pathfinding",
-            "display-text": "{my}: Stop pathfinding",
+            "list-name": "Stop",
+            "display-text": "{my}: Stop",
             "description": "Stop the character immediately and clear the current path. Use when you want to cancel AI navigation and regain manual control.",
             "params": {}
-          },
-          "SetMaxPathsPerTick": {
-            "list-name": "Set max paths per tick",
-            "display-text": "{my}: Set max paths per tick to {0}",
-            "description": "Set how many pathfinding requests can be processed per game tick. Higher values reduce latency but increase CPU cost per frame. Default is 1.",
-            "params": {
-              "count": {
-                "name": "Count",
-                "desc": "Maximum number of paths to process per tick"
-              }
-            }
           },
           "AddElevatorStop": {
             "list-name": "Add elevator stop",
@@ -967,6 +1023,52 @@
               }
             }
           },
+          "SetPortalPosition": {
+            "list-name": "Set portal position",
+            "display-text": "{my}: Move portal {0} to entry ({1}, {2}) exit ({3}, {4})",
+            "description": "Move an existing portal to new entry and exit positions, preserving its ID, type, cost, speed, and tags. Graph connections re-wire immediately (cheap enough to call on a timer for moving teleporters). A character already traversing the portal keeps its original destination; the move never teleports anyone.",
+            "params": {
+              "id": {
+                "name": "Portal ID",
+                "desc": "The portal to move"
+              },
+              "entryX": {
+                "name": "Entry X",
+                "desc": "New entry X position in pixels"
+              },
+              "entryY": {
+                "name": "Entry Y",
+                "desc": "New entry Y position in pixels"
+              },
+              "exitX": {
+                "name": "Exit X",
+                "desc": "New exit X position in pixels"
+              },
+              "exitY": {
+                "name": "Exit Y",
+                "desc": "New exit Y position in pixels"
+              }
+            }
+          },
+          "SetPortalPositionFromObjects": {
+            "list-name": "Set portal position from objects",
+            "display-text": "{my}: Move portal {0} to {1} -> {2}",
+            "description": "Move an existing portal to two objects' current positions (first picked instances), preserving its ID, type, cost, speed, and tags. Combine with an Every X seconds event to make a portal follow moving objects, such as a teleporter drone.",
+            "params": {
+              "id": {
+                "name": "Portal ID",
+                "desc": "The portal to move"
+              },
+              "entryObject": {
+                "name": "Entry object",
+                "desc": "The portal entry moves to this object's position"
+              },
+              "exitObject": {
+                "name": "Exit object",
+                "desc": "The portal exit moves to this object's position"
+              }
+            }
+          },
           "SetPortalSpeed": {
             "list-name": "Set portal speed",
             "display-text": "{my}: Set portal {0} speed to {1}",
@@ -1011,27 +1113,42 @@
                 "desc": "Target world Y position in pixels"
               }
             }
-          },
-          "SetMultiAgentAvoidance": {
-            "list-name": "Set multi-agent avoidance",
-            "display-text": "{my}: Set multi-agent avoidance: {0}",
-            "description": "Enable or disable path-level multi-agent avoidance. When enabled, agents try to avoid choosing overlapping paths when multiple agents share the same navigation map.",
-            "params": {
-              "enabled": {
-                "name": "Enabled",
-                "desc": "Enable or disable multi-agent avoidance",
-                "items": {
-                  "yes": "Yes",
-                  "no": "No"
-                }
-              }
-            }
           }
         },
         "conditions": {
-          "IsNodeLedge": {
-            "list-name": "Is node a ledge",
-            "display-text": "{my}: Node at ({0}, {1}) is a ledge",
+          "GraphNodeExistsGrid": {
+            "list-name": "Graph node exists at grid position",
+            "display-text": "{my}: Graph node exists at grid ({0}, {1})",
+            "description": "Check if a navigation node exists at the specified grid coordinates. Use this to validate positions before pathfinding or placing objects.",
+            "params": {
+              "gx": {
+                "name": "Grid X",
+                "desc": "Grid X coordinate (tile number)"
+              },
+              "gy": {
+                "name": "Grid Y",
+                "desc": "Grid Y coordinate (tile number)"
+              }
+            }
+          },
+          "GraphNodeExistsWorld": {
+            "list-name": "Graph node exists at world position",
+            "display-text": "{my}: Graph node exists at world ({0}, {1})",
+            "description": "Check if a navigation node exists at the specified world coordinates. Use this to validate world positions before pathfinding.",
+            "params": {
+              "x": {
+                "name": "X",
+                "desc": "World X position in pixels"
+              },
+              "y": {
+                "name": "Y",
+                "desc": "World Y position in pixels"
+              }
+            }
+          },
+          "IsGraphNodeLedge": {
+            "list-name": "Is graph node a ledge",
+            "display-text": "{my}: Graph node at ({0}, {1}) is a ledge",
             "description": "True if the node at the given grid coordinates is a ledge node (left or right ledge).",
             "params": {
               "gx": {
@@ -1058,6 +1175,54 @@
                 "desc": "World Y position in pixels"
               }
             }
+          },
+          "IsAtIsland": {
+            "list-name": "Is at island",
+            "display-text": "{my}: Is at island",
+            "description": "Check if the character is standing on a single-tile platform (isolated platform). Use this to detect precarious positions or trigger special behaviors.",
+            "params": {}
+          },
+          "IsAtLedge": {
+            "list-name": "Is at ledge",
+            "display-text": "{my}: Is at ledge",
+            "description": "Check if the character is currently standing on a ledge node (edge of a platform). Use this to trigger ledge-specific behaviors or animations.",
+            "params": {}
+          },
+          "IsEnabled": {
+            "list-name": "Is enabled",
+            "display-text": "{my}: Is enabled",
+            "description": "True while this behavior is enabled (see the Enabled property and the 'Set enabled' action).",
+            "params": {}
+          },
+          "IsPlatformEnabled": {
+            "list-name": "Is platform enabled",
+            "display-text": "{my}: Platform behavior is enabled",
+            "description": "Check if the associated Platform behavior is currently enabled. Returns false if Platform behavior is disabled or not found.",
+            "params": {}
+          },
+          "OnJumpTowardLaunched": {
+            "list-name": "On jump toward launched",
+            "display-text": "{my}: On jump toward launched",
+            "description": "Triggered when the 'Jump toward position' action launches the character. Use this to play attack animations, spawn effects, or apply damage. The target position is available via JumpTowardTargetX/Y expressions.",
+            "params": {}
+          },
+          "OnPathComplete": {
+            "list-name": "On arrived",
+            "display-text": "{my}: On arrived",
+            "description": "Triggered when the AI arrives at the final destination. Use this to trigger arrival animations, next actions, or goal completion logic.",
+            "params": {}
+          },
+          "OnWaypointReached": {
+            "list-name": "On waypoint reached",
+            "display-text": "{my}: On waypoint reached",
+            "description": "Triggered each time the character reaches a waypoint along the path. Use this to play footstep sounds, particle effects, or update animations.",
+            "params": {}
+          },
+          "OnWaypointStuck": {
+            "list-name": "On waypoint stuck",
+            "display-text": "{my}: On waypoint stuck",
+            "description": "Triggered when the character has been stuck at a waypoint for too long (exceeds Max Waypoint Time). The path is automatically cancelled. Use this to handle stuck situations or repath.",
+            "params": {}
           },
           "IsSettingUpPathfinding": {
             "list-name": "Is setting up Pathfinding",
@@ -1150,58 +1315,22 @@
             }
           },
           "HasPath": {
-            "list-name": "Has active path",
-            "display-text": "{my}: Has active path",
-            "description": "Check if the character currently has an active pathfinding path. Returns true while navigating, false when idle or path is complete.",
+            "list-name": "Is moving along path",
+            "display-text": "{my}: Is moving along path",
+            "description": "Check if the character currently has an active pathfinding path. Returns true while navigating, false when idle or path is complete. Matches the built-in Pathfinding behavior's 'Is moving along path'.",
             "params": {}
           },
-          "IsAtIsland": {
-            "list-name": "Is at island",
-            "display-text": "{my}: Is at island",
-            "description": "Check if the character is standing on a single-tile platform (isolated platform). Use this to detect precarious positions or trigger special behaviors.",
+          "IsMultiAgentAvoidanceEnabled": {
+            "list-name": "Is multi-agent avoidance enabled",
+            "display-text": "{my}: Is multi-agent avoidance enabled",
+            "description": "True if multi-agent avoidance is currently active.",
             "params": {}
           },
-          "IsAtLedge": {
-            "list-name": "Is at ledge",
-            "display-text": "{my}: Is at ledge",
-            "description": "Check if the character is currently standing on a ledge node (edge of a platform). Use this to trigger ledge-specific behaviors or animations.",
+          "IsPathPending": {
+            "list-name": "Is calculating path",
+            "display-text": "{my}: Is calculating path",
+            "description": "True when a pathfinding request has been submitted but not yet resolved (queued behind the per-tick path budget). Use to show a 'thinking' state or delay actions until the path arrives.",
             "params": {}
-          },
-          "IsPlatformEnabled": {
-            "list-name": "Is platform enabled",
-            "display-text": "{my}: Platform behavior is enabled",
-            "description": "Check if the associated Platform behavior is currently enabled. Returns false if Platform behavior is disabled or not found.",
-            "params": {}
-          },
-          "NodeExistsGrid": {
-            "list-name": "Node exists at grid position",
-            "display-text": "{my}: Node exists at grid ({0}, {1})",
-            "description": "Check if a navigation node exists at the specified grid coordinates. Use this to validate positions before pathfinding or placing objects.",
-            "params": {
-              "gx": {
-                "name": "Grid X",
-                "desc": "Grid X coordinate (tile number)"
-              },
-              "gy": {
-                "name": "Grid Y",
-                "desc": "Grid Y coordinate (tile number)"
-              }
-            }
-          },
-          "NodeExistsWorld": {
-            "list-name": "Node exists at world position",
-            "display-text": "{my}: Node exists at world ({0}, {1})",
-            "description": "Check if a navigation node exists at the specified world coordinates. Use this to validate world positions before pathfinding.",
-            "params": {
-              "x": {
-                "name": "X",
-                "desc": "World X position in pixels"
-              },
-              "y": {
-                "name": "Y",
-                "desc": "World Y position in pixels"
-              }
-            }
           },
           "OnGraphGenerated": {
             "list-name": "On navigation graph generated",
@@ -1209,21 +1338,9 @@
             "description": "Triggered when the navigation graph has been successfully generated. Use this to start pathfinding operations after map setup.",
             "params": {}
           },
-          "OnJumpTowardLaunched": {
-            "list-name": "On jump toward launched",
-            "display-text": "{my}: On jump toward launched",
-            "description": "Triggered when the 'Jump toward position' action launches the character. Use this to play attack animations, spawn effects, or apply damage. The target position is available via JumpTowardTargetX/Y expressions.",
-            "params": {}
-          },
-          "OnPathComplete": {
-            "list-name": "On path complete",
-            "display-text": "{my}: On path complete",
-            "description": "Triggered when the AI arrives at the final destination. Use this to trigger arrival animations, next actions, or goal completion logic.",
-            "params": {}
-          },
           "OnPathFailed": {
-            "list-name": "On path failed",
-            "display-text": "{my}: On path failed",
+            "list-name": "On failed to find path",
+            "display-text": "{my}: On failed to find path",
             "description": "Triggered when pathfinding fails to find a valid path to the target. Use this to handle unreachable destinations or implement fallback behaviors.",
             "params": {}
           },
@@ -1237,24 +1354,6 @@
             "list-name": "On re-path triggered",
             "display-text": "{my}: On re-path triggered",
             "description": "Triggered when automatic re-pathing occurs due to the character drifting too far from the path. Use this to monitor navigation accuracy.",
-            "params": {}
-          },
-          "OnWaypointReached": {
-            "list-name": "On waypoint reached",
-            "display-text": "{my}: On waypoint reached",
-            "description": "Triggered each time the character reaches a waypoint along the path. Use this to play footstep sounds, particle effects, or update animations.",
-            "params": {}
-          },
-          "OnWaypointStuck": {
-            "list-name": "On waypoint stuck",
-            "display-text": "{my}: On waypoint stuck",
-            "description": "Triggered when the character has been stuck at a waypoint for too long (exceeds Max Waypoint Time). The path is automatically cancelled. Use this to handle stuck situations or repath.",
-            "params": {}
-          },
-          "IsPathPending": {
-            "list-name": "Is path pending",
-            "display-text": "{my}: Is path pending",
-            "description": "True when a pathfinding request has been submitted but not yet resolved. Use to show a 'thinking' state or delay actions until the path arrives.",
             "params": {}
           },
           "IsAtPortal": {
@@ -1280,12 +1379,6 @@
             "display-text": "{my}: On portal entry",
             "description": "Triggered when the AI arrives at a portal entry point, BEFORE the portal executes. Use 'Pause at portal' inside this event to delay execution and run your own events first (animations, sounds, screen effects). If you don't pause, the portal executes immediately. Use CurrentPortalID to identify which portal was reached.",
             "params": {}
-          },
-          "IsMultiAgentAvoidanceEnabled": {
-            "list-name": "Is multi-agent avoidance enabled",
-            "display-text": "{my}: Is multi-agent avoidance enabled",
-            "description": "True if multi-agent avoidance is currently active.",
-            "params": {}
           }
         },
         "expressions": {
@@ -1299,18 +1392,207 @@
             "description": "Get the calculated maximum jump height in pixels. This is the value used to build graph connections. Useful for debugging jump arc detection.",
             "params": {}
           },
-          "PlatformJumpStrength": {
-            "translated-name": "PlatformJumpStrength",
-            "description": "Get the platform behavior's jump strength value. Useful for debugging jump parameter detection.",
+          "GraphNodeAtIndexConnectionCount": {
+            "translated-name": "GraphNodeAtIndexConnectionCount",
+            "description": "Get the number of outgoing connections from the node at the given index.",
+            "params": {
+              "index": {
+                "name": "Index",
+                "desc": "Node index"
+              }
+            }
+          },
+          "GraphNodeAtIndexGridX": {
+            "translated-name": "GraphNodeAtIndexGridX",
+            "description": "Get the grid X coordinate of the node at the given index.",
+            "params": {
+              "index": {
+                "name": "Index",
+                "desc": "Node index"
+              }
+            }
+          },
+          "GraphNodeAtIndexGridY": {
+            "translated-name": "GraphNodeAtIndexGridY",
+            "description": "Get the grid Y coordinate of the node at the given index.",
+            "params": {
+              "index": {
+                "name": "Index",
+                "desc": "Node index"
+              }
+            }
+          },
+          "GraphNodeAtIndexIsLeftLedge": {
+            "translated-name": "GraphNodeAtIndexIsLeftLedge",
+            "description": "Returns 1 if the node at the given index is a left ledge, 0 otherwise.",
+            "params": {
+              "index": {
+                "name": "Index",
+                "desc": "Node index"
+              }
+            }
+          },
+          "GraphNodeAtIndexIsRightLedge": {
+            "translated-name": "GraphNodeAtIndexIsRightLedge",
+            "description": "Returns 1 if the node at the given index is a right ledge, 0 otherwise.",
+            "params": {
+              "index": {
+                "name": "Index",
+                "desc": "Node index"
+              }
+            }
+          },
+          "GraphNodeAtIndexIsSlope": {
+            "translated-name": "GraphNodeAtIndexIsSlope",
+            "description": "Returns 1 if the node at the given index is a slope node, 0 otherwise.",
+            "params": {
+              "index": {
+                "name": "Index",
+                "desc": "Node index"
+              }
+            }
+          },
+          "GraphNodeAtIndexX": {
+            "translated-name": "GraphNodeAtIndexX",
+            "description": "Get the world X position of the node at the given index.",
+            "params": {
+              "index": {
+                "name": "Index",
+                "desc": "Node index"
+              }
+            }
+          },
+          "GraphNodeAtIndexY": {
+            "translated-name": "GraphNodeAtIndexY",
+            "description": "Get the world Y position of the node at the given index.",
+            "params": {
+              "index": {
+                "name": "Index",
+                "desc": "Node index"
+              }
+            }
+          },
+          "GraphNodeConnectionAction": {
+            "translated-name": "GraphNodeConnectionAction",
+            "description": "Get the action string for a connection from the given grid node (e.g. 'walk', 'jump', 'fall', 'portal').",
+            "params": {
+              "gx": {
+                "name": "Grid X",
+                "desc": "Source node grid X"
+              },
+              "gy": {
+                "name": "Grid Y",
+                "desc": "Source node grid Y"
+              },
+              "index": {
+                "name": "Index",
+                "desc": "Connection index"
+              }
+            }
+          },
+          "GraphNodeConnectionCost": {
+            "translated-name": "GraphNodeConnectionCost",
+            "description": "Get the movement cost for a connection from the given grid node.",
+            "params": {
+              "gx": {
+                "name": "Grid X",
+                "desc": "Source node grid X"
+              },
+              "gy": {
+                "name": "Grid Y",
+                "desc": "Source node grid Y"
+              },
+              "index": {
+                "name": "Index",
+                "desc": "Connection index"
+              }
+            }
+          },
+          "GraphNodeConnectionCount": {
+            "translated-name": "GraphNodeConnectionCount",
+            "description": "Get the number of outgoing connections from the node at the given grid coordinates.",
+            "params": {
+              "gx": {
+                "name": "Grid X",
+                "desc": "Node grid X coordinate"
+              },
+              "gy": {
+                "name": "Grid Y",
+                "desc": "Node grid Y coordinate"
+              }
+            }
+          },
+          "GraphNodeConnectionTargetX": {
+            "translated-name": "GraphNodeConnectionTargetX",
+            "description": "Get the world X position of the target node for a connection from the given grid node.",
+            "params": {
+              "gx": {
+                "name": "Grid X",
+                "desc": "Source node grid X"
+              },
+              "gy": {
+                "name": "Grid Y",
+                "desc": "Source node grid Y"
+              },
+              "index": {
+                "name": "Index",
+                "desc": "Connection index"
+              }
+            }
+          },
+          "GraphNodeConnectionTargetY": {
+            "translated-name": "GraphNodeConnectionTargetY",
+            "description": "Get the world Y position of the target node for a connection from the given grid node.",
+            "params": {
+              "gx": {
+                "name": "Grid X",
+                "desc": "Source node grid X"
+              },
+              "gy": {
+                "name": "Grid Y",
+                "desc": "Source node grid Y"
+              },
+              "index": {
+                "name": "Index",
+                "desc": "Connection index"
+              }
+            }
+          },
+          "GraphNodeCount": {
+            "translated-name": "GraphNodeCount",
+            "description": "Get the total number of navigation nodes in the generated graph. Returns 0 if no graph exists.",
             "params": {}
           },
-          "PlatformMaxSpeed": {
-            "translated-name": "PlatformMaxSpeed",
-            "description": "Get the platform behavior's max speed value. Useful for debugging jump parameter detection.",
-            "params": {}
+          "GraphNodeWorldX": {
+            "translated-name": "GraphNodeWorldX",
+            "description": "Get the world X position of a node at the specified grid coordinates. The node position is centred within the tile. Returns 0 if node doesn't exist.",
+            "params": {
+              "gx": {
+                "name": "Grid X",
+                "desc": "Grid X coordinate"
+              },
+              "gy": {
+                "name": "Grid Y",
+                "desc": "Grid Y coordinate"
+              }
+            }
           },
-          "IsNodeIsland": {
-            "translated-name": "IsNodeIsland",
+          "GraphNodeWorldY": {
+            "translated-name": "GraphNodeWorldY",
+            "description": "Get the world Y position of a node at the specified grid coordinates. The node position is centred within the tile. Returns 0 if node doesn't exist.",
+            "params": {
+              "gx": {
+                "name": "Grid X",
+                "desc": "Grid X coordinate"
+              },
+              "gy": {
+                "name": "Grid Y",
+                "desc": "Grid Y coordinate"
+              }
+            }
+          },
+          "IsGraphNodeIsland": {
+            "translated-name": "IsGraphNodeIsland",
             "description": "Returns 1 if the node at the given grid coordinates is an island node (no horizontal neighbors), 0 otherwise.",
             "params": {
               "gx": {
@@ -1323,8 +1605,8 @@
               }
             }
           },
-          "IsNodeLeftLedge": {
-            "translated-name": "IsNodeLeftLedge",
+          "IsGraphNodeLeftLedge": {
+            "translated-name": "IsGraphNodeLeftLedge",
             "description": "Returns 1 if the node at the given grid coordinates is a left ledge, 0 otherwise.",
             "params": {
               "gx": {
@@ -1337,8 +1619,8 @@
               }
             }
           },
-          "IsNodeRightLedge": {
-            "translated-name": "IsNodeRightLedge",
+          "IsGraphNodeRightLedge": {
+            "translated-name": "IsGraphNodeRightLedge",
             "description": "Returns 1 if the node at the given grid coordinates is a right ledge, 0 otherwise.",
             "params": {
               "gx": {
@@ -1365,8 +1647,8 @@
               }
             }
           },
-          "NearestNodeGridX": {
-            "translated-name": "NearestNodeGridX",
+          "NearestGraphNodeGridX": {
+            "translated-name": "NearestGraphNodeGridX",
             "description": "Get the grid X coordinate of the nearest navigation node to a given world position.",
             "params": {
               "x": {
@@ -1379,8 +1661,8 @@
               }
             }
           },
-          "NearestNodeGridY": {
-            "translated-name": "NearestNodeGridY",
+          "NearestGraphNodeGridY": {
+            "translated-name": "NearestGraphNodeGridY",
             "description": "Get the grid Y coordinate of the nearest navigation node to a given world position.",
             "params": {
               "x": {
@@ -1393,8 +1675,8 @@
               }
             }
           },
-          "NearestNodeX": {
-            "translated-name": "NearestNodeX",
+          "NearestGraphNodeX": {
+            "translated-name": "NearestGraphNodeX",
             "description": "Get the world X position of the nearest navigation node to a given world position.",
             "params": {
               "x": {
@@ -1407,8 +1689,8 @@
               }
             }
           },
-          "NearestNodeY": {
-            "translated-name": "NearestNodeY",
+          "NearestGraphNodeY": {
+            "translated-name": "NearestGraphNodeY",
             "description": "Get the world Y position of the nearest navigation node to a given world position.",
             "params": {
               "x": {
@@ -1421,175 +1703,24 @@
               }
             }
           },
-          "NodeAtIndexConnectionCount": {
-            "translated-name": "NodeAtIndexConnectionCount",
-            "description": "Get the number of outgoing connections from the node at the given index.",
-            "params": {
-              "index": {
-                "name": "Index",
-                "desc": "Node index"
-              }
-            }
+          "PlatformJumpStrength": {
+            "translated-name": "PlatformJumpStrength",
+            "description": "Get the platform behavior's jump strength value. Useful for debugging jump parameter detection.",
+            "params": {}
           },
-          "NodeAtIndexGridX": {
-            "translated-name": "NodeAtIndexGridX",
-            "description": "Get the grid X coordinate of the node at the given index.",
-            "params": {
-              "index": {
-                "name": "Index",
-                "desc": "Node index"
-              }
-            }
-          },
-          "NodeAtIndexGridY": {
-            "translated-name": "NodeAtIndexGridY",
-            "description": "Get the grid Y coordinate of the node at the given index.",
-            "params": {
-              "index": {
-                "name": "Index",
-                "desc": "Node index"
-              }
-            }
-          },
-          "NodeAtIndexIsLeftLedge": {
-            "translated-name": "NodeAtIndexIsLeftLedge",
-            "description": "Returns 1 if the node at the given index is a left ledge, 0 otherwise.",
-            "params": {
-              "index": {
-                "name": "Index",
-                "desc": "Node index"
-              }
-            }
-          },
-          "NodeAtIndexIsRightLedge": {
-            "translated-name": "NodeAtIndexIsRightLedge",
-            "description": "Returns 1 if the node at the given index is a right ledge, 0 otherwise.",
-            "params": {
-              "index": {
-                "name": "Index",
-                "desc": "Node index"
-              }
-            }
-          },
-          "NodeAtIndexIsSlope": {
-            "translated-name": "NodeAtIndexIsSlope",
-            "description": "Returns 1 if the node at the given index is a slope node, 0 otherwise.",
-            "params": {
-              "index": {
-                "name": "Index",
-                "desc": "Node index"
-              }
-            }
-          },
-          "NodeAtIndexX": {
-            "translated-name": "NodeAtIndexX",
-            "description": "Get the world X position of the node at the given index.",
-            "params": {
-              "index": {
-                "name": "Index",
-                "desc": "Node index"
-              }
-            }
-          },
-          "NodeAtIndexY": {
-            "translated-name": "NodeAtIndexY",
-            "description": "Get the world Y position of the node at the given index.",
-            "params": {
-              "index": {
-                "name": "Index",
-                "desc": "Node index"
-              }
-            }
-          },
-          "NodeConnectionAction": {
-            "translated-name": "NodeConnectionAction",
-            "description": "Get the action string for a connection from the given grid node (e.g. 'walk', 'jump', 'fall', 'portal').",
-            "params": {
-              "gx": {
-                "name": "Grid X",
-                "desc": "Source node grid X"
-              },
-              "gy": {
-                "name": "Grid Y",
-                "desc": "Source node grid Y"
-              },
-              "index": {
-                "name": "Index",
-                "desc": "Connection index"
-              }
-            }
-          },
-          "NodeConnectionCost": {
-            "translated-name": "NodeConnectionCost",
-            "description": "Get the movement cost for a connection from the given grid node.",
-            "params": {
-              "gx": {
-                "name": "Grid X",
-                "desc": "Source node grid X"
-              },
-              "gy": {
-                "name": "Grid Y",
-                "desc": "Source node grid Y"
-              },
-              "index": {
-                "name": "Index",
-                "desc": "Connection index"
-              }
-            }
-          },
-          "NodeConnectionCount": {
-            "translated-name": "NodeConnectionCount",
-            "description": "Get the number of outgoing connections from the node at the given grid coordinates.",
-            "params": {
-              "gx": {
-                "name": "Grid X",
-                "desc": "Node grid X coordinate"
-              },
-              "gy": {
-                "name": "Grid Y",
-                "desc": "Node grid Y coordinate"
-              }
-            }
-          },
-          "NodeConnectionTargetX": {
-            "translated-name": "NodeConnectionTargetX",
-            "description": "Get the world X position of the target node for a connection from the given grid node.",
-            "params": {
-              "gx": {
-                "name": "Grid X",
-                "desc": "Source node grid X"
-              },
-              "gy": {
-                "name": "Grid Y",
-                "desc": "Source node grid Y"
-              },
-              "index": {
-                "name": "Index",
-                "desc": "Connection index"
-              }
-            }
-          },
-          "NodeConnectionTargetY": {
-            "translated-name": "NodeConnectionTargetY",
-            "description": "Get the world Y position of the target node for a connection from the given grid node.",
-            "params": {
-              "gx": {
-                "name": "Grid X",
-                "desc": "Source node grid X"
-              },
-              "gy": {
-                "name": "Grid Y",
-                "desc": "Source node grid Y"
-              },
-              "index": {
-                "name": "Index",
-                "desc": "Connection index"
-              }
-            }
+          "PlatformMaxSpeed": {
+            "translated-name": "PlatformMaxSpeed",
+            "description": "Get the platform behavior's max speed value. Useful for debugging jump parameter detection.",
+            "params": {}
           },
           "HazardCount": {
             "translated-name": "HazardCount",
             "description": "Get the total number of active hazards (circles and rectangles). Does not include tile hazards.",
+            "params": {}
+          },
+          "HazardRadius": {
+            "translated-name": "HazardRadius",
+            "description": "Get the current hazard radius setting in tiles. This affects how far hazard influence spreads.",
             "params": {}
           },
           "HazardSeverity": {
@@ -1605,6 +1736,11 @@
                 "desc": "World Y position in pixels"
               }
             }
+          },
+          "LastHazardID": {
+            "translated-name": "LastHazardID",
+            "description": "The ID of the most recently added hazard (circle or rectangle). Read it right after an Add hazard action and store it in a variable to remove or track that hazard later. Returns 0 if no hazard has been added yet.",
+            "params": {}
           },
           "PositionIsHazardous": {
             "translated-name": "PositionIsHazardous",
@@ -1634,6 +1770,56 @@
               }
             }
           },
+          "TrackedHazardCount": {
+            "translated-name": "TrackedHazardCount",
+            "description": "The number of active tracked (object-following) hazards.",
+            "params": {}
+          },
+          "CoyoteTime": {
+            "translated-name": "CoyoteTime",
+            "description": "Get the current coyote time setting in seconds. This is the window after walking off a ledge where jumps are still allowed.",
+            "params": {}
+          },
+          "CoyoteTimer": {
+            "translated-name": "CoyoteTimer",
+            "description": "Get the current coyote timer value in seconds. This counts down after leaving the ground. Returns 0 when on ground or timer expired.",
+            "params": {}
+          },
+          "EstimatedVelocityX": {
+            "translated-name": "EstimatedVelocityX",
+            "description": "Get the estimated horizontal velocity needed to follow the current path. Returns 0 if no path is active.",
+            "params": {}
+          },
+          "JumpTowardTargetX": {
+            "translated-name": "JumpTowardTargetX",
+            "description": "Get the world X position of the jump-at target. Returns 0 if not in jump-at mode.",
+            "params": {}
+          },
+          "JumpTowardTargetY": {
+            "translated-name": "JumpTowardTargetY",
+            "description": "Get the world Y position of the jump-at target. Returns 0 if not in jump-at mode.",
+            "params": {}
+          },
+          "LedgeLeniency": {
+            "translated-name": "LedgeLeniency",
+            "description": "Get the ledge leniency setting in pixels. This is how far past a ledge edge the AI can walk before stopping.",
+            "params": {}
+          },
+          "LedgeRestriction": {
+            "translated-name": "LedgeRestriction",
+            "description": "Get whether ledge restriction is enabled. Returns 1 if enabled, 0 if disabled.",
+            "params": {}
+          },
+          "StoppingDistance": {
+            "translated-name": "StoppingDistance",
+            "description": "Get the calculated stopping distance in pixels based on the Platform behavior's current speed. Used for waypoint arrival detection.",
+            "params": {}
+          },
+          "StrictJumpPositioning": {
+            "translated-name": "StrictJumpPositioning",
+            "description": "Get whether strict jump positioning is currently active for this character. Returns 1 if enabled, 0 if disabled. Useful for conditional logic — e.g. switching between careful and aggressive pathfinding modes.",
+            "params": {}
+          },
           "GridHeight": {
             "translated-name": "GridHeight",
             "description": "Get the height of the obstacle map in tiles. Returns 0 if no map exists.",
@@ -1649,9 +1835,9 @@
             "description": "Get the width of the obstacle map in tiles. Returns 0 if no map exists.",
             "params": {}
           },
-          "HazardRadius": {
-            "translated-name": "HazardRadius",
-            "description": "Get the current hazard radius setting in tiles. This affects how far hazard influence spreads.",
+          "MapTag": {
+            "translated-name": "MapTag",
+            "description": "The map tag this instance navigates with (from the Map Tag property). Instances with the same tag on a layout share one navigation map. Returns an empty string for the default shared map.",
             "params": {}
           },
           "ObstacleMapJSON": {
@@ -1662,16 +1848,6 @@
           "ObstacleMapSource": {
             "translated-name": "ObstacleMapSource",
             "description": "Get the source of the current obstacle map. Returns 'custom', 'pathfinding', or 'none'.",
-            "params": {}
-          },
-          "RePathCooldown": {
-            "translated-name": "RePathCooldown",
-            "description": "Get the current re-path cooldown in seconds. This is the minimum time between automatic re-path attempts.",
-            "params": {}
-          },
-          "RePathThreshold": {
-            "translated-name": "RePathThreshold",
-            "description": "Get the current re-path threshold in tiles. This is how far the character can drift before automatic re-pathing triggers.",
             "params": {}
           },
           "SlopeDirection": {
@@ -1732,16 +1908,6 @@
             "description": "Get the angle in degrees from the character to the current waypoint. Returns 0 if no path is active.",
             "params": {}
           },
-          "CoyoteTime": {
-            "translated-name": "CoyoteTime",
-            "description": "Get the current coyote time setting in seconds. This is the window after walking off a ledge where jumps are still allowed.",
-            "params": {}
-          },
-          "CoyoteTimer": {
-            "translated-name": "CoyoteTimer",
-            "description": "Get the current coyote timer value in seconds. This counts down after leaving the ground. Returns 0 when on ground or timer expired.",
-            "params": {}
-          },
           "CurrentPathAction": {
             "translated-name": "CurrentPathAction",
             "description": "Get the action name for a waypoint by index (e.g., 'walk', 'jump', 'fall', 'portal'). Returns empty string if index is out of bounds.",
@@ -1772,67 +1938,29 @@
             "description": "Get the distance in pixels from the character to the current waypoint. Returns 0 if no path is active.",
             "params": {}
           },
-          "EstimatedVelocityX": {
-            "translated-name": "EstimatedVelocityX",
-            "description": "Get the estimated horizontal velocity needed to follow the current path. Returns 0 if no path is active.",
+          "MaxPathsPerTick": {
+            "translated-name": "MaxPathsPerTick",
+            "description": "Get the current maximum paths per tick setting.",
             "params": {}
           },
-          "JumpTowardTargetX": {
-            "translated-name": "JumpTowardTargetX",
-            "description": "Get the world X position of the jump-at target. Returns 0 if not in jump-at mode.",
+          "NearbyAgentCount": {
+            "translated-name": "NearbyAgentCount",
+            "description": "Get the number of nearby agents sharing the same navigation map.",
             "params": {}
-          },
-          "JumpTowardTargetY": {
-            "translated-name": "JumpTowardTargetY",
-            "description": "Get the world Y position of the jump-at target. Returns 0 if not in jump-at mode.",
-            "params": {}
-          },
-          "LedgeLeniency": {
-            "translated-name": "LedgeLeniency",
-            "description": "Get the ledge leniency setting in pixels. This is how far past a ledge edge the AI can walk before stopping.",
-            "params": {}
-          },
-          "LedgeRestriction": {
-            "translated-name": "LedgeRestriction",
-            "description": "Get whether ledge restriction is enabled. Returns 1 if enabled, 0 if disabled.",
-            "params": {}
-          },
-          "NodeCount": {
-            "translated-name": "NodeCount",
-            "description": "Get the total number of navigation nodes in the generated graph. Returns 0 if no graph exists.",
-            "params": {}
-          },
-          "NodeWorldX": {
-            "translated-name": "NodeWorldX",
-            "description": "Get the world X position of a node at the specified grid coordinates. The node position is centred within the tile. Returns 0 if node doesn't exist.",
-            "params": {
-              "gx": {
-                "name": "Grid X",
-                "desc": "Grid X coordinate"
-              },
-              "gy": {
-                "name": "Grid Y",
-                "desc": "Grid Y coordinate"
-              }
-            }
-          },
-          "NodeWorldY": {
-            "translated-name": "NodeWorldY",
-            "description": "Get the world Y position of a node at the specified grid coordinates. The node position is centred within the tile. Returns 0 if node doesn't exist.",
-            "params": {
-              "gx": {
-                "name": "Grid X",
-                "desc": "Grid X coordinate"
-              },
-              "gy": {
-                "name": "Grid Y",
-                "desc": "Grid Y coordinate"
-              }
-            }
           },
           "PathCost": {
             "translated-name": "PathCost",
             "description": "Get the total calculated cost of the current path. Returns 0 if no path is active.",
+            "params": {}
+          },
+          "PathEndX": {
+            "translated-name": "PathEndX",
+            "description": "The world X of the calculated path's final position — the last waypoint, where the character will actually end up. In Nearest mode this can differ from the requested target (the path stops at the closest reachable spot). Returns 0 if no path has been calculated.",
+            "params": {}
+          },
+          "PathEndY": {
+            "translated-name": "PathEndY",
+            "description": "The world Y of the calculated path's final position — the last waypoint, where the character will actually end up. In Nearest mode this can differ from the requested target (the path stops at the closest reachable spot). Returns 0 if no path has been calculated.",
             "params": {}
           },
           "PathFailReason": {
@@ -1840,49 +1968,44 @@
             "description": "Get the reason the last pathfinding attempt failed. Returns: 'no_start_node', 'no_goal_node', 'max_nodes_reached', 'no_path', or empty string if path succeeded.",
             "params": {}
           },
+          "PathQueueSize": {
+            "translated-name": "PathQueueSize",
+            "description": "Get the number of pathfinding requests currently waiting in the queue.",
+            "params": {}
+          },
           "PathStrategy": {
             "translated-name": "PathStrategy",
             "description": "Get the current path strategy preset (balanced, shortest, safest, simplest).",
             "params": {}
           },
-          "PathTargetGridX": {
-            "translated-name": "PathTargetGridX",
-            "description": "Get the grid X coordinate of the path target. Returns -1 if no path is active.",
+          "RePathCooldown": {
+            "translated-name": "RePathCooldown",
+            "description": "Get the current re-path cooldown in seconds. This is the minimum time between automatic re-path attempts.",
             "params": {}
           },
-          "PathTargetGridY": {
-            "translated-name": "PathTargetGridY",
-            "description": "Get the grid Y coordinate of the path target. Returns -1 if no path is active.",
+          "RePathThreshold": {
+            "translated-name": "RePathThreshold",
+            "description": "Get the current re-path threshold in tiles. This is how far the character can drift before automatic re-pathing triggers.",
             "params": {}
           },
-          "PathTargetX": {
-            "translated-name": "PathTargetX",
-            "description": "Get the world X position of the path target. Pass 'original' for raw input or 'corrected' for ground-snapped position.",
-            "params": {
-              "type": {
-                "name": "Type",
-                "desc": "'original' or 'corrected'"
-              }
-            }
-          },
-          "PathTargetY": {
-            "translated-name": "PathTargetY",
-            "description": "Get the world Y position of the path target. Pass 'original' for raw input or 'corrected' for ground-snapped position.",
-            "params": {
-              "type": {
-                "name": "Type",
-                "desc": "'original' or 'corrected'"
-              }
-            }
-          },
-          "StoppingDistance": {
-            "translated-name": "StoppingDistance",
-            "description": "Get the calculated stopping distance in pixels based on the Platform behavior's current speed. Used for waypoint arrival detection.",
+          "TargetGridX": {
+            "translated-name": "TargetGridX",
+            "description": "The grid X coordinate of the requested path target (after ground correction snaps it to walkable ground).",
             "params": {}
           },
-          "StrictJumpPositioning": {
-            "translated-name": "StrictJumpPositioning",
-            "description": "Get whether strict jump positioning is currently active for this character. Returns 1 if enabled, 0 if disabled. Useful for conditional logic — e.g. switching between careful and aggressive pathfinding modes.",
+          "TargetGridY": {
+            "translated-name": "TargetGridY",
+            "description": "The grid Y coordinate of the requested path target (after ground correction snaps it to walkable ground).",
+            "params": {}
+          },
+          "TargetX": {
+            "translated-name": "TargetX",
+            "description": "The world X of the requested path target, as passed to the last Find path action. For where the calculated path actually ends, use PathEndX.",
+            "params": {}
+          },
+          "TargetY": {
+            "translated-name": "TargetY",
+            "description": "The world Y of the requested path target, as passed to the last Find path action. For where the calculated path actually ends, use PathEndY.",
             "params": {}
           },
           "WaypointCount": {
@@ -1929,16 +2052,6 @@
                 "desc": "Waypoint index (0-based)"
               }
             }
-          },
-          "MaxPathsPerTick": {
-            "translated-name": "MaxPathsPerTick",
-            "description": "Get the current maximum paths per tick setting.",
-            "params": {}
-          },
-          "PathQueueSize": {
-            "translated-name": "PathQueueSize",
-            "description": "Get the number of pathfinding requests currently waiting in the queue.",
-            "params": {}
           },
           "CurrentPortalID": {
             "translated-name": "CurrentPortalID",
@@ -2049,11 +2162,6 @@
                 "desc": "The portal ID to check"
               }
             }
-          },
-          "NearbyAgentCount": {
-            "translated-name": "NearbyAgentCount",
-            "description": "Get the number of nearby agents sharing the same navigation map.",
-            "params": {}
           }
         }
       }

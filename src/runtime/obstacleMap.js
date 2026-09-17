@@ -4,6 +4,45 @@ import { globalNavManager } from "./navigationManager.js";
 // queries, and the zero-event auto-build startup path.
 // Mixed into the instance class prototype — `this` is the behavior instance.
 export default {
+  /** Adopts another instance's map state by REFERENCE — one copy of the map
+   *  data per shared map, not one per instance. gridWidth is load-bearing:
+   *  gridKey() depends on it, so an instance without it cannot even look up
+   *  nodes in the shared graph. Mutating tile actions then write into the
+   *  shared arrays, which is the correct shared-mode semantics. */
+  _adoptMapStateFrom(inst) {
+    this.obstacleMap = inst.obstacleMap;
+    this.slopeMap = inst.slopeMap;
+    this.hazardMap = inst.hazardMap;
+    this.gridWidth = inst.gridWidth;
+    this.gridHeight = inst.gridHeight;
+    this.obstacleMapSource = inst.obstacleMapSource;
+    if (this.cellSizeAuto && !this._cellSizeResolved && inst._cellSizeResolved) {
+      this.cellSize = inst.cellSize;
+      this._cellSizeResolved = true;
+    }
+  },
+
+  /** Same-tick dedupe for map-setup actions. Event-sheet actions run once per
+   *  picked instance, so a setup action on a type with N instances would redo
+   *  the same work N times and keep N map copies. The first caller in a tick
+   *  claims the work; later same-tick callers on the same map adopt the first
+   *  caller's result instead. Returns true when the caller should do the work.
+   *  (Same-tick detection uses gameTime, which is frozen while the game is
+   *  paused — repeated setup calls during a hard pause coalesce, acceptable.) */
+  _claimSharedSetup(actionKey) {
+    const navKey = this._getNavKey();
+    if (navKey === null) return true;
+    const key = navKey + "#" + actionKey;
+    const now = this.instance.runtime.gameTime;
+    const rec = globalNavManager.setupStamps.get(key);
+    if (rec && rec.time === now && rec.owner !== this && rec.owner.instance) {
+      this._adoptMapStateFrom(rec.owner);
+      return false;
+    }
+    globalNavManager.setupStamps.set(key, { time: now, owner: this });
+    return true;
+  },
+
   /** Attempts to copy the obstacle map from the Pathfinding behavior, or starts polling if not ready.
    *  When Auto-Build Graph is set to "solids" (or "auto" with no Pathfinding behavior attached),
    *  builds the obstacle map by scanning Solid/Jump-thru objects instead. */
@@ -113,14 +152,14 @@ export default {
     if (this.platformBehavior && !this._jumpParamsOverridden) {
       this._calculateJumpParametersFromPlatform();
     }
-    if (this.useSharedGraph) {
-      const subs = globalNavManager.subscribers.get(this.layoutUID);
-      if (subs) {
-        for (const inst of subs) {
-          if (inst !== this && inst.cellSizeAuto && !inst._cellSizeResolved) {
-            inst.cellSize = px;
-            inst._cellSizeResolved = true;
-          }
+    // Propagate per nav key: instances on OTHER map tags may legitimately
+    // use a different cell size for their own map.
+    const subs = globalNavManager.subscribers.get(this.navKey);
+    if (subs) {
+      for (const inst of subs) {
+        if (inst !== this && inst.cellSizeAuto && !inst._cellSizeResolved) {
+          inst.cellSize = px;
+          inst._cellSizeResolved = true;
         }
       }
     }
@@ -235,6 +274,7 @@ export default {
   /** Creates an empty custom obstacle map (all clear) with the given tile dimensions.
    *  Source becomes "custom" so _scanObstacles never overwrites it. */
   aceCreateCustomObstacleMap(widthInTiles, heightInTiles) {
+    if (!this._claimSharedSetup("createCustom")) return;
     this.gridWidth = Math.ceil(widthInTiles);
     this.gridHeight = Math.ceil(heightInTiles);
     const cellCount = this.gridWidth * this.gridHeight;
@@ -247,6 +287,7 @@ export default {
    *  Sets obstacleMapSource = "collision" so _scanObstacles won't overwrite it.
    *  Follow with ScanSolidObjectsIntoObstacleMap / ScanJumpThruObjectsIntoObstacleMap. */
   aceBuildObstacleMapFromLayout(layoutWidth, layoutHeight) {
+    if (!this._claimSharedSetup("buildFromLayout")) return;
     // Auto Tile Size: derive from the first solid tilemap in the project
     if (!this._cellSizeResolved) {
       this._autoDetectCellSizeFromClasses(this._findObjectClassesWithBehavior("Solid"));
@@ -263,11 +304,13 @@ export default {
 
   /** Scans objects with the Solid behavior into the obstacle map as solid cells (value=1). */
   aceScanSolidObjectsIntoObstacleMap(solidClass) {
+    if (!this._claimSharedSetup("scanSolid")) return;
     this._scanObjectsIntoObstacleMap(solidClass, 1);
   },
 
   /** Scans objects with the Jump-thru behavior into the obstacle map as jump-thru cells (value=2). */
   aceScanJumpThruObjectsIntoObstacleMap(jumpThruClass) {
+    if (!this._claimSharedSetup("scanJumpThru")) return;
     this._scanObjectsIntoObstacleMap(jumpThruClass, 2);
   },
 
@@ -288,6 +331,65 @@ export default {
       }
     }
     return false;
+  },
+
+  /** Counts how many of the 3x3 cell samples the instance's collision polygon
+   *  covers (0..9). Same sample layout as _cellCoveredByInstance but without
+   *  early exit — used when slope detection needs to know full vs partial. */
+  _countCoveredSamples(inst, gx, gy) {
+    const cs = this.cellSize;
+    const baseX = gx * cs;
+    const baseY = gy * cs;
+    let n = 0;
+    for (let sy = 1; sy <= 5; sy += 2) {
+      const py = baseY + (cs * sy) / 6;
+      for (let sx = 1; sx <= 5; sx += 2) {
+        if (inst.containsPoint(baseX + (cs * sx) / 6, py)) n++;
+      }
+    }
+    return n;
+  },
+
+  /** Probes one column of a cell downward with containsPoint and returns the
+   *  height of the topmost solid surface above the cell bottom, in pixels
+   *  (0 = the column has no solid). Resolution is cellSize/12. */
+  _probeColumnSurfaceHeight(inst, worldX, cellTopY) {
+    const cs = this.cellSize;
+    const steps = 12;
+    for (let k = 0; k < steps; k++) {
+      const y = cellTopY + ((k + 0.5) * cs) / steps;
+      if (inst.containsPoint(worldX, y)) {
+        // Surface sits at or just above this probe point
+        return cs - (y - cellTopY) + cs / (2 * steps);
+      }
+    }
+    return 0;
+  },
+
+  /** Classifies a cell's collision shape as a slope by probing surface heights
+   *  at three columns (x = 1/6, 1/2, 5/6 of the cell) — measured collision
+   *  BEHAVIOR via the documented containsPoint, not polygon definitions, so it
+   *  cannot disagree with what the Platform behavior physically collides with.
+   *  Returns a slopeMap value: 1=slope_left(/), 2=slope_right(\),
+   *  3=gentle_left, 4=gentle_right, 0=not a slope (flat, full, or an angle the
+   *  movement system doesn't support — those stay solid, which is safe). */
+  _classifySlopeByProbe(inst, gx, gy) {
+    const cs = this.cellSize;
+    const top = gy * cs;
+    const h1 = this._probeColumnSurfaceHeight(inst, gx * cs + cs / 6, top);
+    const h2 = this._probeColumnSurfaceHeight(inst, gx * cs + cs / 2, top);
+    const h3 = this._probeColumnSurfaceHeight(inst, gx * cs + (5 * cs) / 6, top);
+
+    // The middle column must sit on the line between the outer two, or the
+    // shape isn't a straight ramp (steps, bumps, decorations stay solid)
+    if (Math.abs(h2 - (h1 + h3) / 2) > cs / 6) return 0;
+
+    // Positive gradient = surface rises to the right = "/"
+    const gradient = (h3 - h1) / ((2 * cs) / 3);
+    const mag = Math.abs(gradient);
+    if (mag >= 0.75 && mag <= 1.25) return gradient > 0 ? 1 : 2; // 45 degrees
+    if (mag >= 0.3 && mag <= 0.7) return gradient > 0 ? 3 : 4;   // 22.5 degrees
+    return 0;
   },
 
   /** Shared helper: scans instances of objClass into the obstacle map with the given cellValue.
@@ -328,6 +430,8 @@ export default {
     const candidates = this.instance.runtime.collisions.getCollisionCandidates([objClass], fullRect);
     const seen = new Set();
     let count = 0;
+    let slopeCount = 0;
+    const slopeWritten = new Set(); // cells written as slopes during THIS scan
 
     for (const inst of candidates) {
       if (seen.has(inst)) continue;
@@ -340,24 +444,65 @@ export default {
       if (typeof inst.isCollisionEnabled === "boolean" && !inst.isCollisionEnabled) continue;
 
       const canPolyTest = typeof inst.containsPoint === "function";
+      // Detect Slopes: classify partially-covered SOLID cells by probing the
+      // collision shape. Cells written as slopes this scan are tracked so a
+      // later overlapping solid in the same scan cleanly overwrites them.
+      const wantSlopes = this.detectSlopes && cellValue === 1 && canPolyTest;
+
+      // Applies one covered cell: slope-classified cells become slope tiles,
+      // everything else becomes cellValue.
+      const applyCell = (gx, gy, slopeVal) => {
+        const idx = gy * gw + gx;
+        if (slopeVal > 0) {
+          if (!this.slopeMap) this.slopeMap = new Uint8Array(gw * gh);
+          this.slopeMap[idx] = slopeVal;
+          this.obstacleMap[idx] = 0;
+          slopeWritten.add(idx);
+          slopeCount++;
+        } else {
+          this.obstacleMap[idx] = cellValue;
+          if (slopeWritten.has(idx)) {
+            this.slopeMap[idx] = 0;
+            slopeWritten.delete(idx);
+          }
+          count++;
+        }
+      };
 
       if (typeof inst.getTileAt === "function") {
         // Tilemap: cell-by-cell (tile size must match cellSize). getTileAt returns
         // -1 for empty cells; flipped tiles return other negative raw values, so
         // compare against exactly -1 (a `>= 0` check would skip flipped tiles).
+        // Coverage/slope results are cached per raw tile value (the raw value
+        // includes flip bits, and identical values have identical collision shapes).
+        const tileCache = new Map(); // rawTile → { covered, slope }
         for (let gy = 0; gy < gh; gy++) {
           for (let gx = 0; gx < gw; gx++) {
             let tileId;
             try { tileId = inst.getTileAt(gx, gy); } catch (e) { continue; }
             if (tileId === -1) continue;
-            if (!canPolyTest || this._cellCoveredByInstance(inst, gx, gy)) {
-              this.obstacleMap[gy * gw + gx] = cellValue; count++;
+            if (!canPolyTest) { this.obstacleMap[gy * gw + gx] = cellValue; count++; continue; }
+            let rec = tileCache.get(tileId);
+            if (rec === undefined) {
+              if (wantSlopes) {
+                const n = this._countCoveredSamples(inst, gx, gy);
+                rec = {
+                  covered: n > 0,
+                  slope: n > 0 && n < 9 ? this._classifySlopeByProbe(inst, gx, gy) : 0,
+                };
+              } else {
+                rec = { covered: this._cellCoveredByInstance(inst, gx, gy), slope: 0 };
+              }
+              tileCache.set(tileId, rec);
             }
+            if (rec.covered) applyCell(gx, gy, rec.slope);
           }
         }
       } else {
         // Sprite: iterate cells in the bounding box, marking only polygon-covered
-        // cells (falls back to full bbox fill without containsPoint)
+        // cells (falls back to full bbox fill without containsPoint). Slope
+        // classification runs per cell, so a rotated 45-degree solid sprite's
+        // diagonal edge cells legitimately become walkable ramp tiles.
         const bbox = inst.getBoundingBox();
         const x1 = Math.floor(bbox.left / cs);
         const y1 = Math.floor(bbox.top / cs);
@@ -365,14 +510,20 @@ export default {
         const y2 = Math.ceil(bbox.bottom / cs);
         for (let gy = Math.max(0, y1); gy < Math.min(gh, y2); gy++) {
           for (let gx = Math.max(0, x1); gx < Math.min(gw, x2); gx++) {
-            if (!canPolyTest || this._cellCoveredByInstance(inst, gx, gy)) {
-              this.obstacleMap[gy * gw + gx] = cellValue; count++;
+            if (!canPolyTest) { this.obstacleMap[gy * gw + gx] = cellValue; count++; continue; }
+            if (wantSlopes) {
+              const n = this._countCoveredSamples(inst, gx, gy);
+              if (n === 0) continue;
+              applyCell(gx, gy, n < 9 ? this._classifySlopeByProbe(inst, gx, gy) : 0);
+            } else {
+              if (!this._cellCoveredByInstance(inst, gx, gy)) continue;
+              applyCell(gx, gy, 0);
             }
           }
         }
       }
     }
-    this._log(`Scanned ${count} cells (value=${cellValue}) from "${requiredBehavior}" objects`);
+    this._log(`Scanned ${count} cells (value=${cellValue})${slopeCount > 0 ? ` + ${slopeCount} slope cells` : ""} from "${requiredBehavior}" objects`);
   },
 
   /** Discards the obstacle map and marks the graph dirty. After this, auto-build
@@ -403,6 +554,7 @@ export default {
   /** Restores obstacle/slope/hazard maps from a JSON string produced by
    *  aceSaveObstacleMapToJSON. Also restores cellSize (marks it resolved). */
   aceLoadObstacleMapFromJSON(json) {
+    if (!this._claimSharedSetup("loadJSON")) return;
     try {
       const data = JSON.parse(json);
       this.gridWidth = data.gridWidth;
@@ -434,6 +586,10 @@ export default {
    *  ready (then builds the graph), otherwise polls each tick until it is
    *  (OnPathfindingMapReady / OnPathfindingMapTimeout fire accordingly). */
   aceUsePathfindingObstacleMap(autoRegen) {
+    // Remember the auto-regen choice even when another picked instance already
+    // did the work this tick (matters if this instance builds later).
+    this.autoRegenOnReady = autoRegen !== false;
+    if (!this._claimSharedSetup("usePathfindingMap")) return;
     this._cancelGraphBuild();
     this.obstacleMapSource = null;
     this.obstacleMap = null;
@@ -573,6 +729,7 @@ export default {
 
   /** Scans a Tilemap and marks tiles matching the given tile IDs as slopes. */
   aceMapSlopeTilesFromTilemap(tilemapClass, slopeLeftIds, slopeRightIds, gentleLeftIds, gentleRightIds) {
+    if (!this._claimSharedSetup("mapSlopes")) return;
     const tilemapInst = tilemapClass.getFirstPickedInstance();
     if (!tilemapInst) {
       this._warn("MapSlopeTilesFromTilemap: tilemap instance not found");
@@ -664,93 +821,17 @@ export default {
   },
 
   // -----------------------------------------------------------------------
-  // Auto slope detection helpers
+  // Auto slope detection
   // -----------------------------------------------------------------------
 
-  // Try to retrieve the IAnimationFrame for a base tile ID from the tilemap.
-  // C3 tilemaps store their tileset as animation frames (one animation whose
-  // frames correspond to tile IDs 0, 1, 2, …). The public ITilemapInstance
-  // scripting interface does not document this path, so we try it and return
-  // null on any failure so callers can fall back gracefully.
-  _tryGetTileFrame(baseTileId, tilemapInst) {
-    try {
-      const animations = tilemapInst.animations;
-      if (!animations) return null;
-      for (const anim of animations) {
-        let idx = 0;
-        for (const frame of anim.frames) {
-          if (idx === baseTileId) return frame;
-          idx++;
-        }
-        break; // only check the first animation (the tileset)
-      }
-    } catch (e) {
-      // Animation frame API is not accessible on this object / C3 version
-    }
-    return null;
-  },
-
-  // Classify the collision polygon of a single tile ID as a slope type.
-  // Returns: 1 = slope_left (/), 2 = slope_right (\),
-  //          3 = gentle_slope_left, 4 = gentle_slope_right, 0 = not a slope.
-  // Polygon points are read in normalized coordinates relative to the frame
-  // origin (IAnimationFrame.getPolyPointX/Y). We convert to 0-1 tile space
-  // by adding originX/originY so corner detection is consistent.
-  _classifyTilePolygon(baseTileId, tilemapInst) {
-    const frame = this._tryGetTileFrame(baseTileId, tilemapInst);
-    if (!frame) return 0;
-
-    let count;
-    try {
-      count = frame.getPolyPointCount();
-    } catch (e) {
-      return 0;
-    }
-    if (count < 3) return 0;
-
-    // Convert origin-relative coords to 0-1 tile space
-    const originX = frame.originX ?? 0.5;
-    const originY = frame.originY ?? 0.5;
-    const pts = [];
-    for (let i = 0; i < count; i++) {
-      pts.push([frame.getPolyPointX(i) + originX, frame.getPolyPointY(i) + originY]);
-    }
-
-    const eps = 0.1;
-    const hasCorner = (cx, cy) => pts.some(([px, py]) => Math.abs(px - cx) < eps && Math.abs(py - cy) < eps);
-    const hasTL = hasCorner(0, 0);
-    const hasTR = hasCorner(1, 0);
-    const hasBL = hasCorner(0, 1);
-    const hasBR = hasCorner(1, 1);
-
-    if (count === 3) {
-      // 45° slope triangle — the absent corner reveals the cut direction.
-      // slope_left  (/): solid fills bottom-right triangle → top-left corner absent
-      // slope_right (\): solid fills bottom-left triangle → top-right corner absent
-      if (!hasTL && hasTR && hasBL && hasBR) return 1; // slope_left
-      if ( hasTL && !hasTR && hasBL && hasBR) return 2; // slope_right
-    } else if (count === 4) {
-      // 22.5° gentle-slope trapezoid — three real corners plus one midpoint
-      // on a vertical edge. The side with the midpoint is the cut side.
-      // gentle_slope_left  (/): top-right cut → extra point on right edge  (x≈1, 0<y<1)
-      // gentle_slope_right (\): top-left  cut → extra point on left edge   (x≈0, 0<y<1)
-      if (hasTL && !hasTR && hasBL && hasBR) {
-        const mid = pts.find(([px, py]) => Math.abs(px - 1) < eps && py > eps && py < 1 - eps);
-        if (mid) return 3; // gentle_slope_left
-      }
-      if (!hasTL && hasTR && hasBL && hasBR) {
-        const mid = pts.find(([px, py]) => Math.abs(px) < eps && py > eps && py < 1 - eps);
-        if (mid) return 4; // gentle_slope_right
-      }
-    }
-    return 0; // flat/solid or unrecognised shape
-  },
-
-  // Scan a tilemap and automatically classify every tile that has a triangular
-  // or trapezoidal collision polygon as a slope, without requiring explicit
-  // tile-ID lists. Each unique base tile ID is classified only once for
-  // efficiency. Horizontal-flip variants are handled automatically.
+  // Scan a tilemap and automatically classify slope tiles by PROBING their
+  // collision shapes with the documented containsPoint API (see
+  // _classifySlopeByProbe) — no tile-ID lists and no undocumented polygon
+  // definition access. Results are cached per raw tile value (raw values
+  // include flip bits, so flipped variants classify independently and
+  // correctly). Tiles whose shape isn't a supported slope angle stay solid.
   aceAutoDetectSlopeTiles(tilemapClass) {
+    if (!this._claimSharedSetup("autoDetectSlopes")) return;
     const tilemapInst = tilemapClass.getFirstPickedInstance();
     if (!tilemapInst) {
       this._warn("AutoDetectSlopeTiles: tilemap instance not found");
@@ -760,48 +841,13 @@ export default {
       this._warn("AutoDetectSlopeTiles: obstacle map not created yet");
       return;
     }
-    if (!this.slopeMap) this.slopeMap = new Uint8Array(this.gridWidth * this.gridHeight);
-
-    const TILE_ID_MASK = 0x1FFFFFFF;
-    const TILE_H_FLIP  = 0x80000000;
-
-    // Pass 1 — collect all unique base tile IDs and classify each once.
-    // We classify per unique ID rather than per cell to avoid redundant
-    // (and potentially expensive) polygon API lookups for repeated tiles.
-    const classificationCache = new Map(); // baseTileId → slopeType (0-4)
-    let polyApiWorked = false;
-
-    for (let gy = 0; gy < this.gridHeight; gy++) {
-      for (let gx = 0; gx < this.gridWidth; gx++) {
-        let rawTile;
-        try { rawTile = tilemapInst.getTileAt(gx, gy); } catch (e) { continue; }
-        if (rawTile === -1) continue;
-
-        const baseTileId = (rawTile >>> 0) & TILE_ID_MASK;
-        if (classificationCache.has(baseTileId)) continue;
-
-        // Attempt polygon classification; cache result even if 0 (not a slope)
-        // so we don't re-query the same tile ID in subsequent cells.
-        const slopeType = this._classifyTilePolygon(baseTileId, tilemapInst);
-        classificationCache.set(baseTileId, slopeType);
-
-        // If _tryGetTileFrame returned a frame (not null), the polygon API is
-        // accessible even when the tile isn't a slope — check via a helper probe.
-        if (!polyApiWorked && this._tryGetTileFrame(baseTileId, tilemapInst) !== null) {
-          polyApiWorked = true;
-        }
-      }
-    }
-
-    if (!polyApiWorked) {
-      this._warn(
-        "AutoDetectSlopeTiles: tile collision polygon data is not accessible at runtime on this C3 version. " +
-        "Use MapSlopeTilesFromTilemap with explicit tile IDs instead."
-      );
+    if (typeof tilemapInst.containsPoint !== "function") {
+      this._warn("AutoDetectSlopeTiles: containsPoint is not available on this tilemap. Use MapSlopeTilesFromTilemap with explicit tile IDs instead.");
       return;
     }
+    if (!this.slopeMap) this.slopeMap = new Uint8Array(this.gridWidth * this.gridHeight);
 
-    // Pass 2 — write slope values into slopeMap, applying H-flip mirroring.
+    const classificationCache = new Map(); // rawTile → slopeType (0-4)
     let count = 0;
     const typeCounts = [0, 0, 0, 0]; // [slope_left, slope_right, gentle_left, gentle_right]
 
@@ -811,15 +857,12 @@ export default {
         try { rawTile = tilemapInst.getTileAt(gx, gy); } catch (e) { continue; }
         if (rawTile === -1) continue;
 
-        const baseTileId = (rawTile >>> 0) & TILE_ID_MASK;
-        const hFlipped   = ((rawTile >>> 0) & TILE_H_FLIP) !== 0;
-        const baseType   = classificationCache.get(baseTileId) ?? 0;
-        if (baseType === 0) continue;
-
-        // H-flip mirrors left ↔ right
-        const slopeVal = hFlipped
-          ? (baseType === 1 ? 2 : baseType === 2 ? 1 : baseType === 3 ? 4 : 3)
-          : baseType;
+        let slopeVal = classificationCache.get(rawTile);
+        if (slopeVal === undefined) {
+          slopeVal = this._classifySlopeByProbe(tilemapInst, gx, gy);
+          classificationCache.set(rawTile, slopeVal);
+        }
+        if (slopeVal === 0) continue;
 
         const index = gy * this.gridWidth + gx;
         this.obstacleMap[index] = 0;
@@ -844,7 +887,7 @@ export default {
     } else {
       this._log(
         "AutoDetectSlopeTiles: no slope tiles detected. " +
-        "Ensure tiles have triangular or trapezoidal collision polygons set in the C3 editor."
+        "Ensure slope tiles have sloped collision polygons (45 or 22.5 degrees) set in the C3 editor."
       );
     }
   },
@@ -865,6 +908,7 @@ export default {
       this.hazardMap = new Float32Array(this.gridWidth * this.gridHeight);
     }
     this.hazardMap[gy * this.gridWidth + gx] = severity;
+    this._markHazardCostsDirty();
   },
 
   /** Clears every slope marking (tiles revert to whatever the obstacle map says)
@@ -878,6 +922,7 @@ export default {
   /** Resets all tile hazard severities to 0 (circle/rect hazards are separate). */
   aceClearAllHazardTiles() {
     if (this.hazardMap) this.hazardMap.fill(0);
+    this._markHazardCostsDirty();
   },
 
   /** Returns true if a cell is impassable (solid or jump-thru). Out-of-bounds counts as blocked. */

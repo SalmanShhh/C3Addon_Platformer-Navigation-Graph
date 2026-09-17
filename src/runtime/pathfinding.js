@@ -191,7 +191,7 @@ export default {
     let nodesExplored = 0;
 
     const agentHash = this.multiAgentAvoidance
-      ? globalNavManager.getAgentSpatialHash(this.layoutUID, this.cellSize) : null;
+      ? globalNavManager.getAgentSpatialHash(this.navKey, this.cellSize) : null;
 
     while (openSet.size > 0) {
       if (nodesExplored >= this.maxSearchNodes) {
@@ -657,13 +657,19 @@ export default {
 
   /** Calculates a path from the character's current position to the target coordinates. Supports ground correction and jump-toward mode. */
   aceFindPath(targetX, targetY, correctToGround, mode, strict, isRePath) {
+    if (!this.navEnabled) {
+      this._log("FindPath ignored: behavior is disabled");
+      return false;
+    }
     // A chunked graph build may still be in progress — finish it synchronously
     // so pathfinding always sees the complete graph.
     if (this._graphBuild) {
       this._finishGraphBuildNow();
-    } else if (this.useSharedGraph) {
-      globalNavManager.finishBuildFor(this.layoutUID);
+    } else {
+      globalNavManager.finishBuildFor(this.navKey);
     }
+    // Hazards changed this tick? Re-bake node costs before searching
+    this._applyHazardCostsIfDirty();
 
     // Time-slicing: queue if budget exhausted (unless this is a re-path, which always runs immediately)
     if (globalNavManager.maxPathsPerTick > 0 && !isRePath) {
@@ -924,27 +930,37 @@ export default {
     return this.distance(this.instance.x, this.instance.y, wp.x, wp.y);
   },
 
-  /** Returns the world X of the path target. Pass "corrected" for the ground-corrected position. */
-  aceGetPathTargetX(corrected) {
-    return corrected === "corrected"
-      ? this.pathTargetCorrectedX
-      : this.pathTargetX;
+  /** Returns the world X of the calculated path's final position (the last
+   *  waypoint — where the character will actually end up, which in Nearest
+   *  mode can differ from the requested target). 0 if no path calculated. */
+  aceGetPathEndX() {
+    const path = this.currentPath;
+    return path.length > 0 ? path[path.length - 1].x : 0;
   },
 
-  /** Returns the world Y of the path target. Pass "corrected" for the ground-corrected position. */
-  aceGetPathTargetY(corrected) {
-    return corrected === "corrected"
-      ? this.pathTargetCorrectedY
-      : this.pathTargetY;
+  /** Returns the world Y of the calculated path's final position. See aceGetPathEndX. */
+  aceGetPathEndY() {
+    const path = this.currentPath;
+    return path.length > 0 ? path[path.length - 1].y : 0;
+  },
+
+  /** Returns the world X of the requested path target (as passed to Find path). */
+  aceGetTargetX() {
+    return this.pathTargetX;
+  },
+
+  /** Returns the world Y of the requested path target (as passed to Find path). */
+  aceGetTargetY() {
+    return this.pathTargetY;
   },
 
   /** Returns the grid X coordinate of the path target (after ground correction). */
-  aceGetPathTargetGridX() {
+  aceGetTargetGridX() {
     return this.pathTargetGridX;
   },
 
   /** Returns the grid Y coordinate of the path target (after ground correction). */
-  aceGetPathTargetGridY() {
+  aceGetTargetGridY() {
     return this.pathTargetGridY;
   },
 };
