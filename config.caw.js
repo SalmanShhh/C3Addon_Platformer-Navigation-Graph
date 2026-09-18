@@ -14,7 +14,7 @@ export const minConstructVersion = undefined;
 export const author = "SalmanShh";
 export const website = "https://www.construct.net";
 export const documentation = "https://www.construct.net";
-export const description = "Smart pathfinding for platformer games. Characters automatically jump across gaps, fall between platforms, and find optimal routes through complex levels. Includes instant portals (teleporters, doors) and gradual portals (elevators, ladders, ziplines) with pause/resume support for custom animations. Features hazard avoidance, multiple path strategies, coyote jumps, ledge restriction, and multi-agent support. Works with the built-in Platform behavior: just add the behavior and go.";
+export const description = "Smart pathfinding for platformer games: characters jump gaps, drop between platforms, climb slopes, and take momentum leaps to reach their target. Add it next to the built-in Platform behavior and it works with zero setup events. Includes portals (doors, elevators, ziplines), hazard avoidance, path strategy presets, and crowd handling so groups surround a target instead of stacking.";
 export const category = ADDON_CATEGORY.MOVEMENTS;
 
 export const hasDomside = false;

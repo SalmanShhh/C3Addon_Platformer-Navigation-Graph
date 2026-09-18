@@ -1,24 +1,15 @@
 <img src="./src/icon.svg" width="100" /><br>
 # Platformer Navigation Graph
-<i>Smart pathfinding for platformer games. Characters automatically jump across gaps, fall between platforms, and find optimal routes through complex levels. Includes instant portals (teleporters, doors) and gradual portals (elevators, ladders, ziplines) with pause/resume support for custom animations. Features hazard avoidance, multiple path strategies, coyote jumps, ledge restriction, and multi-agent support. Works with the built-in Platform behavior: just add the behavior and go.</i> <br>
-### Version 0.8.0.0
+<i>Smart pathfinding for platformer games: characters jump gaps, drop between platforms, climb slopes, and take momentum leaps to reach their target. Add it next to the built-in Platform behavior and it works with zero setup events. Includes portals (doors, elevators, ziplines), hazard avoidance, path strategy presets, and crowd handling so groups surround a target instead of stacking.</i> <br>
+### Version 0.8.0.1
 
-[<img src="https://placehold.co/200x50/4493f8/FFF?text=Download&font=montserrat" width="200"/>](https://github.com/SalmanShhh/Platformer-Navigation-Graph-V2/releases/download/salmanshh_platformer_navigationgraph-0.8.0.0.c3addon/salmanshh_platformer_navigationgraph-0.8.0.0.c3addon)
+[<img src="https://placehold.co/200x50/4493f8/FFF?text=Download&font=montserrat" width="200"/>](https://github.com/SalmanShhh/Platformer-Navigation-Graph-V2/releases/download/salmanshh_platformer_navigationgraph-0.8.0.1.c3addon/salmanshh_platformer_navigationgraph-0.8.0.1.c3addon)
 <br>
 <sub> [See all releases](https://github.com/SalmanShhh/Platformer-Navigation-Graph-V2/releases) </sub> <br>
 
-#### What's New in 0.8.0.0
-**Added:**
-- Crowd Arrivals (property + Set crowd arrivals action + Is crowd arrivals enabled condition): characters pathing to the same position each claim a landing node; later arrivals retarget to the nearest unclaimed neighbor, so packs tile around a target instead of stacking on one pixel. Per map tag.
-- Claims are kept while standing at the reserved spot and released on Stop, pathing elsewhere, disable, destroy, and graph rebuilds. TargetX/Y report the requested position; PathEndX/Y show the reserved spot.
-- Idle Separation (property + Set idle separation action + IdleSeparation expression): personal space in pixels for characters with no active path; any closer and they gently push apart. Ledge-safe, never interferes with path following, 0 = off, works with or without Crowd Arrivals.
-- Separation give-up: when the crowd is too dense to satisfy the spacing, characters stop trying after the give-up time (1.2s default; Set separation give-up time action + SeparationGiveUpTime expression) and rest for Separation Cooldown seconds (property + action + expression; 0 = never rest).
-- Teleports, portals, event repositioning, and arriving from a path reset the give-up state, so freshly placed or re-gathered characters always get a fresh separation attempt.
-
+#### What's New in 0.8.0.1
 **Changed:**
-- BREAKING: the Crowd Arrivals, Idle Separation, and Separation Cooldown properties are inserted before Enabled (which stays last, per C3 convention), so property indices after slot 16 shifted - projects saved with 0.7.0.0 must re-check this behavior's properties after updating.
-- Guide: crowd arrivals and idle separation section, three new full examples (zombie horde surround, squad rally point with PathEndX markers, guard-post/rat-nest settle tuning), and five new genre sketches (barricade siege, fireteam squad, pet collection, arena lineup, town crowds).
-- All ACE parameter descriptions rewritten in the built-in behaviors' vocabulary ('The X co-ordinate, in pixels.', 'Whether to enable or disable...'), and em-dashes removed from every ACE and property description.
+- updated addon description
 
 
 <sub>[View full changelog](#changelog)</sub>
@@ -298,6 +289,13 @@ npm run dev
 ---
 ## Changelog
 
+### Version 0.8.0.1
+
+**Changed:**
+- updated addon description
+
+---
+
 ### Version 0.8.0.0
 
 **Added:**
@@ -311,6 +309,7 @@ npm run dev
 - BREAKING: the Crowd Arrivals, Idle Separation, and Separation Cooldown properties are inserted before Enabled (which stays last, per C3 convention), so property indices after slot 16 shifted - projects saved with 0.7.0.0 must re-check this behavior's properties after updating.
 - Guide: crowd arrivals and idle separation section, three new full examples (zombie horde surround, squad rally point with PathEndX markers, guard-post/rat-nest settle tuning), and five new genre sketches (barricade siege, fireteam squad, pet collection, arena lineup, town crowds).
 - All ACE parameter descriptions rewritten in the built-in behaviors' vocabulary ('The X co-ordinate, in pixels.', 'Whether to enable or disable...'), and em-dashes removed from every ACE and property description.
+- Addon description rewritten: briefer, and now mentions momentum jumps and crowd handling.
 
 ---
 
