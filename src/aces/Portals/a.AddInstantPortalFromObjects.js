@@ -8,8 +8,8 @@ export const config = {
     },
     { id: "entryObject", name: "Entry object", desc: "The object to use as the portal entry point", type: "object" },
     { id: "exitObject", name: "Exit object", desc: "The object to use as the portal exit point", type: "object" },
-    { id: "cost", name: "Cost", desc: "Movement cost (lower = preferred, default is 1)", type: "number", initialValue: "1" },
-    { id: "tag", name: "Tag", desc: "Optional tag for grouping portals. Use commas for multiple tags (e.g. \"door,room_A\"). Leave empty for no tag.", type: "string", initialValue: '""' }
+    { id: "cost", name: "Cost", desc: "The movement cost. Lower costs are preferred; the default is 1.", type: "number", initialValue: "1" },
+    { id: "tag", name: "Tag", desc: "An optional tag for grouping portals. Use commas for multiple tags (e.g. \"door,room_A\"). Leave empty for no tag.", type: "string", initialValue: '""' }
   ]
 };
 

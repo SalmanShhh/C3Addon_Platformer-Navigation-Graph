@@ -2,8 +2,8 @@ export const config = {
   returnType: "string",
   description: "Get the slope direction of a tile at the specified grid coordinates. Returns 'left', 'right', or empty string if not a slope.",
   params: [
-    { id: "gx", name: "Grid X", desc: "Grid X coordinate", type: "number" },
-    { id: "gy", name: "Grid Y", desc: "Grid Y coordinate", type: "number" }
+    { id: "gx", name: "Grid X", desc: "The tile X co-ordinate.", type: "number" },
+    { id: "gy", name: "Grid Y", desc: "The tile Y co-ordinate.", type: "number" }
   ]
 };
 

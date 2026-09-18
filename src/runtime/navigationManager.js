@@ -143,6 +143,48 @@ class NavigationManager {
     // picked instance, so N picked instances would redo the same setup N times;
     // the first caller claims it and the rest adopt its result.
     this.setupStamps = new Map(); // navKey#action → { time, owner }
+
+    // Crowd arrivals: goal-node claims per map, so agents pathing to the same
+    // position tile onto neighboring nodes instead of stacking on one pixel.
+    // Keyed by the shared graph's node OBJECTS — cleared on rebuild (new node
+    // objects) and scrubbed per instance on unsubscribe.
+    this.goalClaims = new Map(); // navKey → Map<node → instance>
+  }
+
+  /** Claims a goal node for an instance (releasing its previous claim). */
+  claimGoal(navKey, node, instance) {
+    this.releaseGoalClaim(instance);
+    if (!this.goalClaims.has(navKey)) this.goalClaims.set(navKey, new Map());
+    this.goalClaims.get(navKey).set(node, instance);
+    instance._claimedGoalNode = node;
+    instance._claimedGoalKey = navKey;
+  }
+
+  /** Releases an instance's goal claim (no-op when it has none). */
+  releaseGoalClaim(instance) {
+    const key = instance._claimedGoalKey;
+    if (!key) return;
+    const claims = this.goalClaims.get(key);
+    if (claims && claims.get(instance._claimedGoalNode) === instance) {
+      claims.delete(instance._claimedGoalNode);
+    }
+    instance._claimedGoalNode = null;
+    instance._claimedGoalKey = null;
+  }
+
+  /** True when the node is claimed by ANOTHER still-subscribed instance.
+   *  An agent's own claim never blocks it (re-paths to the same goal). */
+  isGoalClaimedByOther(navKey, node, instance) {
+    const claims = this.goalClaims.get(navKey);
+    if (!claims) return false;
+    const owner = claims.get(node);
+    if (!owner || owner === instance) return false;
+    const subs = this.subscribers.get(navKey);
+    if (!subs || !subs.has(owner)) {
+      claims.delete(node); // stale claim from a dead instance
+      return false;
+    }
+    return true;
   }
 
   /** Returns (or creates) the shared navigation graph Map for a nav key. */
@@ -183,6 +225,7 @@ class NavigationManager {
   /** Removes an instance from its nav key's subscribers; cleans up that map's
    *  state when no subscribers remain. */
   unsubscribe(navKey, instance) {
+    this.releaseGoalClaim(instance);
     const subs = this.subscribers.get(navKey);
     if (subs) {
       subs.delete(instance);
@@ -195,6 +238,7 @@ class NavigationManager {
         this._agentSpatialHashes.delete(navKey);
         this.hazardCostsDirty.delete(navKey);
         this.trackedUpdateStamp.delete(navKey);
+        this.goalClaims.delete(navKey);
         for (const key of this.setupStamps.keys()) {
           if (key.startsWith(navKey + "#")) this.setupStamps.delete(key);
         }

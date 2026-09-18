@@ -3,9 +3,9 @@ export const config = {
   displayText: "{my}: Set tile at ({0}, {1}) to {2}",
   description: "Set the state of a tile at the specified grid coordinates. Use this to mark tiles as solid obstacles, clear space, jump-thru platforms, areas to avoid, or slopes.",
   params: [
-    { id: "gx", name: "Grid X", desc: "Grid X coordinate (tile number)", type: "number", initialValue: "0" },
-    { id: "gy", name: "Grid Y", desc: "Grid Y coordinate (tile number)", type: "number", initialValue: "0" },
-    { id: "state", name: "State", desc: "Tile state to set", type: "combo", initialValue: "solid",
+    { id: "gx", name: "Grid X", desc: "The tile X co-ordinate.", type: "number", initialValue: "0" },
+    { id: "gy", name: "Grid Y", desc: "The tile Y co-ordinate.", type: "number", initialValue: "0" },
+    { id: "state", name: "State", desc: "The tile state to set.", type: "combo", initialValue: "solid",
       items: [
         { solid: "Solid" },
         { clear: "Clear" },

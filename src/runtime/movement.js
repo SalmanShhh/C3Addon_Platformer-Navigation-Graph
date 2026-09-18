@@ -1069,6 +1069,8 @@ export default {
     if (!enabled) {
       this._cancelGraphBuild();
       globalNavManager.removeQueuedRequest(this);
+      // A disabled character shouldn't hold a reserved arrival spot.
+      globalNavManager.releaseGoalClaim(this);
     }
   },
 
@@ -1115,6 +1117,141 @@ export default {
   /** Enables or disables multi-agent avoidance (agents try not to overlap each other). */
   aceSetMultiAgentAvoidance(enabled) {
     this.multiAgentAvoidance = enabled;
+  },
+
+  /** Enables or disables crowd arrivals (goal reservation). */
+  aceSetCrowdArrivals(enabled) {
+    this.crowdArrivals = enabled;
+    if (!enabled) globalNavManager.releaseGoalClaim(this);
+  },
+
+  /** Returns 1 if crowd arrivals is enabled, 0 otherwise. */
+  aceIsCrowdArrivalsEnabled() {
+    return this.crowdArrivals ? 1 : 0;
+  },
+
+  /** Sets the idle separation distance in pixels (0 disables it). */
+  aceSetIdleSeparation(pixels) {
+    this.idleSeparation = Math.max(0, pixels || 0);
+  },
+
+  /** Returns the idle separation distance in pixels. */
+  aceGetIdleSeparation() {
+    return this.idleSeparation;
+  },
+
+  /** Sets the separation cooldown in seconds (0 = never rest, keep trying). */
+  aceSetSeparationCooldown(seconds) {
+    this.separationCooldown = Math.max(0, seconds || 0);
+  },
+
+  /** Returns the separation cooldown in seconds. */
+  aceGetSeparationCooldown() {
+    return this.separationCooldown;
+  },
+
+  /** Sets how long a character keeps trying to separate before giving up. */
+  aceSetSeparationGiveUpTime(seconds) {
+    this.separationGiveUpTime = Math.max(0, seconds || 0);
+  },
+
+  /** Returns the separation give-up time in seconds. */
+  aceGetSeparationGiveUpTime() {
+    return this.separationGiveUpTime;
+  },
+
+  /** Idle separation: gentle grounded drift apart when idle agents are closer
+   *  than the Idle Separation distance (pixels; 0 = off — independent of
+   *  Crowd Arrivals). Runs only when there is NO active path (never fights
+   *  the path follower), the character is grounded, and no portal is in
+   *  progress. Handles knockback/spawn overlap and shoulder-brushing between
+   *  adjacent goal claimants. */
+  _applyIdleSeparation(dt) {
+    if (!(this.idleSeparation > 0) || !this.platformBehavior) return;
+    if (this.hasPath || this.pathPending || this.portalState !== "none") return;
+
+    // Situation change: teleports, portals, spawn placement, event-sheet
+    // repositioning, and ARRIVING FROM A PATH all invalidate previous give-up
+    // state — retry fresh. Separation doesn't run while a path is active, so
+    // its last-seen position goes stale during any path; "moved more than a
+    // tile since separation last looked" therefore catches every one of those
+    // events with a single check, while the slow per-tick separation drift
+    // itself never triggers it.
+    const sepX = this.instance.x;
+    const sepY = this.instance.y;
+    if (
+      this._sepLastX === undefined ||
+      Math.abs(sepX - this._sepLastX) > this.cellSize * 1.5 ||
+      Math.abs(sepY - this._sepLastY) > this.cellSize * 1.5
+    ) {
+      this._sepActiveTime = 0;
+      this._sepCooldown = 0;
+    }
+    this._sepLastX = sepX;
+    this._sepLastY = sepY;
+
+    // Give-up cooldown: when the crowd is too dense for the spacing to ever
+    // be satisfied (e.g. four characters on a three-tile platform), endless
+    // shuffling looks broken. After ~1.2s of continuous trying without
+    // reaching the spacing, stand still for a few seconds before retrying.
+    // Any tick where the spacing IS satisfied resets the effort timer, so
+    // solvable cases still resolve instantly.
+    if (this._sepCooldown > 0) {
+      this._sepCooldown -= dt;
+      return;
+    }
+
+    try {
+      if (!this.platformBehavior.isOnFloor) return;
+      const subs = globalNavManager.subscribers.get(this._getNavKey());
+      if (!subs || subs.size < 2) return;
+
+      // Nearest same-map agent at roughly the same height.
+      const minDist = this.idleSeparation;
+      let nearest = null;
+      let nearestD = minDist;
+      for (const other of subs) {
+        if (other === this || !other.instance) continue;
+        if (Math.abs(other.instance.y - this.instance.y) > this.characterHeight) continue;
+        const d = Math.abs(other.instance.x - this.instance.x);
+        if (d < nearestD) { nearestD = d; nearest = other; }
+      }
+      if (!nearest) {
+        this._sepActiveTime = 0; // spacing satisfied — fresh start next time
+        return;
+      }
+
+      this._sepActiveTime = (this._sepActiveTime || 0) + dt;
+      if (this._sepActiveTime > this.separationGiveUpTime) {
+        this._sepActiveTime = 0;
+        // 0 = never rest: keep trying continuously (the pre-give-up behavior).
+        if (this.separationCooldown > 0) {
+          this._sepCooldown = this.separationCooldown;
+          return;
+        }
+      }
+
+      // Between two IDLE agents the higher UID yields (moves); the lower one
+      // stands still, so pairs drift apart once instead of mirror-pushing.
+      // Against a MOVING agent the idler always steps aside.
+      if (!nearest.hasPath && this.instance.uid < nearest.instance.uid) return;
+
+      const dir = nearest.instance.x >= this.instance.x ? "left" : "right";
+
+      // Never nudge into a wall or off a ledge — on a one-tile island this
+      // simply doesn't fire (stacked beats shoved into a pit).
+      if (this.platformBehavior.isByWall(dir)) return;
+      const step = dir === "left" ? -1 : 1;
+      const ahead = this.worldToGrid(
+        this.instance.x + step * this.cellSize * 0.6,
+        this.instance.y
+      );
+      if (!this._isGroundAt(ahead.gx, ahead.gy + 1) && !this._isSlopeWalkable(ahead.gx, ahead.gy)) {
+        return;
+      }
+
+      this.platformBehavior.simulateControl(dir);
+    } catch (e) {}
   },
 
   // ============================================================================

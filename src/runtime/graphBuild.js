@@ -186,6 +186,10 @@ export default {
   _startGraphBuild() {
     if (this.isWaitingForPathfindingMap) return false;
 
+    // A rebuild replaces every node OBJECT, so goal claims keyed by the old
+    // nodes are meaningless — drop them; agents re-claim on their next path.
+    globalNavManager.goalClaims.delete(this.navKey);
+
     // Graph Manager (SPOT, no Platform): inherit jump params from first Platform agent
     if (!this.platformBehavior) {
       const params = globalNavManager.getAgentParams(this.navKey);

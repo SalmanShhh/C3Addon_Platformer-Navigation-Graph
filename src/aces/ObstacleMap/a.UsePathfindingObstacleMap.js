@@ -3,7 +3,7 @@ export const config = {
   displayText: "{my}: Use Pathfinding obstacle map [Auto-regenerate: {0}]",
   description: "Use the obstacle map from the Pathfinding behavior instead of a custom map. Enable auto-regenerate to automatically rebuild the graph when the Pathfinding map changes.",
   params: [
-    { id: "autoRegen", name: "Auto-regenerate", desc: "Automatically regenerate graph when Pathfinding map changes", type: "combo", initialValue: "yes",
+    { id: "autoRegen", name: "Auto-regenerate", desc: "Whether to automatically regenerate the graph when the Pathfinding behavior's map changes.", type: "combo", initialValue: "yes",
       items: [{ yes: "Yes" }, { no: "No" }]
     }
   ]

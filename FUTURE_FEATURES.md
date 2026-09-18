@@ -4,7 +4,35 @@ Features and enhancements to consider for future versions of the Platformer Navi
 
 ---
 
-## Momentum-Chained Jumps — v1 SHIPPED in 0.6.1.0 (run-up variant)
+## Crowd Arrivals: Goal Reservation + Idle Separation — SHIPPED in 0.8.0.0
+
+Shipped as designed below (single Crowd Arrivals toggle: property [17] + Set/Is ACEs). Remaining future work from this design: **walking-lane yielding** (see the extension note at the end of this section).
+
+Many characters pathfinding to the same position stack on one pixel. Multi-agent avoidance spreads ROUTES (search-time penalty near other agents), but every route still ends at the same goal — no cost penalty can move a fixed goal. This is the platformer-shaped equivalent of the A* Pathfinding Project's RVO "Local Avoidance": planning-level where the genre allows guarantees, steering-level only where physics permits.
+
+### Goal reservation ("Spread arrivals")
+- New NavigationManager per-map registry: `goalClaims: navKey -> Map<node -> instance>` (lives beside subscribers/buildOwners; per Map Tag automatically).
+- In findPath, after ground correction resolves the goal node: if claimed by another LIVING instance, ring outward for the nearest UNCLAIMED node (same distance-ordered iteration as nearest-reachable, plus an "unclaimed" filter, capped at ~24 candidates) and aim there.
+- Claim lifecycle: claim on path found; KEEP through automatic re-paths to the same goal; keep while standing at the arrived spot (occupied = reserved); release on new FindPath elsewhere (atomic swap), Stop/clear, path failure, disable, and instance destroy via the existing unsubscribe cleanup.
+- Moving targets: per-tick path budget staggers searches, so chasers naturally tile cell-sized slots around the player — ring formation for free. TargetX stays the requested point; PathEndX reports the reserved spot.
+- Surface: one toggle (appended property + Set action), mirroring multi-agent avoidance. No new expressions.
+
+### Idle separation
+- Runs per tick ONLY when: enabled, behavior enabled, NO active path, grounded, not in a portal. Never fights the path follower.
+- Query the existing per-map agent spatial hash for same-behavior neighbors within ~one body width; simulateControl one tick AWAY from the nearest neighbor (horizontal only). Platform accel/decel makes it a soft drift.
+- Safety rule 1: never nudge into a wall (isByWall) or off a ledge (_isGroundAt under the destination cell); on 1-tile islands it simply doesn't fire.
+- Safety rule 2: no oscillation — deadband (stop separating at ~0.6 body widths) + tie-break (lower UID yields when two agents mutually overlap).
+- Covers what reservation can't: claims are 32px-quantized, so adjacent claimants can still brush shoulders; separation also cleans up knockback/spawn overlap.
+
+### Costs
+Reservation: O(1) per FindPath + bounded ring search only on conflict. Separation: one hash query per IDLE agent per tick. Both ride existing avoidance infrastructure — hundreds of agents stay in budget.
+
+### Future extension: walking-lane yielding
+The largest slice of RVO a platformer can honestly support: while grounded and WALKING only (never mid-arc — jumps are validated ballistic trajectories), an agent detecting an oncoming same-lane agent slows or yields. Bolts onto the same spatial hash later without touching the planner.
+
+---
+
+## Momentum-Chained Jumps — v1 SHIPPED in 0.7.0.0 (run-up variant)
 
 Shipped as **run-up jumps**: when a jump fails standstill validation, the graph re-validates it with an edge launch at ~0.78 maxSpeed (the kinematic sim with a different launch state) and tags it `requiresMomentum`. The executor backs up across the launch tile, sprints, and leaps from the edge — self-contained per stone, so A* needs no arrival-direction gating and optimal substructure is preserved. Unlocks ~45% more horizontal range (e.g. flat 8-tile gaps, and 6-across-4-up island jumps).
 

@@ -5,7 +5,7 @@
     "behaviors": {
       "salmanshh_platformer_navigationgraph": {
         "name": "Platformer Navigation Graph",
-        "description": "Smart pathfinding for platformer games. Characters automatically jump across gaps, fall between platforms, and find optimal routes through complex levels. Includes instant portals (teleporters, doors) and gradual portals (elevators, ladders, ziplines) with pause/resume support for custom animations. Features hazard avoidance, multiple path strategies, coyote jumps, ledge restriction, and multi-agent support. Works with the built-in Platform behavior — just add the behavior and go.",
+        "description": "Smart pathfinding for platformer games. Characters automatically jump across gaps, fall between platforms, and find optimal routes through complex levels. Includes instant portals (teleporters, doors) and gradual portals (elevators, ladders, ziplines) with pause/resume support for custom animations. Features hazard avoidance, multiple path strategies, coyote jumps, ledge restriction, and multi-agent support. Works with the built-in Platform behavior: just add the behavior and go.",
         "help-url": "https://www.construct.net",
         "aceCategories": {
           "Debug": "Debug",
@@ -22,7 +22,7 @@
           },
           "cell_size": {
             "name": "Tile Size",
-            "desc": "Size of each grid tile in pixels. MUST match your tilemap's tile size / Pathfinding behavior's Cell Size — a mismatch misaligns the graph and characters walk into walls. Set to 0 to auto-detect it (reads the Pathfinding behavior's Cell Size, or the solid tilemap's tile size). Smaller = more precise paths but slower performance."
+            "desc": "Size of each grid tile in pixels. MUST match your tilemap's tile size / Pathfinding behavior's Cell Size; a mismatch misaligns the graph and characters walk into walls. Set to 0 to auto-detect it (reads the Pathfinding behavior's Cell Size, or the solid tilemap's tile size). Smaller = more precise paths but slower performance."
           },
           "max_search_nodes": {
             "name": "Max Search Nodes",
@@ -56,15 +56,15 @@
           },
           "coyote_time": {
             "name": "Coyote Time",
-            "desc": "Seconds after walking off a ledge where a jump can still be executed. Allows AI to walk off edges and jump mid-air for greater reach, making slightly out-of-range platforms reachable. Important: only works when 'Ledge Restriction' is disabled — if Ledge Restriction is enabled, characters won't walk off edges, so coyote jumps can never execute and the connections will go unused. 0 = disabled."
+            "desc": "Seconds after walking off a ledge where a jump can still be executed. Allows AI to walk off edges and jump mid-air for greater reach, making slightly out-of-range platforms reachable. Important: only works when 'Ledge Restriction' is disabled: if Ledge Restriction is enabled, characters won't walk off edges, so coyote jumps can never execute and the connections will go unused. 0 = disabled."
           },
           "strict_positioning": {
             "name": "Strict Jump Positioning",
-            "desc": "When the AI is following a path and needs to jump or fall to another platform, it will slow down and carefully position itself on the tile before launching. This prevents characters from overshooting edges and missing jumps — like a chase enemy flying off a ledge instead of jumping across, or an escort NPC slipping off a narrow bridge mid-jump. Note: this only affects movement DURING pathfinding (jumps and falls that are part of the path). To stop characters from walking off edges entirely, use 'Ledge Restriction' instead. Recommended ON for most games."
+            "desc": "When the AI is following a path and needs to jump or fall to another platform, it will slow down and carefully position itself on the tile before launching. This prevents characters from overshooting edges and missing jumps, like a chase enemy flying off a ledge instead of jumping across, or an escort NPC slipping off a narrow bridge mid-jump. Note: this only affects movement DURING pathfinding (jumps and falls that are part of the path). To stop characters from walking off edges entirely, use 'Ledge Restriction' instead. Recommended ON for most games."
           },
           "ledge_restriction": {
             "name": "Ledge Restriction",
-            "desc": "Prevents AI characters from walking off platform edges when they have no reason to leave. Useful for patrol guards that should stay on their platform, or NPCs that shouldn't wander off rooftops. Note: this only stops characters from casually walking off edges — if the AI's path requires a jump or fall to reach its goal, it will still leave the platform. When enabled, 'Coyote Time' has no effect since characters won't walk off edges to trigger it. When disabled, characters can slide off edges freely, which also enables wall-adjacent jumps (walking to the platform edge to clear a wall before jumping). To make jumps and falls more precise, use 'Strict Jump Positioning' instead."
+            "desc": "Prevents AI characters from walking off platform edges when they have no reason to leave. Useful for patrol guards that should stay on their platform, or NPCs that shouldn't wander off rooftops. Note: this only stops characters from casually walking off edges: if the AI's path requires a jump or fall to reach its goal, it will still leave the platform. When enabled, 'Coyote Time' has no effect since characters won't walk off edges to trigger it. When disabled, characters can slide off edges freely, which also enables wall-adjacent jumps (walking to the platform edge to clear a wall before jumping). To make jumps and falls more precise, use 'Strict Jump Positioning' instead."
           },
           "ledge_leniency": {
             "name": "Ledge Leniency",
@@ -94,7 +94,19 @@
           },
           "detect_slopes": {
             "name": "Detect Slopes",
-            "desc": "During solid scanning (including Auto-Build), probe each partially-solid tile's collision shape and automatically register 45° and 22.5° slope surfaces as slopes — no tile ID lists needed. Tiles whose shape doesn't match a supported slope angle stay solid, so this is safe to leave on. Requires tiles/sprites to have actual sloped collision polygons. Turn off to register slopes yourself with the slope actions only."
+            "desc": "During solid scanning (including Auto-Build), probe each partially-solid tile's collision shape and automatically register 45° and 22.5° slope surfaces as slopes, with no tile ID lists needed. Tiles whose shape doesn't match a supported slope angle stay solid, so this is safe to leave on. Requires tiles/sprites to have actual sloped collision polygons. Turn off to register slopes yourself with the slope actions only."
+          },
+          "crowd_arrivals": {
+            "name": "Crowd Arrivals",
+            "desc": "When several characters path to the same position, spread their arrivals: each claims a landing spot (goal node) so others automatically target neighboring spots instead of stacking on one pixel. Per map tag. Harmless with a single character."
+          },
+          "idle_separation": {
+            "name": "Idle Separation",
+            "desc": "Personal space in pixels for characters with no active path: idle characters closer than this to another character on the same map gently push apart. 0 = off. The nudge is ledge-safe (never pushes off an edge or into a wall) and never interferes with path following. A good starting value is the character's width."
+          },
+          "separation_cooldown": {
+            "name": "Separation Cooldown",
+            "desc": "How long (in seconds) characters rest after giving up on idle separation (when the crowd is too dense for the spacing to be satisfied) before trying again. 0 = never rest, keep trying continuously. Only used when Idle Separation is above 0."
           },
           "enabled": {
             "name": "Enabled",
@@ -105,7 +117,7 @@
           "LogGraphStats": {
             "list-name": "Log graph stats",
             "display-text": "{my}: Log graph stats to console",
-            "description": "Print navigation graph statistics to the browser console. Useful for debugging — shows node count, connection count, portal count, etc.",
+            "description": "Print navigation graph statistics to the browser console. Useful for debugging: shows node count, connection count, portal count, etc.",
             "params": {}
           },
           "AddCircleHazard": {
@@ -115,19 +127,19 @@
             "params": {
               "x": {
                 "name": "X",
-                "desc": "World X position (center)"
+                "desc": "The X co-ordinate of the center, in pixels."
               },
               "y": {
                 "name": "Y",
-                "desc": "World Y position (center)"
+                "desc": "The Y co-ordinate of the center, in pixels."
               },
               "radius": {
                 "name": "Radius",
-                "desc": "Radius in pixels"
+                "desc": "The radius, in pixels."
               },
               "severity": {
                 "name": "Severity",
-                "desc": "Hazard severity (higher = more dangerous)"
+                "desc": "The hazard severity. Higher values are more dangerous."
               }
             }
           },
@@ -138,30 +150,30 @@
             "params": {
               "x": {
                 "name": "X",
-                "desc": "World X position (center)"
+                "desc": "The X co-ordinate of the center, in pixels."
               },
               "y": {
                 "name": "Y",
-                "desc": "World Y position (center)"
+                "desc": "The Y co-ordinate of the center, in pixels."
               },
               "width": {
                 "name": "Width",
-                "desc": "Width in pixels"
+                "desc": "The width, in pixels."
               },
               "height": {
                 "name": "Height",
-                "desc": "Height in pixels"
+                "desc": "The height, in pixels."
               },
               "severity": {
                 "name": "Severity",
-                "desc": "Hazard severity (higher = more dangerous)"
+                "desc": "The hazard severity. Higher values are more dangerous."
               }
             }
           },
           "AddTrackedHazard": {
             "list-name": "Add tracked hazard (follows object)",
             "display-text": "{my}: Add tracked hazard following {0} [Radius: {1}] [Severity: {2}]",
-            "description": "Add a circular hazard that follows an object's position automatically every tick — for moving dangers like patrolling saws, fireballs, or spreading flames. No per-frame events are needed: path costs update only when the object actually moves, and the hazard removes itself when the object is destroyed. Read the new hazard's ID with LastHazardID; RemoveHazard removes it like any other hazard.",
+            "description": "Add a circular hazard that follows an object's position automatically every tick, for moving dangers like patrolling saws, fireballs, or spreading flames. No per-frame events are needed: path costs update only when the object actually moves, and the hazard removes itself when the object is destroyed. Read the new hazard's ID with LastHazardID; RemoveHazard removes it like any other hazard.",
             "params": {
               "target": {
                 "name": "Object to follow",
@@ -169,11 +181,11 @@
               },
               "radius": {
                 "name": "Radius",
-                "desc": "Radius in pixels"
+                "desc": "The radius, in pixels."
               },
               "severity": {
                 "name": "Severity",
-                "desc": "Hazard severity (higher = more dangerous)"
+                "desc": "The hazard severity. Higher values are more dangerous."
               }
             }
           },
@@ -202,7 +214,7 @@
             "params": {
               "id": {
                 "name": "ID",
-                "desc": "Hazard ID to remove"
+                "desc": "The ID of the hazard to remove."
               }
             }
           },
@@ -213,7 +225,7 @@
             "params": {
               "tiles": {
                 "name": "Tiles",
-                "desc": "Radius in tiles"
+                "desc": "The radius, in tiles."
               }
             }
           },
@@ -224,30 +236,30 @@
             "params": {
               "gx": {
                 "name": "Grid X",
-                "desc": "Grid X coordinate (tile number)"
+                "desc": "The tile X co-ordinate."
               },
               "gy": {
                 "name": "Grid Y",
-                "desc": "Grid Y coordinate (tile number)"
+                "desc": "The tile Y co-ordinate."
               },
               "severity": {
                 "name": "Severity",
-                "desc": "Hazard severity (0 = none, higher = more dangerous)"
+                "desc": "The hazard severity. 0 removes it; higher values are more dangerous."
               }
             }
           },
           "JumpTowardPosition": {
             "list-name": "Jump toward position",
             "display-text": "{my}: Jump toward ({0}, {1})",
-            "description": "Immediately jump toward a target position. The character jumps from its current position with full strength, moving horizontally toward the target. No pathfinding is involved — the character simply lunges at the target. Use for: jump attacks, stomps, lunges. Triggers 'On jump toward executed' when the jump starts. The character must be on the floor to jump.",
+            "description": "Immediately jump toward a target position. The character jumps from its current position with full strength, moving horizontally toward the target. No pathfinding is involved: the character simply lunges at the target. Use for: jump attacks, stomps, lunges. Triggers 'On jump toward executed' when the jump starts. The character must be on the floor to jump.",
             "params": {
               "x": {
                 "name": "X",
-                "desc": "Target X position in pixels"
+                "desc": "The target X co-ordinate, in pixels."
               },
               "y": {
                 "name": "Y",
-                "desc": "Target Y position in pixels"
+                "desc": "The target Y co-ordinate, in pixels."
               }
             }
           },
@@ -258,7 +270,7 @@
             "params": {
               "enabled": {
                 "name": "Enabled",
-                "desc": "Enable or disable auto-control",
+                "desc": "Whether to enable or disable auto-control.",
                 "items": {
                   "yes": "Enabled",
                   "no": "Disabled"
@@ -273,7 +285,7 @@
             "params": {
               "seconds": {
                 "name": "Seconds",
-                "desc": "Coyote time window in seconds"
+                "desc": "The coyote time window, in seconds."
               }
             }
           },
@@ -299,18 +311,18 @@
             "params": {
               "pixels": {
                 "name": "Pixels",
-                "desc": "Pixels past ledge edge before stopping"
+                "desc": "How far past a ledge edge the character may walk, in pixels."
               }
             }
           },
           "SetLedgeRestriction": {
             "list-name": "Set ledge restriction",
             "display-text": "{my}: Set ledge restriction: {0}",
-            "description": "Prevents AI characters from walking off platform edges when they have no reason to leave. Useful for patrol guards that should stay on their platform, or NPCs that shouldn't wander off rooftops. This only stops characters from casually walking off edges — if the AI's path requires a jump or fall to reach its goal, it will still leave the platform.",
+            "description": "Prevents AI characters from walking off platform edges when they have no reason to leave. Useful for patrol guards that should stay on their platform, or NPCs that shouldn't wander off rooftops. This only stops characters from casually walking off edges: if the AI's path requires a jump or fall to reach its goal, it will still leave the platform.",
             "params": {
               "enabled": {
                 "name": "Enabled",
-                "desc": "Enable or disable ledge restriction",
+                "desc": "Whether to enable or disable ledge restriction.",
                 "items": {
                   "yes": "Enabled",
                   "no": "Disabled"
@@ -325,40 +337,40 @@
             "params": {
               "value": {
                 "name": "Distance",
-                "desc": "Maximum fall distance in pixels"
+                "desc": "The maximum fall distance, in pixels."
               }
             }
           },
           "SetMaxJumpDistance": {
             "list-name": "Set max jump distance",
             "display-text": "{my}: Set max jump distance to {0} px",
-            "description": "Override the maximum horizontal jump distance (in pixels) used to build navigation graph connections. Use this if the auto-detected value from the platform behavior is wrong for your setup. Calling this locks in the value — it won't be overridden by platform behavior properties.",
+            "description": "Override the maximum horizontal jump distance (in pixels) used to build navigation graph connections. Use this if the auto-detected value from the platform behavior is wrong for your setup. Calling this locks in the value; it won't be overridden by platform behavior properties.",
             "params": {
               "value": {
                 "name": "Distance",
-                "desc": "Maximum jump distance in pixels"
+                "desc": "The maximum jump distance, in pixels."
               }
             }
           },
           "SetMaxJumpHeight": {
             "list-name": "Set max jump height",
             "display-text": "{my}: Set max jump height to {0} px",
-            "description": "Override the maximum jump height (in pixels) used to build navigation graph connections. Use this if the auto-detected value from the platform behavior is wrong for your setup. Calling this locks in the value — it won't be overridden by platform behavior properties.",
+            "description": "Override the maximum jump height (in pixels) used to build navigation graph connections. Use this if the auto-detected value from the platform behavior is wrong for your setup. Calling this locks in the value; it won't be overridden by platform behavior properties.",
             "params": {
               "value": {
                 "name": "Height",
-                "desc": "Maximum jump height in pixels"
+                "desc": "The maximum jump height, in pixels."
               }
             }
           },
           "SetStrictJumpPositioning": {
             "list-name": "Set strict jump positioning",
             "display-text": "{my}: Set strict jump positioning: {0}",
-            "description": "Toggle whether this AI character slows down and carefully positions itself before jumping or falling during pathfinding. This does NOT affect walking off edges (use 'Set ledge restriction' for that). Use this to change behavior at runtime — for example, disable when a boss enters 'rage mode' for reckless movement, or enable when an NPC needs to carefully cross a narrow bridge.",
+            "description": "Toggle whether this AI character slows down and carefully positions itself before jumping or falling during pathfinding. This does NOT affect walking off edges (use 'Set ledge restriction' for that). Use this to change behavior at runtime: for example, disable when a boss enters 'rage mode' for reckless movement, or enable when an NPC needs to carefully cross a narrow bridge.",
             "params": {
               "enabled": {
                 "name": "Enabled",
-                "desc": "Enable or disable strict jump positioning",
+                "desc": "Whether to enable or disable strict jump positioning.",
                 "items": {
                   "yes": "Enabled",
                   "no": "Disabled"
@@ -384,11 +396,11 @@
             "params": {
               "layoutWidth": {
                 "name": "Layout width (px)",
-                "desc": "Total layout width in pixels"
+                "desc": "The layout width, in pixels."
               },
               "layoutHeight": {
                 "name": "Layout height (px)",
-                "desc": "Total layout height in pixels"
+                "desc": "The layout height, in pixels."
               }
             }
           },
@@ -411,11 +423,11 @@
             "params": {
               "width": {
                 "name": "Width",
-                "desc": "Width in tiles"
+                "desc": "The width, in tiles."
               },
               "height": {
                 "name": "Height",
-                "desc": "Height in tiles"
+                "desc": "The height, in tiles."
               }
             }
           },
@@ -432,7 +444,7 @@
             "params": {
               "json": {
                 "name": "JSON",
-                "desc": "JSON string containing obstacle map data"
+                "desc": "The JSON string of obstacle map data, from the ObstacleMapJSON expression."
               }
             }
           },
@@ -447,19 +459,19 @@
               },
               "slopeLeftIds": {
                 "name": "Slope left IDs",
-                "desc": "Comma-separated tile IDs for 45° slope left (/)"
+                "desc": "The comma-separated tile IDs for 45° slope left (/)"
               },
               "slopeRightIds": {
                 "name": "Slope right IDs",
-                "desc": "Comma-separated tile IDs for 45° slope right (\\)"
+                "desc": "The comma-separated tile IDs for 45° slope right (\\)"
               },
               "gentleLeftIds": {
                 "name": "Gentle left IDs",
-                "desc": "Comma-separated tile IDs for 22.5° gentle slope left (/)"
+                "desc": "The comma-separated tile IDs for 22.5° gentle slope left (/)"
               },
               "gentleRightIds": {
                 "name": "Gentle right IDs",
-                "desc": "Comma-separated tile IDs for 22.5° gentle slope right (\\)"
+                "desc": "The comma-separated tile IDs for 22.5° gentle slope right (\\)"
               }
             }
           },
@@ -470,23 +482,23 @@
             "params": {
               "startGx": {
                 "name": "Start X",
-                "desc": "Starting grid X"
+                "desc": "The starting tile X co-ordinate."
               },
               "startGy": {
                 "name": "Start Y",
-                "desc": "Starting grid Y"
+                "desc": "The starting tile Y co-ordinate."
               },
               "endGx": {
                 "name": "End X",
-                "desc": "Ending grid X"
+                "desc": "The ending tile X co-ordinate."
               },
               "endGy": {
                 "name": "End Y",
-                "desc": "Ending grid Y"
+                "desc": "The ending tile Y co-ordinate."
               },
               "direction": {
                 "name": "Direction",
-                "desc": "Slope direction",
+                "desc": "The slope direction.",
                 "items": {
                   "slope_left": "Slope left / (45°)",
                   "slope_right": "Slope right \\ (45°)",
@@ -509,7 +521,7 @@
             "params": {
               "jumpThruObjects": {
                 "name": "Jump-thru objects",
-                "desc": "Objects with Jump-thru behavior enabled"
+                "desc": "The objects to scan: those with the Jump-thru behavior enabled."
               }
             }
           },
@@ -520,7 +532,7 @@
             "params": {
               "solidObjects": {
                 "name": "Solid objects",
-                "desc": "Objects with Solid behavior enabled (tilemaps or sprites)"
+                "desc": "The objects to scan: tilemaps or sprites with the Solid behavior enabled."
               }
             }
           },
@@ -531,15 +543,15 @@
             "params": {
               "gx": {
                 "name": "Grid X",
-                "desc": "Grid X coordinate (tile number)"
+                "desc": "The tile X co-ordinate."
               },
               "gy": {
                 "name": "Grid Y",
-                "desc": "Grid Y coordinate (tile number)"
+                "desc": "The tile Y co-ordinate."
               },
               "state": {
                 "name": "State",
-                "desc": "Tile state to set",
+                "desc": "The tile state to set.",
                 "items": {
                   "solid": "Solid",
                   "clear": "Clear",
@@ -560,15 +572,15 @@
             "params": {
               "x": {
                 "name": "X",
-                "desc": "World X position in pixels"
+                "desc": "The X co-ordinate, in pixels."
               },
               "y": {
                 "name": "Y",
-                "desc": "World Y position in pixels"
+                "desc": "The Y co-ordinate, in pixels."
               },
               "state": {
                 "name": "State",
-                "desc": "Tile state to set",
+                "desc": "The tile state to set.",
                 "items": {
                   "solid": "Solid",
                   "clear": "Clear",
@@ -589,7 +601,7 @@
             "params": {
               "autoRegen": {
                 "name": "Auto-regenerate",
-                "desc": "Automatically regenerate graph when Pathfinding map changes",
+                "desc": "Whether to automatically regenerate the graph when the Pathfinding behavior's map changes.",
                 "items": {
                   "yes": "Yes",
                   "no": "No"
@@ -604,15 +616,15 @@
             "params": {
               "x": {
                 "name": "X",
-                "desc": "Target X position in pixels"
+                "desc": "The target X co-ordinate, in pixels."
               },
               "y": {
                 "name": "Y",
-                "desc": "Target Y position in pixels"
+                "desc": "The target Y co-ordinate, in pixels."
               },
               "correctToGround": {
                 "name": "Correct to ground",
-                "desc": "Snap start/target to nearest walkable ground position",
+                "desc": "Whether to snap the start and target to the nearest walkable ground position.",
                 "items": {
                   "no": "No",
                   "yes": "Yes"
@@ -620,7 +632,7 @@
               },
               "mode": {
                 "name": "Mode",
-                "desc": "Path mode: 'reach' finds a complete path or fails. 'nearest' paths as close as possible and never fails.",
+                "desc": "The path mode. 'Reach' finds a complete path or fails; 'Nearest' paths as close as possible and never fails.",
                 "items": {
                   "reach": "Reach (default)",
                   "nearest": "Nearest (never fails)"
@@ -628,7 +640,7 @@
               },
               "strict": {
                 "name": "Jump Positioning",
-                "desc": "Control how carefully the character positions itself before jumps and falls on THIS specific path. 'Default' uses whatever the property or SetStrictJumpPositioning action is set to. 'Strict' forces careful positioning. 'Relaxed' skips positioning checks for maximum speed.",
+                "desc": "How carefully the character positions itself before jumps and falls on this specific path. 'Default' uses the property or 'Set strict jump positioning' setting; 'Strict' forces careful positioning; 'Relaxed' skips positioning checks for maximum speed.",
                 "items": {
                   "default": "Default (use property)",
                   "strict": "Strict",
@@ -644,11 +656,11 @@
             "params": {
               "x": {
                 "name": "X",
-                "desc": "Target X position in pixels"
+                "desc": "The target X co-ordinate, in pixels."
               },
               "y": {
                 "name": "Y",
-                "desc": "Target Y position in pixels"
+                "desc": "The target Y co-ordinate, in pixels."
               }
             }
           },
@@ -663,6 +675,32 @@
               }
             }
           },
+          "SetCrowdArrivals": {
+            "list-name": "Set crowd arrivals",
+            "display-text": "{my}: Set crowd arrivals: {0}",
+            "description": "Enable or disable crowd arrivals. When enabled, characters pathing to the same position each claim a landing spot so the others automatically target neighboring spots instead of stacking. Per map tag. Combine with 'Set idle separation' to also push overlapping idle characters apart.",
+            "params": {
+              "enabled": {
+                "name": "Enabled",
+                "desc": "Whether to enable or disable crowd arrivals.",
+                "items": {
+                  "yes": "Enabled",
+                  "no": "Disabled"
+                }
+              }
+            }
+          },
+          "SetIdleSeparation": {
+            "list-name": "Set idle separation",
+            "display-text": "{my}: Set idle separation to {0} px",
+            "description": "Set the personal space in pixels for characters with no active path: idle characters closer than this to another character on the same map gently push apart. 0 disables it. Ledge-safe and never interferes with path following.",
+            "params": {
+              "pixels": {
+                "name": "Pixels",
+                "desc": "The minimum spacing between idle characters, in pixels. 0 disables it."
+              }
+            }
+          },
           "SetMaxPathsPerTick": {
             "list-name": "Set max paths per tick",
             "display-text": "{my}: Set max paths per tick to {0}",
@@ -670,7 +708,7 @@
             "params": {
               "count": {
                 "name": "Count",
-                "desc": "Maximum number of paths to process per tick"
+                "desc": "The maximum number of paths to calculate per tick. 0 means unlimited."
               }
             }
           },
@@ -681,7 +719,7 @@
             "params": {
               "enabled": {
                 "name": "Enabled",
-                "desc": "Enable or disable multi-agent avoidance",
+                "desc": "Whether to enable or disable multi-agent avoidance.",
                 "items": {
                   "yes": "Enabled",
                   "no": "Disabled"
@@ -713,7 +751,7 @@
             "params": {
               "seconds": {
                 "name": "Seconds",
-                "desc": "Cooldown in seconds"
+                "desc": "The cooldown, in seconds."
               }
             }
           },
@@ -724,7 +762,29 @@
             "params": {
               "tiles": {
                 "name": "Tiles",
-                "desc": "Threshold in tiles"
+                "desc": "The threshold, in tiles."
+              }
+            }
+          },
+          "SetSeparationCooldown": {
+            "list-name": "Set separation cooldown",
+            "display-text": "{my}: Set separation cooldown to {0} seconds",
+            "description": "Set how long characters rest after giving up on idle separation (when the crowd is too dense for the spacing to be satisfied) before trying again. 0 = never rest, keep trying continuously.",
+            "params": {
+              "seconds": {
+                "name": "Seconds",
+                "desc": "The rest time after giving up, in seconds. 0 means never rest."
+              }
+            }
+          },
+          "SetSeparationGiveUpTime": {
+            "list-name": "Set separation give-up time",
+            "display-text": "{my}: Set separation give-up time to {0} seconds",
+            "description": "Set how long a character keeps trying to push apart from overlapping neighbors before it gives up and rests for the Separation Cooldown. Default is 1.2 seconds. Larger values shuffle longer before settling; very small values settle almost immediately.",
+            "params": {
+              "seconds": {
+                "name": "Seconds",
+                "desc": "The time to keep trying, in seconds, before giving up."
               }
             }
           },
@@ -741,23 +801,23 @@
             "params": {
               "groupId": {
                 "name": "Group",
-                "desc": "Unique group name for this elevator (e.g. 'elevator_A')"
+                "desc": "The elevator group name, e.g. 'elevator_A'."
               },
               "x": {
                 "name": "X",
-                "desc": "World X position of this stop"
+                "desc": "The X co-ordinate of this stop, in pixels."
               },
               "y": {
                 "name": "Y",
-                "desc": "World Y position of this stop"
+                "desc": "The Y co-ordinate of this stop, in pixels."
               },
               "speed": {
                 "name": "Speed",
-                "desc": "Movement speed in pixels per second"
+                "desc": "The movement speed, in pixels per second."
               },
               "tag": {
                 "name": "Tag",
-                "desc": "Optional tag for grouping portals. Use commas for multiple tags (e.g. \"door,room_A\"). Leave empty for no tag."
+                "desc": "An optional tag for grouping portals. Use commas for multiple tags (e.g. \"door,room_A\"). Leave empty for no tag."
               }
             }
           },
@@ -768,7 +828,7 @@
             "params": {
               "groupId": {
                 "name": "Group",
-                "desc": "Unique group name for this elevator"
+                "desc": "The elevator group name."
               },
               "object": {
                 "name": "Object",
@@ -776,18 +836,18 @@
               },
               "speed": {
                 "name": "Speed",
-                "desc": "Movement speed in pixels per second"
+                "desc": "The movement speed, in pixels per second."
               },
               "tag": {
                 "name": "Tag",
-                "desc": "Optional tag for grouping portals. Use commas for multiple tags (e.g. \"door,room_A\"). Leave empty for no tag."
+                "desc": "An optional tag for grouping portals. Use commas for multiple tags (e.g. \"door,room_A\"). Leave empty for no tag."
               }
             }
           },
           "AddGradualPortal": {
             "list-name": "Add gradual portal",
             "display-text": "{my}: Add {0} gradual portal from ({1}, {2}) to ({3}, {4}) [Cost: {5}] [Speed: {6}] [Tag: {7}]",
-            "description": "Add a portal that gradually moves the AI from entry to exit at the given speed. The character moves in a straight line (any direction — vertical, horizontal, or diagonal). Platform behavior is disabled during movement. Use for: elevators, lifts, moving platforms, ziplines.",
+            "description": "Add a portal that gradually moves the AI from entry to exit at the given speed. The character moves in a straight line (any direction: vertical, horizontal, or diagonal). Platform behavior is disabled during movement. Use for: elevators, lifts, moving platforms, ziplines.",
             "params": {
               "direction": {
                 "name": "Direction",
@@ -799,31 +859,31 @@
               },
               "entryX": {
                 "name": "Entry X",
-                "desc": "Entry world X position in pixels"
+                "desc": "The X co-ordinate of the portal entry, in pixels."
               },
               "entryY": {
                 "name": "Entry Y",
-                "desc": "Entry world Y position in pixels"
+                "desc": "The Y co-ordinate of the portal entry, in pixels."
               },
               "exitX": {
                 "name": "Exit X",
-                "desc": "Exit world X position in pixels"
+                "desc": "The X co-ordinate of the portal exit, in pixels."
               },
               "exitY": {
                 "name": "Exit Y",
-                "desc": "Exit world Y position in pixels"
+                "desc": "The Y co-ordinate of the portal exit, in pixels."
               },
               "cost": {
                 "name": "Cost",
-                "desc": "Movement cost. Default 1 = auto-calculated from distance and speed. Set higher to make AI avoid this portal."
+                "desc": "The movement cost. The default of 1 is calculated automatically from distance and speed; set it higher to make the AI avoid this portal."
               },
               "speed": {
                 "name": "Speed",
-                "desc": "Movement speed in pixels per second"
+                "desc": "The movement speed, in pixels per second."
               },
               "tag": {
                 "name": "Tag",
-                "desc": "Optional tag for grouping portals. Use commas for multiple tags (e.g. \"door,room_A\"). Leave empty for no tag."
+                "desc": "An optional tag for grouping portals. Use commas for multiple tags (e.g. \"door,room_A\"). Leave empty for no tag."
               }
             }
           },
@@ -850,15 +910,15 @@
               },
               "cost": {
                 "name": "Cost",
-                "desc": "Movement cost (default 1 = auto-calculated)"
+                "desc": "The movement cost. The default of 1 is calculated automatically."
               },
               "speed": {
                 "name": "Speed",
-                "desc": "Movement speed in pixels per second"
+                "desc": "The movement speed, in pixels per second."
               },
               "tag": {
                 "name": "Tag",
-                "desc": "Optional tag for grouping portals. Use commas for multiple tags (e.g. \"door,room_A\"). Leave empty for no tag."
+                "desc": "An optional tag for grouping portals. Use commas for multiple tags (e.g. \"door,room_A\"). Leave empty for no tag."
               }
             }
           },
@@ -877,27 +937,27 @@
               },
               "entryX": {
                 "name": "Entry X",
-                "desc": "Entry world X position in pixels"
+                "desc": "The X co-ordinate of the portal entry, in pixels."
               },
               "entryY": {
                 "name": "Entry Y",
-                "desc": "Entry world Y position in pixels"
+                "desc": "The Y co-ordinate of the portal entry, in pixels."
               },
               "exitX": {
                 "name": "Exit X",
-                "desc": "Exit world X position in pixels"
+                "desc": "The X co-ordinate of the portal exit, in pixels."
               },
               "exitY": {
                 "name": "Exit Y",
-                "desc": "Exit world Y position in pixels"
+                "desc": "The Y co-ordinate of the portal exit, in pixels."
               },
               "cost": {
                 "name": "Cost",
-                "desc": "How much the AI 'pays' to use this portal. Default 1 = same as walking one tile. Lower = preferred, higher = avoided."
+                "desc": "The cost of using this portal. The default of 1 is the same as walking one tile; lower costs are preferred and higher costs avoided."
               },
               "tag": {
                 "name": "Tag",
-                "desc": "Optional tag for grouping portals. Use commas for multiple tags (e.g. \"door,room_A\"). Leave empty for no tag."
+                "desc": "An optional tag for grouping portals. Use commas for multiple tags (e.g. \"door,room_A\"). Leave empty for no tag."
               }
             }
           },
@@ -924,11 +984,11 @@
               },
               "cost": {
                 "name": "Cost",
-                "desc": "Movement cost (lower = preferred, default is 1)"
+                "desc": "The movement cost. Lower costs are preferred; the default is 1."
               },
               "tag": {
                 "name": "Tag",
-                "desc": "Optional tag for grouping portals. Use commas for multiple tags (e.g. \"door,room_A\"). Leave empty for no tag."
+                "desc": "An optional tag for grouping portals. Use commas for multiple tags (e.g. \"door,room_A\"). Leave empty for no tag."
               }
             }
           },
@@ -964,7 +1024,7 @@
           "RemovePortalAtObject": {
             "list-name": "Remove portal at object",
             "display-text": "{my}: Remove portal at {0}",
-            "description": "Remove the portal closest to this object. Works with both entry and exit positions — for two-way portals, either endpoint object can be used.",
+            "description": "Remove the portal closest to this object. Works with both entry and exit positions; for two-way portals, either endpoint object can be used.",
             "params": {
               "object": {
                 "name": "Object",
@@ -975,11 +1035,11 @@
           "RemovePortalsByTag": {
             "list-name": "Remove portals by tag",
             "display-text": "{my}: Remove all portals tagged {0}",
-            "description": "Remove every portal whose tag matches the given string. Connections are removed from the navigation graph immediately. Use this to deactivate a group of related portals — for example, removing all 'door' portals when a room is sealed, or clearing 'floor_2' portals when a floor is destroyed.",
+            "description": "Remove every portal whose tag matches the given string. Connections are removed from the navigation graph immediately. Use this to deactivate a group of related portals: for example, removing all 'door' portals when a room is sealed, or clearing 'floor_2' portals when a floor is destroyed.",
             "params": {
               "tag": {
                 "name": "Tag",
-                "desc": "Tag string to match against (e.g. \"door\", \"elevator\", \"room_A\")"
+                "desc": "The tag string to match against (e.g. \"door\", \"elevator\", \"room_A\")"
               }
             }
           },
@@ -1000,7 +1060,7 @@
               },
               "cost": {
                 "name": "Cost",
-                "desc": "Movement cost (lower = preferred, default is 1)"
+                "desc": "The movement cost. Lower costs are preferred; the default is 1."
               }
             }
           },
@@ -1034,19 +1094,19 @@
               },
               "entryX": {
                 "name": "Entry X",
-                "desc": "New entry X position in pixels"
+                "desc": "The new X co-ordinate of the portal entry, in pixels."
               },
               "entryY": {
                 "name": "Entry Y",
-                "desc": "New entry Y position in pixels"
+                "desc": "The new Y co-ordinate of the portal entry, in pixels."
               },
               "exitX": {
                 "name": "Exit X",
-                "desc": "New exit X position in pixels"
+                "desc": "The new X co-ordinate of the portal exit, in pixels."
               },
               "exitY": {
                 "name": "Exit Y",
-                "desc": "New exit Y position in pixels"
+                "desc": "The new Y co-ordinate of the portal exit, in pixels."
               }
             }
           },
@@ -1080,14 +1140,14 @@
               },
               "speed": {
                 "name": "Speed",
-                "desc": "Movement speed in pixels per second"
+                "desc": "The movement speed, in pixels per second."
               }
             }
           },
           "SetPortalTag": {
             "list-name": "Set portal tag",
             "display-text": "{my}: Set portal {0} tag to {1}",
-            "description": "Assign a string tag to a portal. Tags are used to group portals so they can be removed together with 'Remove portals by tag'. A portal can only have one tag at a time — calling this again replaces the previous tag.",
+            "description": "Assign a string tag to a portal. Tags are used to group portals so they can be removed together with 'Remove portals by tag'. A portal can only have one tag at a time; calling this again replaces the previous tag.",
             "params": {
               "portalId": {
                 "name": "Portal ID",
@@ -1095,22 +1155,22 @@
               },
               "tag": {
                 "name": "Tag",
-                "desc": "Tag string to assign (e.g. \"door\", \"elevator\", \"room_A\")"
+                "desc": "The tag string to assign (e.g. \"door\", \"elevator\", \"room_A\")"
               }
             }
           },
           "TeleportToPosition": {
             "list-name": "Teleport to position",
             "display-text": "{my}: Teleport to ({0}, {1})",
-            "description": "Instantly move the character to the given position. Can be used anywhere — inside portal events, on button press, on collision, etc. Suppresses re-pathing for one tick to prevent the AI from thinking it's lost. Useful with 'Pause at portal' + 'Complete portal' for fully custom portal behavior.",
+            "description": "Instantly move the character to the given position. Can be used anywhere: inside portal events, on button press, on collision, etc. Suppresses re-pathing for one tick to prevent the AI from thinking it's lost. Useful with 'Pause at portal' + 'Complete portal' for fully custom portal behavior.",
             "params": {
               "x": {
                 "name": "X",
-                "desc": "Target world X position in pixels"
+                "desc": "The target X co-ordinate, in pixels."
               },
               "y": {
                 "name": "Y",
-                "desc": "Target world Y position in pixels"
+                "desc": "The target Y co-ordinate, in pixels."
               }
             }
           }
@@ -1123,11 +1183,11 @@
             "params": {
               "gx": {
                 "name": "Grid X",
-                "desc": "Grid X coordinate (tile number)"
+                "desc": "The tile X co-ordinate."
               },
               "gy": {
                 "name": "Grid Y",
-                "desc": "Grid Y coordinate (tile number)"
+                "desc": "The tile Y co-ordinate."
               }
             }
           },
@@ -1138,11 +1198,11 @@
             "params": {
               "x": {
                 "name": "X",
-                "desc": "World X position in pixels"
+                "desc": "The X co-ordinate, in pixels."
               },
               "y": {
                 "name": "Y",
-                "desc": "World Y position in pixels"
+                "desc": "The Y co-ordinate, in pixels."
               }
             }
           },
@@ -1153,11 +1213,11 @@
             "params": {
               "gx": {
                 "name": "Grid X",
-                "desc": "Grid X coordinate"
+                "desc": "The tile X co-ordinate."
               },
               "gy": {
                 "name": "Grid Y",
-                "desc": "Grid Y coordinate"
+                "desc": "The tile Y co-ordinate."
               }
             }
           },
@@ -1168,11 +1228,11 @@
             "params": {
               "x": {
                 "name": "X",
-                "desc": "World X position in pixels"
+                "desc": "The X co-ordinate, in pixels."
               },
               "y": {
                 "name": "Y",
-                "desc": "World Y position in pixels"
+                "desc": "The Y co-ordinate, in pixels."
               }
             }
           },
@@ -1267,15 +1327,15 @@
             "params": {
               "gx": {
                 "name": "Grid X",
-                "desc": "Grid X coordinate (tile number)"
+                "desc": "The tile X co-ordinate."
               },
               "gy": {
                 "name": "Grid Y",
-                "desc": "Grid Y coordinate (tile number)"
+                "desc": "The tile Y co-ordinate."
               },
               "state": {
                 "name": "State",
-                "desc": "Tile state to check for",
+                "desc": "The tile state to check for.",
                 "items": {
                   "solid": "Solid",
                   "clear": "Clear",
@@ -1294,15 +1354,15 @@
             "params": {
               "x": {
                 "name": "X",
-                "desc": "World X position in pixels"
+                "desc": "The X co-ordinate, in pixels."
               },
               "y": {
                 "name": "Y",
-                "desc": "World Y position in pixels"
+                "desc": "The Y co-ordinate, in pixels."
               },
               "state": {
                 "name": "State",
-                "desc": "Tile state to check for",
+                "desc": "The tile state to check for.",
                 "items": {
                   "solid": "Solid",
                   "clear": "Clear",
@@ -1318,6 +1378,12 @@
             "list-name": "Is moving along path",
             "display-text": "{my}: Is moving along path",
             "description": "Check if the character currently has an active pathfinding path. Returns true while navigating, false when idle or path is complete. Matches the built-in Pathfinding behavior's 'Is moving along path'.",
+            "params": {}
+          },
+          "IsCrowdArrivalsEnabled": {
+            "list-name": "Is crowd arrivals enabled",
+            "display-text": "{my}: Is crowd arrivals enabled",
+            "description": "True if crowd arrivals (goal reservation) is currently active.",
             "params": {}
           },
           "IsMultiAgentAvoidanceEnabled": {
@@ -1371,7 +1437,7 @@
           "OnPortalComplete": {
             "list-name": "On portal complete",
             "display-text": "{my}: On portal complete",
-            "description": "Triggered when portal execution finishes — after an instant teleport completes, a gradual movement reaches the exit, or 'Complete portal' is called. Use this for post-portal effects like opening doors at the exit, playing arrival animations, etc.",
+            "description": "Triggered when portal execution finishes: after an instant teleport completes, a gradual movement reaches the exit, or 'Complete portal' is called. Use this for post-portal effects like opening doors at the exit, playing arrival animations, etc.",
             "params": {}
           },
           "OnPortalEntry": {
@@ -1398,7 +1464,7 @@
             "params": {
               "index": {
                 "name": "Index",
-                "desc": "Node index"
+                "desc": "The zero-based index of the node."
               }
             }
           },
@@ -1408,7 +1474,7 @@
             "params": {
               "index": {
                 "name": "Index",
-                "desc": "Node index"
+                "desc": "The zero-based index of the node."
               }
             }
           },
@@ -1418,7 +1484,7 @@
             "params": {
               "index": {
                 "name": "Index",
-                "desc": "Node index"
+                "desc": "The zero-based index of the node."
               }
             }
           },
@@ -1428,7 +1494,7 @@
             "params": {
               "index": {
                 "name": "Index",
-                "desc": "Node index"
+                "desc": "The zero-based index of the node."
               }
             }
           },
@@ -1438,7 +1504,7 @@
             "params": {
               "index": {
                 "name": "Index",
-                "desc": "Node index"
+                "desc": "The zero-based index of the node."
               }
             }
           },
@@ -1448,7 +1514,7 @@
             "params": {
               "index": {
                 "name": "Index",
-                "desc": "Node index"
+                "desc": "The zero-based index of the node."
               }
             }
           },
@@ -1458,7 +1524,7 @@
             "params": {
               "index": {
                 "name": "Index",
-                "desc": "Node index"
+                "desc": "The zero-based index of the node."
               }
             }
           },
@@ -1468,7 +1534,7 @@
             "params": {
               "index": {
                 "name": "Index",
-                "desc": "Node index"
+                "desc": "The zero-based index of the node."
               }
             }
           },
@@ -1478,15 +1544,15 @@
             "params": {
               "gx": {
                 "name": "Grid X",
-                "desc": "Source node grid X"
+                "desc": "The tile X co-ordinate of the source node."
               },
               "gy": {
                 "name": "Grid Y",
-                "desc": "Source node grid Y"
+                "desc": "The tile Y co-ordinate of the source node."
               },
               "index": {
                 "name": "Index",
-                "desc": "Connection index"
+                "desc": "The zero-based index of the connection."
               }
             }
           },
@@ -1496,15 +1562,15 @@
             "params": {
               "gx": {
                 "name": "Grid X",
-                "desc": "Source node grid X"
+                "desc": "The tile X co-ordinate of the source node."
               },
               "gy": {
                 "name": "Grid Y",
-                "desc": "Source node grid Y"
+                "desc": "The tile Y co-ordinate of the source node."
               },
               "index": {
                 "name": "Index",
-                "desc": "Connection index"
+                "desc": "The zero-based index of the connection."
               }
             }
           },
@@ -1514,11 +1580,11 @@
             "params": {
               "gx": {
                 "name": "Grid X",
-                "desc": "Node grid X coordinate"
+                "desc": "The tile X co-ordinate of the node."
               },
               "gy": {
                 "name": "Grid Y",
-                "desc": "Node grid Y coordinate"
+                "desc": "The tile Y co-ordinate of the node."
               }
             }
           },
@@ -1528,15 +1594,15 @@
             "params": {
               "gx": {
                 "name": "Grid X",
-                "desc": "Source node grid X"
+                "desc": "The tile X co-ordinate of the source node."
               },
               "gy": {
                 "name": "Grid Y",
-                "desc": "Source node grid Y"
+                "desc": "The tile Y co-ordinate of the source node."
               },
               "index": {
                 "name": "Index",
-                "desc": "Connection index"
+                "desc": "The zero-based index of the connection."
               }
             }
           },
@@ -1546,15 +1612,15 @@
             "params": {
               "gx": {
                 "name": "Grid X",
-                "desc": "Source node grid X"
+                "desc": "The tile X co-ordinate of the source node."
               },
               "gy": {
                 "name": "Grid Y",
-                "desc": "Source node grid Y"
+                "desc": "The tile Y co-ordinate of the source node."
               },
               "index": {
                 "name": "Index",
-                "desc": "Connection index"
+                "desc": "The zero-based index of the connection."
               }
             }
           },
@@ -1569,11 +1635,11 @@
             "params": {
               "gx": {
                 "name": "Grid X",
-                "desc": "Grid X coordinate"
+                "desc": "The tile X co-ordinate."
               },
               "gy": {
                 "name": "Grid Y",
-                "desc": "Grid Y coordinate"
+                "desc": "The tile Y co-ordinate."
               }
             }
           },
@@ -1583,11 +1649,11 @@
             "params": {
               "gx": {
                 "name": "Grid X",
-                "desc": "Grid X coordinate"
+                "desc": "The tile X co-ordinate."
               },
               "gy": {
                 "name": "Grid Y",
-                "desc": "Grid Y coordinate"
+                "desc": "The tile Y co-ordinate."
               }
             }
           },
@@ -1597,11 +1663,11 @@
             "params": {
               "gx": {
                 "name": "Grid X",
-                "desc": "Node grid X"
+                "desc": "The tile X co-ordinate of the node."
               },
               "gy": {
                 "name": "Grid Y",
-                "desc": "Node grid Y"
+                "desc": "The tile Y co-ordinate of the node."
               }
             }
           },
@@ -1611,11 +1677,11 @@
             "params": {
               "gx": {
                 "name": "Grid X",
-                "desc": "Node grid X"
+                "desc": "The tile X co-ordinate of the node."
               },
               "gy": {
                 "name": "Grid Y",
-                "desc": "Node grid Y"
+                "desc": "The tile Y co-ordinate of the node."
               }
             }
           },
@@ -1625,11 +1691,11 @@
             "params": {
               "gx": {
                 "name": "Grid X",
-                "desc": "Node grid X"
+                "desc": "The tile X co-ordinate of the node."
               },
               "gy": {
                 "name": "Grid Y",
-                "desc": "Node grid Y"
+                "desc": "The tile Y co-ordinate of the node."
               }
             }
           },
@@ -1639,11 +1705,11 @@
             "params": {
               "gx": {
                 "name": "Grid X",
-                "desc": "Tile grid X"
+                "desc": "The tile X co-ordinate."
               },
               "gy": {
                 "name": "Grid Y",
-                "desc": "Tile grid Y"
+                "desc": "The tile Y co-ordinate."
               }
             }
           },
@@ -1653,11 +1719,11 @@
             "params": {
               "x": {
                 "name": "X",
-                "desc": "World X position"
+                "desc": "The X co-ordinate, in pixels."
               },
               "y": {
                 "name": "Y",
-                "desc": "World Y position"
+                "desc": "The Y co-ordinate, in pixels."
               }
             }
           },
@@ -1667,11 +1733,11 @@
             "params": {
               "x": {
                 "name": "X",
-                "desc": "World X position"
+                "desc": "The X co-ordinate, in pixels."
               },
               "y": {
                 "name": "Y",
-                "desc": "World Y position"
+                "desc": "The Y co-ordinate, in pixels."
               }
             }
           },
@@ -1681,11 +1747,11 @@
             "params": {
               "x": {
                 "name": "X",
-                "desc": "World X position"
+                "desc": "The X co-ordinate, in pixels."
               },
               "y": {
                 "name": "Y",
-                "desc": "World Y position"
+                "desc": "The Y co-ordinate, in pixels."
               }
             }
           },
@@ -1695,11 +1761,11 @@
             "params": {
               "x": {
                 "name": "X",
-                "desc": "World X position"
+                "desc": "The X co-ordinate, in pixels."
               },
               "y": {
                 "name": "Y",
-                "desc": "World Y position"
+                "desc": "The Y co-ordinate, in pixels."
               }
             }
           },
@@ -1729,11 +1795,11 @@
             "params": {
               "x": {
                 "name": "X",
-                "desc": "World X position in pixels"
+                "desc": "The X co-ordinate, in pixels."
               },
               "y": {
                 "name": "Y",
-                "desc": "World Y position in pixels"
+                "desc": "The Y co-ordinate, in pixels."
               }
             }
           },
@@ -1748,11 +1814,11 @@
             "params": {
               "x": {
                 "name": "X",
-                "desc": "World X position in pixels"
+                "desc": "The X co-ordinate, in pixels."
               },
               "y": {
                 "name": "Y",
-                "desc": "World Y position in pixels"
+                "desc": "The Y co-ordinate, in pixels."
               }
             }
           },
@@ -1762,11 +1828,11 @@
             "params": {
               "gx": {
                 "name": "Grid X",
-                "desc": "Grid X coordinate"
+                "desc": "The tile X co-ordinate."
               },
               "gy": {
                 "name": "Grid Y",
-                "desc": "Grid Y coordinate"
+                "desc": "The tile Y co-ordinate."
               }
             }
           },
@@ -1817,7 +1883,7 @@
           },
           "StrictJumpPositioning": {
             "translated-name": "StrictJumpPositioning",
-            "description": "Get whether strict jump positioning is currently active for this character. Returns 1 if enabled, 0 if disabled. Useful for conditional logic — e.g. switching between careful and aggressive pathfinding modes.",
+            "description": "Get whether strict jump positioning is currently active for this character. Returns 1 if enabled, 0 if disabled. Useful for conditional logic, e.g. switching between careful and aggressive pathfinding modes.",
             "params": {}
           },
           "GridHeight": {
@@ -1856,11 +1922,11 @@
             "params": {
               "gx": {
                 "name": "Grid X",
-                "desc": "Grid X coordinate"
+                "desc": "The tile X co-ordinate."
               },
               "gy": {
                 "name": "Grid Y",
-                "desc": "Grid Y coordinate"
+                "desc": "The tile Y co-ordinate."
               }
             }
           },
@@ -1870,11 +1936,11 @@
             "params": {
               "gx": {
                 "name": "Grid X",
-                "desc": "Grid X coordinate"
+                "desc": "The tile X co-ordinate."
               },
               "gy": {
                 "name": "Grid Y",
-                "desc": "Grid Y coordinate"
+                "desc": "The tile Y co-ordinate."
               }
             }
           },
@@ -1889,7 +1955,7 @@
             "params": {
               "x": {
                 "name": "X",
-                "desc": "World X position in pixels"
+                "desc": "The X co-ordinate, in pixels."
               }
             }
           },
@@ -1899,7 +1965,7 @@
             "params": {
               "y": {
                 "name": "Y",
-                "desc": "World Y position in pixels"
+                "desc": "The Y co-ordinate, in pixels."
               }
             }
           },
@@ -1914,7 +1980,7 @@
             "params": {
               "index": {
                 "name": "Index",
-                "desc": "Waypoint index (0-based)"
+                "desc": "The zero-based index of the waypoint."
               }
             }
           },
@@ -1938,6 +2004,11 @@
             "description": "Get the distance in pixels from the character to the current waypoint. Returns 0 if no path is active.",
             "params": {}
           },
+          "IdleSeparation": {
+            "translated-name": "IdleSeparation",
+            "description": "The idle separation distance in pixels (0 = off).",
+            "params": {}
+          },
           "MaxPathsPerTick": {
             "translated-name": "MaxPathsPerTick",
             "description": "Get the current maximum paths per tick setting.",
@@ -1955,12 +2026,12 @@
           },
           "PathEndX": {
             "translated-name": "PathEndX",
-            "description": "The world X of the calculated path's final position — the last waypoint, where the character will actually end up. In Nearest mode this can differ from the requested target (the path stops at the closest reachable spot). Returns 0 if no path has been calculated.",
+            "description": "The world X of the calculated path's final position: the last waypoint, where the character will actually end up. In Nearest mode this can differ from the requested target (the path stops at the closest reachable spot). Returns 0 if no path has been calculated.",
             "params": {}
           },
           "PathEndY": {
             "translated-name": "PathEndY",
-            "description": "The world Y of the calculated path's final position — the last waypoint, where the character will actually end up. In Nearest mode this can differ from the requested target (the path stops at the closest reachable spot). Returns 0 if no path has been calculated.",
+            "description": "The world Y of the calculated path's final position: the last waypoint, where the character will actually end up. In Nearest mode this can differ from the requested target (the path stops at the closest reachable spot). Returns 0 if no path has been calculated.",
             "params": {}
           },
           "PathFailReason": {
@@ -1975,7 +2046,7 @@
           },
           "PathStrategy": {
             "translated-name": "PathStrategy",
-            "description": "Get the current path strategy preset (balanced, shortest, safest, simplest). Note: 'simplest' is the Ground-Hugging strategy — the key kept its original name for save compatibility.",
+            "description": "Get the current path strategy preset (balanced, shortest, safest, simplest). Note: 'simplest' is the Ground-Hugging strategy; the key kept its original name for save compatibility.",
             "params": {}
           },
           "RePathCooldown": {
@@ -1986,6 +2057,16 @@
           "RePathThreshold": {
             "translated-name": "RePathThreshold",
             "description": "Get the current re-path threshold in tiles. This is how far the character can drift before automatic re-pathing triggers.",
+            "params": {}
+          },
+          "SeparationCooldown": {
+            "translated-name": "SeparationCooldown",
+            "description": "The separation cooldown in seconds (rest time after giving up on idle separation; 0 = never rest).",
+            "params": {}
+          },
+          "SeparationGiveUpTime": {
+            "translated-name": "SeparationGiveUpTime",
+            "description": "How long a character keeps trying to separate before giving up and resting, in seconds.",
             "params": {}
           },
           "TargetGridX": {
@@ -2019,7 +2100,7 @@
             "params": {
               "index": {
                 "name": "Index",
-                "desc": "Waypoint index (0-based)"
+                "desc": "The zero-based index of the waypoint."
               }
             }
           },
@@ -2029,7 +2110,7 @@
             "params": {
               "index": {
                 "name": "Index",
-                "desc": "Waypoint index (0-based)"
+                "desc": "The zero-based index of the waypoint."
               }
             }
           },
@@ -2039,7 +2120,7 @@
             "params": {
               "index": {
                 "name": "Index",
-                "desc": "Waypoint index (0-based)"
+                "desc": "The zero-based index of the waypoint."
               }
             }
           },
@@ -2049,7 +2130,7 @@
             "params": {
               "index": {
                 "name": "Index",
-                "desc": "Waypoint index (0-based)"
+                "desc": "The zero-based index of the waypoint."
               }
             }
           },
@@ -2064,11 +2145,11 @@
             "params": {
               "x": {
                 "name": "X",
-                "desc": "World X position to measure from."
+                "desc": "The X co-ordinate to measure from, in pixels."
               },
               "y": {
                 "name": "Y",
-                "desc": "World Y position to measure from."
+                "desc": "The Y co-ordinate to measure from, in pixels."
               },
               "tag": {
                 "name": "Tag",
@@ -2087,11 +2168,11 @@
             "params": {
               "x": {
                 "name": "X",
-                "desc": "World X position to measure from."
+                "desc": "The X co-ordinate to measure from, in pixels."
               },
               "y": {
                 "name": "Y",
-                "desc": "World Y position to measure from."
+                "desc": "The Y co-ordinate to measure from, in pixels."
               },
               "tag": {
                 "name": "Tag",

@@ -1,7 +1,7 @@
 export const config = {
   listName: "On portal complete",
   displayText: "{my}: On portal complete",
-  description: "Triggered when portal execution finishes — after an instant teleport completes, a gradual movement reaches the exit, or 'Complete portal' is called. Use this for post-portal effects like opening doors at the exit, playing arrival animations, etc.",
+  description: "Triggered when portal execution finishes: after an instant teleport completes, a gradual movement reaches the exit, or 'Complete portal' is called. Use this for post-portal effects like opening doors at the exit, playing arrival animations, etc.",
   isTrigger: true
 };
 

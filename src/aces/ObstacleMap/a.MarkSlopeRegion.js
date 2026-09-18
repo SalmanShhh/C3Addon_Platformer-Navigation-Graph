@@ -3,11 +3,11 @@ export const config = {
   displayText: "{my}: Mark slope from ({0},{1}) to ({2},{3}) as {4}",
   description: "Mark a diagonal region of tiles as slope. Specify the start and end grid corners. All tiles along the diagonal will be marked as slope with the given direction.",
   params: [
-    { id: "startGx", name: "Start X", desc: "Starting grid X", type: "number", initialValue: "0" },
-    { id: "startGy", name: "Start Y", desc: "Starting grid Y", type: "number", initialValue: "0" },
-    { id: "endGx", name: "End X", desc: "Ending grid X", type: "number", initialValue: "5" },
-    { id: "endGy", name: "End Y", desc: "Ending grid Y", type: "number", initialValue: "5" },
-    { id: "direction", name: "Direction", desc: "Slope direction", type: "combo", initialValue: "slope_left",
+    { id: "startGx", name: "Start X", desc: "The starting tile X co-ordinate.", type: "number", initialValue: "0" },
+    { id: "startGy", name: "Start Y", desc: "The starting tile Y co-ordinate.", type: "number", initialValue: "0" },
+    { id: "endGx", name: "End X", desc: "The ending tile X co-ordinate.", type: "number", initialValue: "5" },
+    { id: "endGy", name: "End Y", desc: "The ending tile Y co-ordinate.", type: "number", initialValue: "5" },
+    { id: "direction", name: "Direction", desc: "The slope direction.", type: "combo", initialValue: "slope_left",
       items: [
         { slope_left: "Slope left / (45°)" },
         { slope_right: "Slope right \\ (45°)" },

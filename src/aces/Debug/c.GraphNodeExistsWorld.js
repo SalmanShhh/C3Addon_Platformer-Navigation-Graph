@@ -4,8 +4,8 @@ export const config = {
   description: "Check if a navigation node exists at the specified world coordinates. Use this to validate world positions before pathfinding.",
   isInvertible: true,
   params: [
-    { id: "x", name: "X", desc: "World X position in pixels", type: "number", initialValue: "0" },
-    { id: "y", name: "Y", desc: "World Y position in pixels", type: "number", initialValue: "0" }
+    { id: "x", name: "X", desc: "The X co-ordinate, in pixels.", type: "number", initialValue: "0" },
+    { id: "y", name: "Y", desc: "The Y co-ordinate, in pixels.", type: "number", initialValue: "0" }
   ]
 };
 

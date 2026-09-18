@@ -4,8 +4,8 @@ export const config = {
   description: "True if the node at the given grid coordinates is a ledge node (left or right ledge).",
   isInvertible: true,
   params: [
-    { id: "gx", name: "Grid X", desc: "Grid X coordinate", type: "number", initialValue: "0" },
-    { id: "gy", name: "Grid Y", desc: "Grid Y coordinate", type: "number", initialValue: "0" }
+    { id: "gx", name: "Grid X", desc: "The tile X co-ordinate.", type: "number", initialValue: "0" },
+    { id: "gy", name: "Grid Y", desc: "The tile Y co-ordinate.", type: "number", initialValue: "0" }
   ]
 };
 

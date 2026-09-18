@@ -2,8 +2,8 @@ export const config = {
   returnType: "number",
   description: "Returns 1 if the node at the given grid coordinates is a right ledge, 0 otherwise.",
   params: [
-    { id: "gx", name: "Grid X", desc: "Node grid X", type: "number" },
-    { id: "gy", name: "Grid Y", desc: "Node grid Y", type: "number" }
+    { id: "gx", name: "Grid X", desc: "The tile X co-ordinate of the node.", type: "number" },
+    { id: "gy", name: "Grid Y", desc: "The tile Y co-ordinate of the node.", type: "number" }
   ]
 };
 

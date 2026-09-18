@@ -155,6 +155,9 @@ Graph generation is time-sliced. On big maps the build spreads across several ti
 | **Auto-Build Graph** | Combo | Auto | Zero-event startup. Auto: use the attached Pathfinding behavior's map when present, otherwise scan all Solid/Jump-thru objects; explicit setup actions always take precedence. From Pathfinding and From Solids force one source. Off: set the map up with actions only. |
 | **Map Tag** | Text | (empty) | Instances with the same tag on a layout share one navigation map. Empty = share with everyone. Give special characters (wall-phasing ghosts, flyers) their own tag. Each tag builds its own map, so use few tags. |
 | **Detect Slopes** | Boolean | On | During solid scanning (including Auto-Build), probe partially-solid tiles' collision shapes and register 45 and 22.5 degree surfaces as slopes automatically. Requires sloped collision polygons on the tiles. Unsupported angles stay solid. |
+| **Crowd Arrivals** | Boolean | Off | When several characters path to the same position, each claims a landing spot so the others target neighboring spots instead of stacking. Per map tag. |
+| **Idle Separation** | Float (0 to 256) | 0 | Personal space in pixels for characters with no active path: idle characters closer than this gently push apart. 0 = off. Ledge-safe. A good starting value is the character's width. |
+| **Separation Cooldown** | Float (0 to 60) | 5.0 | Rest time in seconds after giving up on idle separation (crowd too dense for the spacing) before trying again. 0 = never rest, keep trying continuously. |
 | **Enabled** | Boolean | On | Whether the behavior starts active. Disabled freezes navigation (path, graph, and settings are kept; resumes on re-enable). Toggle at runtime with Set enabled. |
 
 ---
@@ -781,6 +784,21 @@ Expression: AnyEnemy.PlatformerNavGraph.NearbyAgentCount
 // Agents within three tiles of this character
 ```
 
+### Crowd arrivals and idle separation
+
+Avoidance spreads the routes, but every route still ends at the same goal position, so a chasing pack piles onto one pixel. Two independent tools fix the destination side:
+
+- **Crowd Arrivals** (property or the Set crowd arrivals action): goal reservation. When a character paths somewhere, it claims the landing spot (goal node). Another character pathing to the same position automatically targets the nearest unclaimed spot instead, so a pack tiles the platform around the target in a natural ring. The claim is kept while the character stands there and is released when it paths elsewhere, stops, is disabled, or is destroyed. `TargetX/Y` still report the requested position; `PathEndX/Y` show the reserved spot.
+- **Idle Separation** (property or the Set idle separation action): personal space in pixels for characters with no active path. Idle characters closer than this to a same-map neighbor gently push apart. The nudge never pushes into a wall or off a ledge (on a one-tile island it simply does nothing) and never interferes with path following. 0 turns it off; the character's width is a good starting value. Works with or without Crowd Arrivals, and also cleans up knockback and spawn overlap on its own. When the crowd is too dense for the spacing to ever be satisfied (four characters on a three-tile platform), characters give up after the give-up time (1.2 seconds by default, tunable with the Set separation give-up time action) and rest for **Separation Cooldown** seconds instead of shuffling forever (0 = never rest). Being teleported, taking a portal, being repositioned by events, or arriving from a path resets that give-up state, so a freshly placed character always gets a fresh separation attempt.
+
+Both are per map tag, cost almost nothing when no conflict exists, and are inert with a single character. For full crowd behavior combine all three: avoidance en route, reservation at the destination, separation while standing around.
+
+```
+Event: On start of layout
+  Action: AnyEnemy -> PlatformerNavGraph -> Set crowd arrivals  "Enabled"
+  Action: AnyEnemy -> PlatformerNavGraph -> Set idle separation  32
+```
+
 ### Tuning checklist
 
 - **Tile Size**: the biggest lever. Node count scales with area divided by tile size squared, so 48 px tiles cost roughly half of 32 px tiles.
@@ -808,6 +826,10 @@ Categories mirror the built-in Pathfinding behavior's groups: Pathfinding (findi
 | **SetRePathCooldown** Seconds | Minimum time between automatic re-path attempts. |
 | **SetMaxPathsPerTick** Count | Limit A* calculations per tick; extra requests queue. 0 means unlimited. |
 | **SetMultiAgentAvoidance** Enabled | Toggle multi-agent path avoidance (agents on the same map fan out instead of stacking). |
+| **SetCrowdArrivals** Enabled | Toggle crowd arrivals: goal reservation, so arrivals tile onto neighboring spots instead of stacking. |
+| **SetIdleSeparation** Pixels | Personal space for idle characters: closer than this, they gently push apart. 0 = off. |
+| **SetSeparationCooldown** Seconds | Rest time after giving up on idle separation before retrying. 0 = never rest. |
+| **SetSeparationGiveUpTime** Seconds | How long a character keeps trying to separate before giving up and resting. Default 1.2. |
 
 ### Movement
 
@@ -910,6 +932,7 @@ Categories mirror the built-in Pathfinding behavior's groups: Pathfinding (findi
 | **Is setting up Pathfinding** | True while waiting for the Pathfinding behavior's async map build. |
 | **Is position hazardous** X, Y | True if any hazard (circle, rect, or tile) affects the position. |
 | **Is multi-agent avoidance enabled** | True if avoidance is active. |
+| **Is crowd arrivals enabled** | True if crowd arrivals (goal reservation and idle separation) is active. |
 | **Is calculating path** | True while this agent's path request is queued behind the per-tick budget. |
 
 ---
@@ -938,6 +961,9 @@ Categories mirror the built-in Pathfinding behavior's groups: Pathfinding (findi
 | **MaxPathsPerTick** | Number | Current per-tick path budget. 0 means unlimited. |
 | **PathQueueSize** | Number | Pending queued path requests. |
 | **NearbyAgentCount** | Number | Path-following agents within three tiles (avoidance must be on). |
+| **IdleSeparation** | Number | Idle separation distance in pixels (0 = off). |
+| **SeparationCooldown** | Number | Rest time in seconds after giving up on idle separation (0 = never rest). |
+| **SeparationGiveUpTime** | Number | Trying time in seconds before giving up on idle separation. |
 
 ### Movement
 
@@ -1209,6 +1235,33 @@ Scenario: agents pile up on the single best route and look robotic.
 Event: On start of layout
   Action: AnyGoblin -> PlatformerNavGraph -> SetMultiAgentAvoidance  "Enabled"
   // A* now penalizes routes that pass close to other agents
+```
+
+**Spreading arrivals.**
+Scenario: routes fan out nicely, but every agent still lands on the same pixel at the destination.
+
+```
+Event: On start of layout
+  Action: AnyGoblin -> PlatformerNavGraph -> Set crowd arrivals  "Enabled"
+  // Each agent claims its landing node; the rest target neighboring nodes.
+  // No event changes needed: the same Find path calls now tile the arrivals.
+
+Event: Every 0.5 seconds
+  Action: AnyGoblin -> PlatformerNavGraph -> Find path to object  Player
+```
+
+Note: `TargetX/Y` still return the requested position; `PathEndX/Y` return the spot this agent actually reserved.
+
+**Settling an idle crowd.**
+Scenario: agents that finished their paths stand overlapped after knockbacks and spawns.
+
+```
+Event: On start of layout
+  Action: AnyGoblin -> PlatformerNavGraph -> Set idle separation  32
+  // Idle goblins closer than 32 px gently push apart (ledge-safe).
+  Action: AnyGoblin -> PlatformerNavGraph -> Set separation cooldown  5
+  // If a platform is too small for everyone to fit, they shuffle for about
+  // a second, then rest 5 seconds before trying again.
 ```
 
 ---
@@ -1632,6 +1685,68 @@ Event: Enemy -> PlatformerNavGraph -> On arrived
 
 Ground correction snaps each marker to the nearest walkable node, so markers can sit loosely inside the cover art without tile-perfect placement. The safe-distance check (350 px here) is what stops the enemy from choosing cover on the player's side of the room; combine it with the player-position hazard from above and the route to cover will also curve away from the player on the way there.
 
+### 22. Zombie horde that surrounds the player
+
+**Scenario:** twenty zombies chase the player. Without crowd features they form a single-file conga line and merge into one writhing pixel on arrival. With them they spread across routes, encircle the player, and hold a loose ring.
+
+```
+Event: On start of layout
+  Action: AnyZombie -> PlatformerNavGraph -> SetMultiAgentAvoidance  "Enabled"
+  Action: AnyZombie -> PlatformerNavGraph -> Set crowd arrivals  "Enabled"
+  Action: AnyZombie -> PlatformerNavGraph -> Set idle separation  28
+  Action: AnyZombie -> PlatformerNavGraph -> SetMaxPathsPerTick  4
+
+Event: Every 0.6 seconds
+  Condition: distance(AnyZombie.X, AnyZombie.Y, Player.X, Player.Y) > 60
+  Action: AnyZombie -> PlatformerNavGraph -> Find path to object  Player
+
+Event: AnyZombie -> PlatformerNavGraph -> On arrived
+  Condition: distance(AnyZombie.X, AnyZombie.Y, Player.X, Player.Y) < 90
+  Action: AnyZombie -> PlayAnimation  "Attack"
+```
+
+Each system covers one phase: avoidance fans the horde across parallel routes on the way in, goal reservation tiles their landing spots around the player (the first zombie to path claims the closest node, the next ones ring outward), and idle separation keeps the ring loose while they attack. The 60 px distance condition stops zombies already in the ring from re-pathing onto the player's exact pixel.
+
+### 23. Squad rally point with formation markers
+
+**Scenario:** the player plants a flag and the squad gathers on it, each soldier visibly taking their own spot instead of stacking.
+
+```
+Event: Player plants Flag
+  Action: AnySoldier -> PlatformerNavGraph -> Set crowd arrivals  "Enabled"
+  Action: AnySoldier -> PlatformerNavGraph -> Find path  Flag.X, Flag.Y
+
+Event: AnySoldier -> PlatformerNavGraph -> On path found
+  // PathEndX/Y is the spot THIS soldier reserved, not the flag position.
+  Action: Create SpotMarker at (AnySoldier.PlatformerNavGraph.PathEndX,
+                                AnySoldier.PlatformerNavGraph.PathEndY)
+  Action: SpotMarker -> Set opacity  40
+
+Event: AnySoldier -> PlatformerNavGraph -> On arrived
+  Action: AnySoldier -> PlayAnimation  "AtEase"
+```
+
+The markers make the reservation system visible: one soldier's marker sits on the flag node, the rest on the neighboring nodes the reservations pushed them to. Because claims are released when a soldier paths elsewhere or is destroyed, re-planting the flag reshuffles the formation cleanly.
+
+### 24. Guard post and rat nest (tuning the settle feel)
+
+**Scenario:** two enemy types share the crowd systems but should feel opposite. Guards at a post stand firm the moment they are placed; rats in a nest never stop squirming.
+
+```
+// Guards: settle almost instantly, rest for a long time
+Event: On start of layout
+  Action: AnyGuard -> PlatformerNavGraph -> Set idle separation  36
+  Action: AnyGuard -> PlatformerNavGraph -> Set separation give-up time  0.2
+  Action: AnyGuard -> PlatformerNavGraph -> Set separation cooldown  30
+
+// Rats: never rest, permanent squirming pile
+Event: On start of layout
+  Action: AnyRat -> PlatformerNavGraph -> Set idle separation  16
+  Action: AnyRat -> PlatformerNavGraph -> Set separation cooldown  0
+```
+
+The guards take one brief step apart when crowded and then hold their ground for half a minute, which reads as discipline. The rats keep nudging forever (cooldown 0 disables the rest entirely), which reads as vermin. Same system, two personalities from two numbers. Teleporting either type into a pile resets the give-up state automatically, so a freshly warped guard still takes its one composing step.
+
 ### Other game use cases
 
 **Action platformer.** Enemies chase across interconnected platforms and switch stances mid-fight: Balanced pathing to close distance, then JumpTowardPosition for the strike. Player explosions become temporary circle hazards that reroute the rest of the mob.
@@ -1663,6 +1778,16 @@ Ground correction snaps each marker to the nearest walkable node, so markers can
 **Escort mission.** The VIP walks Safest Route with Ledge Restriction on, pausing when the player falls behind (distance check gates the Find path calls) and hazards keep them out of turret arcs.
 
 **Speedrun rival ghost.** An AI rival races the player using Shortest Distance, coyote time, and Relaxed positioning, taking risky jump-falls a human speedrunner would attempt.
+
+**Barricade siege.** The horde piles against a player-built wall: Crowd Arrivals tiles attackers along the barricade line instead of merging them into one pixel, and Separation Cooldown 0 keeps the pile visibly squirming while they claw at it. When the wall breaks (tile cleared, graph regenerated), every claim re-resolves and the horde pours through in a spread wave.
+
+**Fireteam squad.** Soldiers gather on the player's rally flag with Crowd Arrivals, each taking its own spot; a marker sprite at each soldier's PathEndX/Y shows the player exactly where everyone will stand before they arrive. Idle Separation holds their spacing when combat knocks them around.
+
+**Pet collection.** A dozen pets trail the player with Nearest-mode Find path calls. Crowd Arrivals assigns each pet its own spot at heel instead of a single writhing stack, Idle Separation keeps them from merging when the player stops, and the separation give-up means they settle calmly on narrow ledges instead of pacing forever.
+
+**Arena lineup.** Fighters teleport onto the starting platforms between rounds. Teleporting automatically resets the separation give-up state, so each fighter takes one composing step to its mark and then holds; a short give-up time with a long Separation Cooldown makes the lineup snap into place and stand at attention.
+
+**Town crowds.** Ambient NPCs wander between market stalls with Ground-Hugging so nobody hops onto rooftops. Idle Separation with a generous value and a long Separation Cooldown produces natural-looking clusters: people drift apart when a spot gets crowded, then settle and chat instead of endlessly shuffling.
 
 **Farming and village sims.** Villagers path between homes, fields, and shops on a shared graph; doors are instant portals with entry pauses that play open animations, and the whole town shares one build.
 

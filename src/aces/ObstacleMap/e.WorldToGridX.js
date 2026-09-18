@@ -2,7 +2,7 @@ export const config = {
   returnType: "number",
   description: "Convert a world X position to grid X coordinate. Returns the grid tile number at the given pixel position.",
   params: [
-    { id: "x", name: "X", desc: "World X position in pixels", type: "number" }
+    { id: "x", name: "X", desc: "The X co-ordinate, in pixels.", type: "number" }
   ]
 };
 

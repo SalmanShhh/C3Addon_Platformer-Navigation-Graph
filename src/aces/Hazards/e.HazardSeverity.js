@@ -2,8 +2,8 @@ export const config = {
   returnType: "number",
   description: "Get the total hazard severity at a world position from all sources (circles, rects, tiles). Higher values = more dangerous.",
   params: [
-    { id: "x", name: "X", desc: "World X position in pixels", type: "number" },
-    { id: "y", name: "Y", desc: "World Y position in pixels", type: "number" }
+    { id: "x", name: "X", desc: "The X co-ordinate, in pixels.", type: "number" },
+    { id: "y", name: "Y", desc: "The Y co-ordinate, in pixels.", type: "number" }
   ]
 };
 

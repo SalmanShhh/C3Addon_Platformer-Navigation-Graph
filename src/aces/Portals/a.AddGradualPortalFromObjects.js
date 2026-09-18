@@ -8,9 +8,9 @@ export const config = {
     },
     { id: "entryObject", name: "Entry object", desc: "The object to use as the portal entry point", type: "object" },
     { id: "exitObject", name: "Exit object", desc: "The object to use as the portal exit point", type: "object" },
-    { id: "cost", name: "Cost", desc: "Movement cost (default 1 = auto-calculated)", type: "number", initialValue: "1" },
-    { id: "speed", name: "Speed", desc: "Movement speed in pixels per second", type: "number", initialValue: "100" },
-    { id: "tag", name: "Tag", desc: "Optional tag for grouping portals. Use commas for multiple tags (e.g. \"door,room_A\"). Leave empty for no tag.", type: "string", initialValue: '""' }
+    { id: "cost", name: "Cost", desc: "The movement cost. The default of 1 is calculated automatically.", type: "number", initialValue: "1" },
+    { id: "speed", name: "Speed", desc: "The movement speed, in pixels per second.", type: "number", initialValue: "100" },
+    { id: "tag", name: "Tag", desc: "An optional tag for grouping portals. Use commas for multiple tags (e.g. \"door,room_A\"). Leave empty for no tag.", type: "string", initialValue: '""' }
   ]
 };
 

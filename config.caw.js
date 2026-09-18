@@ -14,7 +14,7 @@ export const minConstructVersion = undefined;
 export const author = "SalmanShh";
 export const website = "https://www.construct.net";
 export const documentation = "https://www.construct.net";
-export const description = "Smart pathfinding for platformer games. Characters automatically jump across gaps, fall between platforms, and find optimal routes through complex levels. Includes instant portals (teleporters, doors) and gradual portals (elevators, ladders, ziplines) with pause/resume support for custom animations. Features hazard avoidance, multiple path strategies, coyote jumps, ledge restriction, and multi-agent support. Works with the built-in Platform behavior — just add the behavior and go.";
+export const description = "Smart pathfinding for platformer games. Characters automatically jump across gaps, fall between platforms, and find optimal routes through complex levels. Includes instant portals (teleporters, doors) and gradual portals (elevators, ladders, ziplines) with pause/resume support for custom animations. Features hazard avoidance, multiple path strategies, coyote jumps, ledge restriction, and multi-agent support. Works with the built-in Platform behavior: just add the behavior and go.";
 export const category = ADDON_CATEGORY.MOVEMENTS;
 
 export const hasDomside = false;
@@ -98,7 +98,7 @@ export const properties = [
     type: PROPERTY_TYPE.INTEGER,
     id: "cell_size",
     name: "Tile Size",
-    desc: "Size of each grid tile in pixels. MUST match your tilemap's tile size / Pathfinding behavior's Cell Size — a mismatch misaligns the graph and characters walk into walls. Set to 0 to auto-detect it (reads the Pathfinding behavior's Cell Size, or the solid tilemap's tile size). Smaller = more precise paths but slower performance.",
+    desc: "Size of each grid tile in pixels. MUST match your tilemap's tile size / Pathfinding behavior's Cell Size; a mismatch misaligns the graph and characters walk into walls. Set to 0 to auto-detect it (reads the Pathfinding behavior's Cell Size, or the solid tilemap's tile size). Smaller = more precise paths but slower performance.",
     options: {
       initialValue: 32,
       minValue: 0,
@@ -149,8 +149,8 @@ export const properties = [
         { balanced: "Balanced (recommended for most games)" },
         { shortest: "Shortest Distance (speedrunners, time trials)" },
         { safest: "Safest Route (stealth, escort missions)" },
-        // Key stays "simplest" (combo values are stored by index/key — only
-        // the display text may change). Rebranded Ground-Hugging in 0.6.1.0.
+        // Key stays "simplest" (combo values are stored by index/key; only
+        // the display text may change). Rebranded Ground-Hugging in 0.7.0.0.
         { simplest: "Ground-Hugging (patrols, predictable AI)" }
       ]
     }
@@ -183,7 +183,7 @@ export const properties = [
     type: PROPERTY_TYPE.FLOAT,
     id: "coyote_time",
     name: "Coyote Time",
-    desc: "Seconds after walking off a ledge where a jump can still be executed. Allows AI to walk off edges and jump mid-air for greater reach, making slightly out-of-range platforms reachable. Important: only works when 'Ledge Restriction' is disabled — if Ledge Restriction is enabled, characters won't walk off edges, so coyote jumps can never execute and the connections will go unused. 0 = disabled.",
+    desc: "Seconds after walking off a ledge where a jump can still be executed. Allows AI to walk off edges and jump mid-air for greater reach, making slightly out-of-range platforms reachable. Important: only works when 'Ledge Restriction' is disabled: if Ledge Restriction is enabled, characters won't walk off edges, so coyote jumps can never execute and the connections will go unused. 0 = disabled.",
     options: {
       initialValue: 0,
       minValue: 0,
@@ -196,7 +196,7 @@ export const properties = [
     type: PROPERTY_TYPE.CHECK,
     id: "strict_positioning",
     name: "Strict Jump Positioning",
-    desc: "When the AI is following a path and needs to jump or fall to another platform, it will slow down and carefully position itself on the tile before launching. This prevents characters from overshooting edges and missing jumps — like a chase enemy flying off a ledge instead of jumping across, or an escort NPC slipping off a narrow bridge mid-jump. Note: this only affects movement DURING pathfinding (jumps and falls that are part of the path). To stop characters from walking off edges entirely, use 'Ledge Restriction' instead. Recommended ON for most games.",
+    desc: "When the AI is following a path and needs to jump or fall to another platform, it will slow down and carefully position itself on the tile before launching. This prevents characters from overshooting edges and missing jumps, like a chase enemy flying off a ledge instead of jumping across, or an escort NPC slipping off a narrow bridge mid-jump. Note: this only affects movement DURING pathfinding (jumps and falls that are part of the path). To stop characters from walking off edges entirely, use 'Ledge Restriction' instead. Recommended ON for most games.",
     options: { initialValue: true }
   },
 
@@ -205,7 +205,7 @@ export const properties = [
     type: PROPERTY_TYPE.CHECK,
     id: "ledge_restriction",
     name: "Ledge Restriction",
-    desc: "Prevents AI characters from walking off platform edges when they have no reason to leave. Useful for patrol guards that should stay on their platform, or NPCs that shouldn't wander off rooftops. Note: this only stops characters from casually walking off edges — if the AI's path requires a jump or fall to reach its goal, it will still leave the platform. When enabled, 'Coyote Time' has no effect since characters won't walk off edges to trigger it. When disabled, characters can slide off edges freely, which also enables wall-adjacent jumps (walking to the platform edge to clear a wall before jumping). To make jumps and falls more precise, use 'Strict Jump Positioning' instead.",
+    desc: "Prevents AI characters from walking off platform edges when they have no reason to leave. Useful for patrol guards that should stay on their platform, or NPCs that shouldn't wander off rooftops. Note: this only stops characters from casually walking off edges: if the AI's path requires a jump or fall to reach its goal, it will still leave the platform. When enabled, 'Coyote Time' has no effect since characters won't walk off edges to trigger it. When disabled, characters can slide off edges freely, which also enables wall-adjacent jumps (walking to the platform edge to clear a wall before jumping). To make jumps and falls more precise, use 'Strict Jump Positioning' instead.",
     options: { initialValue: false }
   },
 
@@ -283,11 +283,46 @@ export const properties = [
     type: PROPERTY_TYPE.CHECK,
     id: "detect_slopes",
     name: "Detect Slopes",
-    desc: "During solid scanning (including Auto-Build), probe each partially-solid tile's collision shape and automatically register 45° and 22.5° slope surfaces as slopes — no tile ID lists needed. Tiles whose shape doesn't match a supported slope angle stay solid, so this is safe to leave on. Requires tiles/sprites to have actual sloped collision polygons. Turn off to register slopes yourself with the slope actions only.",
+    desc: "During solid scanning (including Auto-Build), probe each partially-solid tile's collision shape and automatically register 45° and 22.5° slope surfaces as slopes, with no tile ID lists needed. Tiles whose shape doesn't match a supported slope angle stay solid, so this is safe to leave on. Requires tiles/sprites to have actual sloped collision polygons. Turn off to register slopes yourself with the slope actions only.",
     options: { initialValue: true }
   },
 
-  // Property [17] — keep LAST: the Enabled toggle conventionally sits at the
+  // Property [17]
+  {
+    type: PROPERTY_TYPE.CHECK,
+    id: "crowd_arrivals",
+    name: "Crowd Arrivals",
+    desc: "When several characters path to the same position, spread their arrivals: each claims a landing spot (goal node) so others automatically target neighboring spots instead of stacking on one pixel. Per map tag. Harmless with a single character.",
+    options: { initialValue: false }
+  },
+
+  // Property [18]
+  {
+    type: PROPERTY_TYPE.FLOAT,
+    id: "idle_separation",
+    name: "Idle Separation",
+    desc: "Personal space in pixels for characters with no active path: idle characters closer than this to another character on the same map gently push apart. 0 = off. The nudge is ledge-safe (never pushes off an edge or into a wall) and never interferes with path following. A good starting value is the character's width.",
+    options: {
+      initialValue: 0,
+      minValue: 0,
+      maxValue: 256
+    }
+  },
+
+  // Property [19]
+  {
+    type: PROPERTY_TYPE.FLOAT,
+    id: "separation_cooldown",
+    name: "Separation Cooldown",
+    desc: "How long (in seconds) characters rest after giving up on idle separation (when the crowd is too dense for the spacing to be satisfied) before trying again. 0 = never rest, keep trying continuously. Only used when Idle Separation is above 0.",
+    options: {
+      initialValue: 5.0,
+      minValue: 0,
+      maxValue: 60
+    }
+  },
+
+  // Property [20], keep LAST: the Enabled toggle conventionally sits at the
   // bottom of a behavior's properties in C3.
   {
     type: PROPERTY_TYPE.CHECK,

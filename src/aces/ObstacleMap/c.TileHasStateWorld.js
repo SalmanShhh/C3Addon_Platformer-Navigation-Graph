@@ -4,9 +4,9 @@ export const config = {
   description: "Check if a tile at the given world position has the specified state. World coordinates are automatically converted to grid coordinates.",
   isInvertible: true,
   params: [
-    { id: "x", name: "X", desc: "World X position in pixels", type: "number", initialValue: "0" },
-    { id: "y", name: "Y", desc: "World Y position in pixels", type: "number", initialValue: "0" },
-    { id: "state", name: "State", desc: "Tile state to check for", type: "combo", initialValue: "solid",
+    { id: "x", name: "X", desc: "The X co-ordinate, in pixels.", type: "number", initialValue: "0" },
+    { id: "y", name: "Y", desc: "The Y co-ordinate, in pixels.", type: "number", initialValue: "0" },
+    { id: "state", name: "State", desc: "The tile state to check for.", type: "combo", initialValue: "solid",
       items: [
         { solid: "Solid" },
         { clear: "Clear" },

@@ -2,8 +2,8 @@ export const config = {
   returnType: "number",
   description: "Get the grid Y coordinate of the nearest navigation node to a given world position.",
   params: [
-    { id: "x", name: "X", desc: "World X position", type: "number" },
-    { id: "y", name: "Y", desc: "World Y position", type: "number" }
+    { id: "x", name: "X", desc: "The X co-ordinate, in pixels.", type: "number" },
+    { id: "y", name: "Y", desc: "The Y co-ordinate, in pixels.", type: "number" }
   ]
 };
 

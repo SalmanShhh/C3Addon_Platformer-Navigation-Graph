@@ -51,8 +51,21 @@ export default function (parentClass) {
       this.mapTag = typeof properties[15] === "string" ? properties[15].trim() : "";
       // Detect Slopes: classify slope tiles from collision-shape probes during scans
       this.detectSlopes = !!properties[16];
+
+      // Crowd arrivals: goal reservation (per map tag)
+      this.crowdArrivals = !!properties[17];
+      // Idle separation: personal space in pixels for idle characters (0 = off)
+      this.idleSeparation = Math.max(0, properties[18] || 0);
+      // Separation cooldown: rest time after giving up on an unsatisfiable
+      // separation (0 = never rest, keep trying)
+      this.separationCooldown =
+        typeof properties[19] === "number" ? Math.max(0, properties[19]) : 5;
+      // Separation give-up time: how long a character keeps nudging before it
+      // gives up and rests. ACE-only setting (no property) — 1.2s suits most
+      // games; tune via 'Set separation give-up time'.
+      this.separationGiveUpTime = 1.2;
       // Enabled: standard behavior toggle. Disabled = frozen (state kept)
-      this.navEnabled = properties[17] !== false;
+      this.navEnabled = properties[20] !== false;
       // Auto-enabled when portals/hazards are added via ACEs
       this.enablePortals = true;
       this.enableHazards = false;
@@ -338,6 +351,10 @@ export default function (parentClass) {
 
       if (this.hasPath && !this.pathPending) {
         this._followPath(dt);
+      } else {
+        // Idle separation: idle agents drift apart when overlapping (no-op
+        // unless Idle Separation > 0 and a same-map neighbor is too close).
+        this._applyIdleSeparation(dt);
       }
 
       if (this.justUsedPortal) {
@@ -398,6 +415,10 @@ export default function (parentClass) {
         hazardRadius: this.hazardRadius,
         pathStrategy: this.pathStrategy,
         multiAgentAvoidance: this.multiAgentAvoidance,
+        crowdArrivals: this.crowdArrivals,
+        idleSeparation: this.idleSeparation,
+        separationCooldown: this.separationCooldown,
+        separationGiveUpTime: this.separationGiveUpTime,
         currentPath: this.currentPath.map((wp) => ({
           x: wp.x,
           y: wp.y,
@@ -493,6 +514,10 @@ export default function (parentClass) {
       this.hazardRadius = o.hazardRadius;
       this.pathStrategy = o.pathStrategy || "balanced";
       this.multiAgentAvoidance = o.multiAgentAvoidance;
+      this.crowdArrivals = !!o.crowdArrivals;
+      this.idleSeparation = Math.max(0, o.idleSeparation || 0);
+      this.separationCooldown = typeof o.separationCooldown === "number" ? Math.max(0, o.separationCooldown) : 5;
+      this.separationGiveUpTime = typeof o.separationGiveUpTime === "number" ? Math.max(0, o.separationGiveUpTime) : 1.2;
       this.currentWaypoint = o.currentWaypoint;
       this.hasPath = o.hasPath;
       this.timeAtWaypoint = o.timeAtWaypoint;

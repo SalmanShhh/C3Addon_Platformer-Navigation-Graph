@@ -2,8 +2,8 @@ export const config = {
   returnType: "number",
   description: "Get the world X position of a node at the specified grid coordinates. The node position is centred within the tile. Returns 0 if node doesn't exist.",
   params: [
-    { id: "gx", name: "Grid X", desc: "Grid X coordinate", type: "number" },
-    { id: "gy", name: "Grid Y", desc: "Grid Y coordinate", type: "number" }
+    { id: "gx", name: "Grid X", desc: "The tile X co-ordinate.", type: "number" },
+    { id: "gy", name: "Grid Y", desc: "The tile Y co-ordinate.", type: "number" }
   ]
 };
 

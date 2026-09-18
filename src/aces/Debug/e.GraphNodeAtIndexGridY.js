@@ -2,7 +2,7 @@ export const config = {
   returnType: "number",
   description: "Get the grid Y coordinate of the node at the given index.",
   params: [
-    { id: "index", name: "Index", desc: "Node index", type: "number" }
+    { id: "index", name: "Index", desc: "The zero-based index of the node.", type: "number" }
   ]
 };
 

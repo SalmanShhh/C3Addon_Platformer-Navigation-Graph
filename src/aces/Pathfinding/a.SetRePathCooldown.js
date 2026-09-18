@@ -3,7 +3,7 @@ export const config = {
   displayText: "{my}: Set re-path cooldown to {0} seconds",
   description: "Set the minimum time in seconds between automatic re-path attempts. Lower values = more responsive re-pathing but more CPU usage. Default is 0.5 seconds.",
   params: [
-    { id: "seconds", name: "Seconds", desc: "Cooldown in seconds", type: "number", initialValue: "0.5" }
+    { id: "seconds", name: "Seconds", desc: "The cooldown, in seconds.", type: "number", initialValue: "0.5" }
   ]
 };
 

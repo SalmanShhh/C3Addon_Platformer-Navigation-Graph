@@ -3,9 +3,9 @@ export const config = {
   displayText: "{my}: Set tile at world ({0}, {1}) to {2}",
   description: "Set the state of a tile at the specified world coordinates. The world position is automatically converted to grid coordinates.",
   params: [
-    { id: "x", name: "X", desc: "World X position in pixels", type: "number", initialValue: "0" },
-    { id: "y", name: "Y", desc: "World Y position in pixels", type: "number", initialValue: "0" },
-    { id: "state", name: "State", desc: "Tile state to set", type: "combo", initialValue: "solid",
+    { id: "x", name: "X", desc: "The X co-ordinate, in pixels.", type: "number", initialValue: "0" },
+    { id: "y", name: "Y", desc: "The Y co-ordinate, in pixels.", type: "number", initialValue: "0" },
+    { id: "state", name: "State", desc: "The tile state to set.", type: "combo", initialValue: "solid",
       items: [
         { solid: "Solid" },
         { clear: "Clear" },

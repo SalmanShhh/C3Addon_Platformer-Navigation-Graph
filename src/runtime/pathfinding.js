@@ -56,6 +56,19 @@ export default {
       return null;
     }
 
+    // Crowd arrivals: if another living agent already claimed this goal node,
+    // retarget to the nearest unclaimed node so arrivals tile onto neighboring
+    // cells instead of stacking on one pixel. The claim itself is made when a
+    // path is actually found (aceFindPath success).
+    if (this.crowdArrivals) {
+      const spread = this._resolveUnclaimedGoal(goalNode);
+      if (spread !== goalNode) {
+        this._log(`Crowd arrivals: goal (${goalNode.gx},${goalNode.gy}) is claimed — retargeting to (${spread.gx},${spread.gy})`);
+        goalNode = spread;
+        goalGrid = { gx: spread.gx, gy: spread.gy };
+      }
+    }
+
     // Early exit: same ground level, continuous walkable ground, no gaps/walls
     const sameLevel = Math.abs(startGrid.gy - goalGrid.gy) <= 1;
     if (sameLevel && startNode && goalNode) {
@@ -639,6 +652,31 @@ export default {
     return bestPath;
   },
 
+  /** Crowd arrivals: returns the given goal node if it is unclaimed (or claimed
+   *  by this instance), otherwise the nearest unclaimed node within a few cells.
+   *  Falls back to the original node when everything nearby is taken — stacking
+   *  is better than failing. */
+  _resolveUnclaimedGoal(goalNode) {
+    const navKey = this._getNavKey();
+    if (!globalNavManager.isGoalClaimedByOther(navKey, goalNode, this)) {
+      return goalNode;
+    }
+    const graph = this._getNavigationGraph();
+    if (!graph) return goalNode;
+    const maxRadius = this.cellSize * 6;
+    let best = null;
+    let bestDist = Infinity;
+    for (const [, node] of graph) {
+      if (node === goalNode) continue;
+      const d = this.distance(node.x, node.y, goalNode.x, goalNode.y);
+      if (d > maxRadius || d >= bestDist) continue;
+      if (globalNavManager.isGoalClaimedByOther(navKey, node, this)) continue;
+      best = node;
+      bestDist = d;
+    }
+    return best || goalNode;
+  },
+
   /** Traces parent pointers from the goal back to the start, building a waypoint array with actions and metadata. */
   _reconstructPath(goalNode) {
     const path = [];
@@ -902,6 +940,13 @@ export default {
         );
       }
 
+      // Crowd arrivals: claim the path's actual final node (swaps out any
+      // previous claim). The claim persists while standing at the spot and is
+      // released on Stop/clear, disable, or destroy.
+      if (this.crowdArrivals && path[path.length - 1].node) {
+        globalNavManager.claimGoal(this._getNavKey(), path[path.length - 1].node, this);
+      }
+
       this.lastPathFailReason = "";
       this._log(`Path found: ${path.length} waypoints, cost=${Math.round(this.lastPathCost)}`);
       this._trigger("OnPathFound");
@@ -915,6 +960,8 @@ export default {
 
   /** Clears the current path and resets all path-following state (waypoint index, jump phase, etc.). */
   aceClearPath() {
+    // Stop is an explicit abandon — give the reserved spot back to the crowd.
+    globalNavManager.releaseGoalClaim(this);
     this.hasPath = false;
     this.currentPath = [];
     this.currentWaypoint = 0;

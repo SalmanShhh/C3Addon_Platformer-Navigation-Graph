@@ -6,12 +6,12 @@ export const config = {
     { id: "direction", name: "Direction", desc: "One-way: entry to exit only. Two-way: works in both directions.", type: "combo", initialValue: "one_way",
       items: [{ one_way: "One-way" }, { two_way: "Two-way" }]
     },
-    { id: "entryX", name: "Entry X", desc: "Entry world X position in pixels", type: "number", initialValue: "0" },
-    { id: "entryY", name: "Entry Y", desc: "Entry world Y position in pixels", type: "number", initialValue: "0" },
-    { id: "exitX", name: "Exit X", desc: "Exit world X position in pixels", type: "number", initialValue: "0" },
-    { id: "exitY", name: "Exit Y", desc: "Exit world Y position in pixels", type: "number", initialValue: "0" },
-    { id: "cost", name: "Cost", desc: "How much the AI 'pays' to use this portal. Default 1 = same as walking one tile. Lower = preferred, higher = avoided.", type: "number", initialValue: "1" },
-    { id: "tag", name: "Tag", desc: "Optional tag for grouping portals. Use commas for multiple tags (e.g. \"door,room_A\"). Leave empty for no tag.", type: "string", initialValue: '""' }
+    { id: "entryX", name: "Entry X", desc: "The X co-ordinate of the portal entry, in pixels.", type: "number", initialValue: "0" },
+    { id: "entryY", name: "Entry Y", desc: "The Y co-ordinate of the portal entry, in pixels.", type: "number", initialValue: "0" },
+    { id: "exitX", name: "Exit X", desc: "The X co-ordinate of the portal exit, in pixels.", type: "number", initialValue: "0" },
+    { id: "exitY", name: "Exit Y", desc: "The Y co-ordinate of the portal exit, in pixels.", type: "number", initialValue: "0" },
+    { id: "cost", name: "Cost", desc: "The cost of using this portal. The default of 1 is the same as walking one tile; lower costs are preferred and higher costs avoided.", type: "number", initialValue: "1" },
+    { id: "tag", name: "Tag", desc: "An optional tag for grouping portals. Use commas for multiple tags (e.g. \"door,room_A\"). Leave empty for no tag.", type: "string", initialValue: '""' }
   ]
 };
 

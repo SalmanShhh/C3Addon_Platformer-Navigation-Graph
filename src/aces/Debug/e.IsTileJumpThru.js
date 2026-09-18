@@ -2,8 +2,8 @@ export const config = {
   returnType: "number",
   description: "Returns 1 if the tile at the given grid coordinates is a jump-through tile, 0 otherwise.",
   params: [
-    { id: "gx", name: "Grid X", desc: "Tile grid X", type: "number" },
-    { id: "gy", name: "Grid Y", desc: "Tile grid Y", type: "number" }
+    { id: "gx", name: "Grid X", desc: "The tile X co-ordinate.", type: "number" },
+    { id: "gy", name: "Grid Y", desc: "The tile Y co-ordinate.", type: "number" }
   ]
 };
 

@@ -4,7 +4,7 @@ export const config = {
   description: "Change the movement speed of a gradual portal (pixels per second). Has no effect on instant portals.",
   params: [
     { id: "portalId", name: "Portal ID", desc: "The ID of the portal to configure", type: "number", initialValue: "0" },
-    { id: "speed", name: "Speed", desc: "Movement speed in pixels per second", type: "number", initialValue: "100" }
+    { id: "speed", name: "Speed", desc: "The movement speed, in pixels per second.", type: "number", initialValue: "100" }
   ]
 };
 
