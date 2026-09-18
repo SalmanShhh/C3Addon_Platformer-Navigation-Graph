@@ -38,12 +38,12 @@
           },
           "path_strategy": {
             "name": "Path Strategy",
-            "desc": "How the AI picks the best route when multiple paths exist. Balanced: weighs distance and difficulty equally, good for most platformers and adventure games. Shortest Distance: always takes the fastest route even with risky jumps, ideal for speedrunner games and time trials. Safest Route: avoids jumps and falls when possible, great for stealth games, escort missions, or fragile NPCs. Simplest Path: fewest waypoints for predictable movement, best for simple enemies and tower defense creeps.",
+            "desc": "How the AI picks the best route when multiple paths exist. Balanced: weighs distance and difficulty equally, good for most platformers and adventure games. Shortest Distance: always takes the fastest route, using long momentum jumps to skip platforms, ideal for speedrunner games and time trials. Safest Route: prefers chains of short hops and drops over long leaps and falls, great for stealth games, escort missions, or fragile NPCs. Ground-Hugging: walks whenever a walking route exists and only jumps or falls when unavoidable, best for patrols, tower defense creeps, and predictable simple enemies.",
             "items": {
               "balanced": "Balanced (recommended for most games)",
               "shortest": "Shortest Distance (speedrunners, time trials)",
               "safest": "Safest Route (stealth, escort missions)",
-              "simplest": "Simplest Path (simple enemies, predictable AI)"
+              "simplest": "Ground-Hugging (patrols, predictable AI)"
             }
           },
           "smooth_paths": {
@@ -692,7 +692,7 @@
           "SetPathStrategy": {
             "list-name": "Set path strategy",
             "display-text": "{my}: Set path strategy to {0}",
-            "description": "Change how the AI picks the best route when multiple paths exist. Balanced: weighs distance and difficulty equally. Shortest Distance: always takes the fastest route. Safest Route: avoids jumps and falls. Simplest Path: fewest waypoints.",
+            "description": "Change how the AI picks the best route when multiple paths exist. Balanced: weighs distance and difficulty equally. Shortest Distance: always takes the fastest route, using momentum jumps to skip platforms. Safest Route: prefers short hops and drops over long leaps and falls. Ground-Hugging: walks whenever possible, jumping or falling only when unavoidable.",
             "params": {
               "strategy": {
                 "name": "Strategy",
@@ -701,7 +701,7 @@
                   "balanced": "Balanced",
                   "shortest": "Shortest Distance",
                   "safest": "Safest Route",
-                  "simplest": "Simplest Path"
+                  "simplest": "Ground-Hugging"
                 }
               }
             }
@@ -1975,7 +1975,7 @@
           },
           "PathStrategy": {
             "translated-name": "PathStrategy",
-            "description": "Get the current path strategy preset (balanced, shortest, safest, simplest).",
+            "description": "Get the current path strategy preset (balanced, shortest, safest, simplest). Note: 'simplest' is the Ground-Hugging strategy — the key kept its original name for save compatibility.",
             "params": {}
           },
           "RePathCooldown": {

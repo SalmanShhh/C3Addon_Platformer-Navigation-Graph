@@ -50,9 +50,72 @@ export default {
     const waypoint = this.currentPath[this.currentWaypoint];
     this.timeAtWaypoint += dt;
 
+    // Debug: compact arc trace during jump/fall waypoints — one line at
+    // departure and one at the first wall contact, the two moments that
+    // diagnose a missed arc. Landing outcomes are already covered by the
+    // "Waypoint reached" / "Landed off-course" lines.
+    if (
+      this.enableDebug && waypoint.action &&
+      (waypoint.action.includes("fall") || waypoint.action.includes("jump"))
+    ) {
+      try {
+        const airborne = !this.platformBehavior.isOnFloor;
+        if (airborne && !(this._arcTraceState & 1)) {
+          this._arcTraceState |= 1;
+          this._log(
+            `Arc [${waypoint.action}] departed: ` +
+            `pos=(${Math.round(this.instance.x)},${Math.round(this.instance.y)}) ` +
+            `vx=${Math.round(this.platformBehavior.vectorX)}`
+          );
+        }
+        if (
+          airborne && !(this._arcTraceState & 2) &&
+          (this.platformBehavior.isByWall("left") || this.platformBehavior.isByWall("right"))
+        ) {
+          this._arcTraceState |= 2;
+          this._log(
+            `Arc [${waypoint.action}] wall contact: ` +
+            `pos=(${Math.round(this.instance.x)},${Math.round(this.instance.y)})`
+          );
+        }
+      } catch (e) {}
+    }
+
+    // Off-course landing detection for airborne waypoints: if the character
+    // was airborne for this jump/fall and lands far from the target, the arc
+    // failed (bumped a wall, clipped a corner). Re-path immediately from
+    // wherever it landed instead of waiting out the stuck timer.
+    const isAirWaypoint =
+      waypoint.action === "jump" || waypoint.action === "coyote_jump" ||
+      waypoint.action.includes("fall");
+    if (isAirWaypoint && this.platformBehavior) {
+      try {
+        if (!this.platformBehavior.isOnFloor) {
+          this._wpWasAirborne = true;
+        } else if (this._wpWasAirborne) {
+          this._wpWasAirborne = false;
+          this._arcTraceState = 0;
+          const landDist = this.distance(
+            this.instance.x, this.instance.y, waypoint.x, waypoint.y
+          );
+          if (landDist > this.cellSize * 1.5) {
+            this._log(
+              `Landed off-course after ${waypoint.action} ` +
+              `(${Math.round(landDist)}px from waypoint) — repathing`
+            );
+            this._rePath();
+            return;
+          }
+        }
+      } catch (e) {}
+    }
+
     if (this.timeAtWaypoint > this.maxWaypointTime) {
       this.hasPath = false;
       this.departureCommitted = false;
+      this._wpWasAirborne = false;
+      this._arcTraceState = 0;
+      this._momentumArmed = false;
       this.timeAtWaypoint = 0;
       this._log(`Stuck at waypoint ${this.currentWaypoint} action=${waypoint.action} target=(${Math.round(waypoint.x)},${Math.round(waypoint.y)}) pos=(${Math.round(this.instance.x)},${Math.round(this.instance.y)}) (exceeded ${this.maxWaypointTime}s)`);
       this._trigger("OnWaypointStuck");
@@ -152,6 +215,9 @@ export default {
       this.departureCommitted = false;
       this.doubleJumpPhase = 0;
       this.isHoldingJump = false;
+      this._wpWasAirborne = false;
+      this._arcTraceState = 0;
+      this._momentumArmed = false;
       this._trigger("OnWaypointReached");
       return;
     }
@@ -183,18 +249,29 @@ export default {
 
       // Convert jump to fall when the target is below, character is on the floor,
       // and not on an island. Only when grounded — mid-air conversion disrupts the jump arc.
-      if (effectiveAction === "jump" && this.platformBehavior.isOnFloor && waypoint.y > this.instance.y + this.cellSize * 0.3) {
+      if (effectiveAction === "jump" && !waypoint.requiresMomentum && this.platformBehavior.isOnFloor && waypoint.y > this.instance.y + this.cellSize * 0.3) {
         const prevWpIdx = this.currentWaypoint - 1;
         const prevWp = prevWpIdx >= 0 ? this.currentPath[prevWpIdx] : null;
         const prevNode = prevWp ? prevWp.node : null;
         const isOnIsland = prevNode && prevNode.isIsland;
         if (!isOnIsland) {
           const xDiff = waypoint.x - this.instance.x;
+          // Only downgrade the jump when plain fall physics can actually cover
+          // the horizontal distance: drift range = maxSpeed × fall time, with a
+          // 20% margin for the edge departure and end-of-fall braking. A long
+          // flat jump to a lower platform (e.g. 6 tiles across, 2 down) needs
+          // the jump arc's extra airtime — converted to a fall, the character
+          // walks off the ledge into a drop that can never reach the landing.
+          const dy = waypoint.y - this.instance.y;
+          const gravity = this.platformProps.gravity || 1500;
+          const maxSpeed = this.platformProps.maxSpeed || 330;
+          const fallDriftRange = maxSpeed * Math.sqrt((2 * dy) / gravity) * 0.8;
           if (Math.abs(xDiff) < this.cellSize * 0.3) {
             effectiveAction = "fall";
-          } else {
+          } else if (Math.abs(xDiff) <= fallDriftRange) {
             effectiveAction = xDiff < 0 ? "fall_left" : "fall_right";
           }
+          // else: keep the jump — the arc is required to cover the distance.
         }
       }
 
@@ -390,8 +467,10 @@ export default {
 
   /** Applies horizontal simulateControl toward a walk waypoint; handles ledge restriction and arrival centering. */
   _handleWalkAction(targetX, direction, waypoint) {
+    // Horizontal braking must use the horizontal velocity only: .speed is the
+    // overall velocity magnitude, which includes any vertical component.
     const speed =
-      this.platformBehavior.speed || Math.abs(this.estimatedVelocityX);
+      Math.abs(this.platformBehavior.vectorX) || Math.abs(this.estimatedVelocityX);
     const decel = this.platformProps.deceleration;
     const distToTarget = Math.abs(targetX - this.instance.x);
     const stoppingDist = (speed * speed) / (2 * decel);
@@ -665,6 +744,44 @@ export default {
       }
     }
 
+    // Momentum (run-up) jump departure: this connection was validated for an
+    // edge launch at speed, not a standstill launch from the tile center. Do
+    // what a player does on a small stone: back up across the launch tile,
+    // sprint toward the gap, and leap from the edge (~24px of runway reaches
+    // ~0.8 maxSpeed, matching _canJump's momentum launch model).
+    if (waypoint && waypoint.requiresMomentum && this.platformBehavior.isOnFloor) {
+      const prevIdx = this.currentWaypoint - 1;
+      const prevWp = prevIdx >= 0 ? this.currentPath[prevIdx] : null;
+      const baseX = prevWp && prevWp.node ? prevWp.node.x : this.instance.x;
+      const D = targetX < this.instance.x ? -1 : 1;
+      const dirName = D < 0 ? "left" : "right";
+      const backName = D < 0 ? "right" : "left";
+      const backX = baseX - D * this.cellSize * 0.3;
+      const launchX = baseX + D * this.cellSize * 0.44;
+
+      if (!this._momentumArmed) {
+        // Phase A: back up to the far side of the launch tile for runway.
+        let wallBehind = false;
+        try { wallBehind = this.platformBehavior.isByWall(backName); } catch (e) {}
+        if (!wallBehind && (this.instance.x - backX) * D > 0) {
+          this.platformBehavior.simulateControl(backName);
+          return;
+        }
+        this._momentumArmed = true;
+      }
+
+      // Phase B: sprint across the tile; leap the moment the edge is reached.
+      this.platformBehavior.simulateControl(dirName);
+      if ((this.instance.x - launchX) * D >= 0) {
+        this._momentumArmed = false;
+        this.platformBehavior.simulateControl("jump");
+        this.isHoldingJump = true;
+        this.jumpHoldTimer = 0;
+        this.jumpStartY = this.instance.y;
+      }
+      return;
+    }
+
     // Pre-position before jumping.
     // When ledge restriction is OFF, a wall blocks the jump direction, AND the
     // node has a ledge on that side (overhang scenario), walk to the platform edge
@@ -727,10 +844,31 @@ export default {
       }
     }
 
-    // Apply horizontal input toward target during jump
+    // Apply horizontal input toward the target during the jump. Mid-air the
+    // input uses the same deceleration-based braking as falls: without it the
+    // drift bang-bangs around the target X (input direction flips sign every
+    // tick once past it), and that ±stopping-distance oscillation is wider
+    // than a one-tile island — the character can cross the landing height
+    // during an outward swing and miss the platform entirely.
     if (!isVerticalJump) {
       const dir = targetX < this.instance.x ? "left" : "right";
-      this.platformBehavior.simulateControl(dir);
+      let airborne = false;
+      try { airborne = !this.platformBehavior.isOnFloor; } catch (e) {}
+      if (!airborne) {
+        // Launch frame(s): full input for maximum departure speed.
+        this.platformBehavior.simulateControl(dir);
+      } else {
+        const vx =
+          Math.abs(this.platformBehavior.vectorX) || Math.abs(this.estimatedVelocityX);
+        const stopDist = (vx * vx) / (2 * this.platformProps.deceleration);
+        const distToTarget = Math.abs(targetX - this.instance.x);
+        if (
+          distToTarget > this.cellSize * 0.2 &&
+          distToTarget > stopDist + this.cellSize * 0.1
+        ) {
+          this.platformBehavior.simulateControl(dir);
+        }
+      }
     }
 
     try {
@@ -816,17 +954,46 @@ export default {
   /** Handles fall/fall_left/fall_right by applying directional input to drift toward the landing target.
    *  Uses deceleration-based braking to avoid overshooting the target X. */
   _handleFallAction(targetX) {
+    // Horizontal braking must use the horizontal velocity ONLY. The Platform
+    // behavior's .speed is the overall velocity magnitude, so mid-fall the
+    // vertical component (up to maxFallSpeed) inflated the stopping distance
+    // and cut drift input the moment the character left the edge — long
+    // diagonal falls then undershot their landing platform and dropped past it.
     const speed =
-      this.platformBehavior.speed || Math.abs(this.estimatedVelocityX);
+      Math.abs(this.platformBehavior.vectorX) || Math.abs(this.estimatedVelocityX);
     const decel = this.platformProps.deceleration;
     const distToTarget = Math.abs(targetX - this.instance.x);
     const stoppingDist = (speed * speed) / (2 * decel);
 
+    let onFloor = false;
+    try { onFloor = this.platformBehavior.isOnFloor; } catch (e) {}
+    const dir = targetX < this.instance.x ? "left" : "right";
+
     if (distToTarget > this.cellSize * 0.2) {
-      const dir = targetX < this.instance.x ? "left" : "right";
       if (distToTarget > stoppingDist + this.cellSize * 0.1) {
         this.platformBehavior.simulateControl(dir);
+        this._fallBrakeLogged = false;
+      } else if (onFloor && speed < 60) {
+        // Braked to a crawl but still STANDING short of the drop: keep creeping
+        // toward the edge. Without this, the deceleration-based braking parks
+        // the character on the ledge corner (floor still under a few pixels of
+        // its base) and the fall never starts. Mid-air braking is untouched —
+        // this only fires while grounded at near-zero speed.
+        this.platformBehavior.simulateControl(dir);
+      } else if (!this._fallBrakeLogged) {
+        // One-shot debug marker per braking phase: records where drift input was
+        // released so undershoot/overshoot can be diagnosed from the console.
+        this._fallBrakeLogged = true;
+        this._log(
+          `Fall braking: pos=(${Math.round(this.instance.x)},${Math.round(this.instance.y)}) ` +
+          `vx=${Math.round(speed)} distX=${Math.round(distToTarget)} stopDist=${Math.round(stoppingDist)}`
+        );
       }
+    } else if (onFloor) {
+      // At the landing X but still standing ABOVE the drop (teetering on the
+      // ledge corner within the dead zone): the fall has not happened yet.
+      // Nudge toward the target until the floor is actually left behind.
+      this.platformBehavior.simulateControl(dir);
     }
   },
 
@@ -1015,10 +1182,10 @@ export default {
     return this.estimatedVelocityX;
   },
 
-  /** Returns the estimated stopping distance in pixels based on current speed and deceleration. */
+  /** Returns the estimated stopping distance in pixels based on current horizontal speed and deceleration. */
   aceGetStoppingDistance() {
     const speed = this.platformBehavior
-      ? this.platformBehavior.speed || Math.abs(this.estimatedVelocityX)
+      ? Math.abs(this.platformBehavior.vectorX) || Math.abs(this.estimatedVelocityX)
       : 0;
     const decel = this.platformProps.deceleration;
     return decel > 0 ? (speed * speed) / (2 * decel) : 0;

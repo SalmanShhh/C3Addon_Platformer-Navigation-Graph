@@ -297,8 +297,64 @@ export default {
     const wallMs = performance.now() - build.startTime;
     this._log(`Graph generated: ${build.workMs.toFixed(2)}ms of work over ${build.ticks} tick(s) (${wallMs.toFixed(2)}ms wall)`);
 
+    this._warnIfGraphDisconnected();
+
     // this makes sure the trigger condition is called once the graph is generated.
     this._trigger("OnGraphGenerated");
+  },
+
+  /** Debug aid: after a build, detect isolated graph regions. A map that
+   *  silently splits into components is the root of every "it just refuses to
+   *  path" report — a character inside a small component can reach nothing,
+   *  and nothing can reach it. Components are computed over connections
+   *  treated as undirected (reachable either way still means "same region"). */
+  _warnIfGraphDisconnected() {
+    if (!this.enableDebug) return;
+    const graph = this._getNavigationGraph();
+    if (!graph || graph.size < 2) return;
+
+    // Undirected adjacency via node identity
+    const neighbors = new Map();
+    for (const [, node] of graph) neighbors.set(node, new Set());
+    for (const [, node] of graph) {
+      for (const conn of node.connections) {
+        if (!neighbors.has(conn.target)) continue;
+        neighbors.get(node).add(conn.target);
+        neighbors.get(conn.target).add(node);
+      }
+    }
+
+    const seen = new Set();
+    const components = [];
+    for (const [, node] of graph) {
+      if (seen.has(node)) continue;
+      const comp = [];
+      const stack = [node];
+      seen.add(node);
+      while (stack.length) {
+        const n = stack.pop();
+        comp.push(n);
+        for (const nb of neighbors.get(n)) {
+          if (!seen.has(nb)) { seen.add(nb); stack.push(nb); }
+        }
+      }
+      components.push(comp);
+    }
+
+    if (components.length > 1) {
+      components.sort((a, b) => b.length - a.length);
+      for (let i = 1; i < components.length; i++) {
+        const cells = components[i]
+          .slice(0, 8)
+          .map((n) => `(${n.gx},${n.gy})`)
+          .join(" ");
+        this._warn(
+          `Graph has an ISOLATED region of ${components[i].length} node(s): ${cells}` +
+          `${components[i].length > 8 ? " …" : ""} — characters there cannot reach the rest of the map ` +
+          `(gaps too wide/tall for this character's jump physics, or blocked arcs).`
+        );
+      }
+    }
   },
 
   /** Shares the builder's map state (by reference) with every same-map
@@ -385,6 +441,10 @@ export default {
     const maxHeightCells = Math.ceil(singleHeight / this.cellSize);
     const maxFallCells = Math.ceil(this.maxFallDistance / this.cellSize);
     const maxDistCells = Math.ceil(singleDist / this.cellSize);
+    // Momentum (run-up) jumps launch from the tile edge at speed, extending
+    // horizontal range ~45% beyond the standstill envelope.
+    const momentumDist = singleDist * 1.45;
+    const momentumDistCells = Math.ceil(momentumDist / this.cellSize);
     // Cap downward range: a jump arc goes UP peakHeight then descends back.
     // From launch, you land at most ~maxHeightCells below via the arc itself.
     // Targets further below should use fall connections from ledge nodes.
@@ -393,7 +453,7 @@ export default {
     let count = 0;
 
     for (const dir of [-1, 1]) {
-      for (let dist = 0; dist <= maxDistCells; dist++) {
+      for (let dist = 0; dist <= momentumDistCells; dist++) {
         // When dist=0 (vertical jump), only check once (dir=1) to avoid duplicates
         if (dist === 0 && dir === -1) continue;
 
@@ -404,8 +464,11 @@ export default {
           const targetGx = node.gx + dir * dist;
           const targetGy = node.gy - height;
           const target = this.getNode(targetGx, targetGy);
+          if (!target) continue;
 
-          const peakHeight = target ? this._canJump(node, target, singleHeight, singleDist) : 0;
+          const peakHeight = dist <= maxDistCells
+            ? this._canJump(node, target, singleHeight, singleDist)
+            : 0;
           if (peakHeight > 0) {
             const distance = this.distance(node.x, node.y, target.x, target.y);
             node.connections.push({
@@ -415,6 +478,26 @@ export default {
               peakHeight,
             });
             count++;
+          } else if (dist >= 3) {
+            // Standstill launch can't make it — try a run-up (momentum) launch.
+            // Slope nodes are allowed: the Platform behavior sprints on slopes
+            // fine, and excluding them stranded characters on slope-only
+            // terrain whose sole exits were momentum-length hops. Only hops
+            // long enough to be worth the back-up-and-sprint setup.
+            const momPeak = this._canJump(node, target, singleHeight, momentumDist, true);
+            if (momPeak > 0) {
+              const distance = this.distance(node.x, node.y, target.x, target.y);
+              node.connections.push({
+                target,
+                action: "jump",
+                // Slightly pricier than a plain jump: the run-up costs setup
+                // time and the launch has tighter tolerances.
+                cost: distance * this.JUMP_COST * 1.25,
+                peakHeight: momPeak,
+                requiresMomentum: true,
+              });
+              count++;
+            }
           }
         }
       }
@@ -731,7 +814,10 @@ export default {
   // Returns the minimum viable peak height in pixels (>0) if jump is possible,
   // or 0 if the jump is blocked. The peak height is stored in connections and
   // used by the movement code to release the jump button at the right time.
-  _canJump(from, to, maxHeight, maxDist) {
+  // withMomentum: validate a RUN-UP launch instead of a standstill one — the
+  // executor backs up across the launch tile, sprints, and leaps from the
+  // tile edge at ~0.78 maxSpeed (see _handleJumpAction's momentum departure).
+  _canJump(from, to, maxHeight, maxDist, withMomentum) {
     maxHeight = maxHeight || this.maxJumpHeight;
     maxDist = maxDist || this.maxJumpDistance;
     const dx = to.x - from.x;
@@ -740,7 +826,44 @@ export default {
     if (Math.abs(dx) > maxDist) return 0;
     if (-dy > maxHeight) return 0;
 
-    const headCells = Math.max(0, Math.ceil(this.characterHeight / this.cellSize) - 1);
+    // Kinematic envelope: height and distance are NOT independent limits. An
+    // upward jump only has until it sinks back to the landing height to cover
+    // the horizontal distance. With launch speed v0 = sqrt(2g·maxHeight), the
+    // second crossing of rise h is at t = (v0 + sqrt(2g(maxHeight - h))) / g.
+    // Near-max height leaves near-zero range (e.g. a 128px-up jump cannot also
+    // travel 192px sideways even though both are under their individual caps —
+    // the character arrives at the right X but below the platform and drops).
+    // The 0.8 factor mirrors the margin already baked into maxJumpDistance.
+    const rise = -dy;
+    if (rise > 0) {
+      const g = this.platformProps.gravity;
+      const maxSpd = this.platformProps.maxSpeed;
+      if (g > 0 && maxSpd > 0) {
+        const v0 = Math.sqrt(2 * g * maxHeight);
+        const tLand = (v0 + Math.sqrt(Math.max(0, 2 * g * (maxHeight - rise)))) / g;
+        // Run-up launches suffer no standstill acceleration loss (1.0 vs 0.8)
+        // and start from the tile edge rather than the node center.
+        const reach = withMomentum
+          ? maxSpd * tLand + this.cellSize * 0.44
+          : maxSpd * tLand * 0.8;
+        if (Math.abs(dx) > reach) return 0;
+      }
+    }
+
+    // Head clearance: arc samples are the character's CENTER, so the body
+    // extends half the character height above each sample. The old formula
+    // (ceil(height/cs) - 1) was ZERO for characters up to one cell tall, so
+    // arcs were validated as a point — a rising jump could pass "clear" while
+    // the character's head clipped the side of a block one row above the
+    // sampled cell, killing the arc mid-air. standingHeadCells is the head
+    // room needed when standing AT a node (start/destination cells), which is
+    // less than mid-arc clearance since the sample sits at the node center.
+    const halfH = (this.characterHeight || this.cellSize) / 2;
+    const headCells = Math.ceil(halfH / this.cellSize);
+    const standingHeadCells = Math.max(
+      0,
+      Math.ceil((halfH - this.cellSize / 2) / this.cellSize)
+    );
 
     // Vertical or near-vertical jump: use straight column check instead of Bezier arc.
     // This matches how falls work (straight drop) and avoids the arc overshooting into ceilings.
@@ -749,6 +872,10 @@ export default {
       const maxGy = Math.max(from.gy, to.gy);
       for (let gy = minGy; gy <= maxGy; gy++) {
         for (let h = 0; h <= headCells; h++) {
+          // Start/destination rows only need STANDING head room — e.g. a
+          // ceiling directly above the landing node must not reject the jump
+          // (the character bonks harmlessly and settles onto the node).
+          if (h > 0 && (gy === from.gy || gy === to.gy) && h > standingHeadCells) continue;
           const checkGy = gy - h;
           if (checkGy < 0) continue; // Above grid — no ceiling to hit
           const index = checkGy * this.gridWidth + from.gx;
@@ -773,103 +900,168 @@ export default {
       return maxHeight; // Vertical jumps use full sustain
     }
 
-    // Horizontal jump: use Bezier arc check
-    // Adaptive arc: peak just high enough for the jump, capped at maxHeight
+    // Horizontal jump: kinematic flight simulation.
+    // The old check swept a synthetic minimal-peak Bezier ("just high enough
+    // for the jump"), but the arc the character actually flies is fixed by
+    // physics: with Jump Sustain = 0 every jump rises the FULL maxHeight
+    // before descending. The real arc therefore flew far above the validated
+    // one and clipped wall faces the Bezier missed — a side hit while rising
+    // kills horizontal momentum and drops the character short, often into a
+    // pit. This simulates exactly what the movement code will do — launch at
+    // jump speed, accelerate horizontal input toward the target, brake inside
+    // stopping distance, bonk ceilings harmlessly (C3 "stop" mode keeps the
+    // flight alive), die on wall faces — and accepts the connection only if
+    // the simulated character actually lands on the target node.
     const neededPeakHeight = Math.max(-dy, 0) + this.cellSize;
-    const actualPeakHeight = Math.min(maxHeight, neededPeakHeight);
-    const peakY = from.y - actualPeakHeight;
-    const controlY = 2 * peakY - (from.y + to.y) / 2;
+    // Sustain > 0: the executor releases the jump button at the needed peak.
+    // Sustain = 0: jump height is fixed — every arc rises to maxHeight.
+    const actualPeakHeight = this.platformProps.jumpSustain > 0
+      ? Math.min(maxHeight, neededPeakHeight)
+      : maxHeight;
 
-    // Adaptive sample count based on total arc travel (not straight-line distance).
-    // The Bezier can bow significantly above the start→end line (especially for
-    // double-jump second arcs with large downward drops), so use the total vertical
-    // travel (up to peak + peak down to end) plus horizontal distance.
-    const totalArcTravel = Math.abs(dx) + Math.abs(from.y - peakY) + Math.abs(peakY - to.y);
-    const numSteps = Math.max(8, Math.ceil(totalArcTravel / (this.cellSize * 0.5)));
+    const cs = this.cellSize;
+    const g = this.platformProps.gravity || 1500;
+    const maxSpd = this.platformProps.maxSpeed || 330;
+    const accel = this.platformProps.acceleration || maxSpd * 4;
+    const decel = this.platformProps.deceleration || accel;
+    const maxFall = this.platformProps.maxFallSpeed || 1000;
+    const preserveMomentum =
+      this.platformProps.ceilingCollisionMode === "preserve-momentum";
+    const halfW = (this.characterWidth || cs) / 2;
 
-    for (let i = 0; i <= numSteps; i++) {
-      const t = i / numSteps;
-      const x = from.x + dx * t;
-      const oneMinusT = 1 - t;
-      const arcY = from.y * oneMinusT * oneMinusT + 2 * controlY * t * oneMinusT + to.y * t * t;
+    const cellAt = (gx, gy) => {
+      if (gx < 0 || gx >= this.gridWidth) return -1; // off the map sideways
+      if (gy < 0 || gy >= this.gridHeight) return 0; // above/below the map: open air
+      return this.obstacleMap ? this.obstacleMap[gy * this.gridWidth + gx] : 0;
+    };
+    const slopeAt = (gx, gy) =>
+      this.slopeMap && gx >= 0 && gx < this.gridWidth && gy >= 0 && gy < this.gridHeight
+        ? this.slopeMap[gy * this.gridWidth + gx]
+        : 0;
+    // Surface line of a slope cell at world X (same formulas as the walk phase).
+    const slopeSurfaceY = (gx, gy, px) => {
+      const type = slopeAt(gx, gy);
+      const localX = px - gx * cs;
+      if (type === 1) return (gy + 1) * cs - localX;          // slope_left (/)
+      if (type === 2) return gy * cs + localX;                // slope_right (\)
+      const leftType = slopeAt(gx - 1, gy);
+      if (type === 3)                                          // gentle_left (/)
+        return leftType === 3
+          ? (gy + 0.5) * cs - localX * 0.5
+          : (gy + 1) * cs - localX * 0.5;
+      return leftType === 4                                    // gentle_right (\)
+        ? (gy + 0.5) * cs + localX * 0.5
+        : gy * cs + localX * 0.5;
+    };
 
-      const grid = this.worldToGrid(x, arcY);
+    // Run-up launch: from the tile edge at ~0.78 maxSpeed (the executor's
+    // back-up-and-sprint gives ~24px of runway → sqrt(2·accel·24) ≈ 0.8 max;
+    // 0.78 keeps the validator conservative against the real launch).
+    const launchDir = dx < 0 ? -1 : 1;
+    let x = from.x + (withMomentum ? launchDir * cs * 0.44 : 0);
+    let y = from.y;
+    let vx = withMomentum ? launchDir * maxSpd * 0.78 : 0;
+    let vy = -Math.sqrt(2 * g * actualPeakHeight);
+    const dt = 1 / 60;
 
-      if (
-        grid.gx < 0 ||
-        grid.gx >= this.gridWidth ||
-        grid.gy < 0 ||
-        grid.gy >= this.gridHeight
-      ) {
-        return 0;
+    for (let t = 0; t < 3.0; t += dt) {
+      // Executor's horizontal control (mirrors _handleJumpAction's airborne
+      // input): drive toward the target X, brake within stopping distance.
+      const distX = Math.abs(to.x - x);
+      const stopDist = (vx * vx) / (2 * decel);
+      if (distX > cs * 0.2 && distX > stopDist + cs * 0.1) {
+        vx += (to.x < x ? -1 : 1) * accel * dt;
+        if (vx > maxSpd) vx = maxSpd;
+        if (vx < -maxSpd) vx = -maxSpd;
+      } else if (vx !== 0) {
+        const dv = decel * dt;
+        vx = Math.abs(vx) <= dv ? 0 : vx - Math.sign(vx) * dv;
+      }
+      vy += g * dt;
+      if (vy > maxFall) vy = maxFall;
+
+      let nx = x + vx * dt;
+      let ny = y + vy * dt;
+
+      // Horizontal: leading edge against solids and slope bodies (wall hit).
+      if (vx !== 0) {
+        const leadX = nx + Math.sign(vx) * halfW;
+        const lgx = Math.floor(leadX / cs);
+        const topGy = Math.floor((y - halfH + 2) / cs);
+        const botGy = Math.floor((y + halfH - 2) / cs);
+        for (let bgy = topGy; bgy <= botGy; bgy++) {
+          const v = cellAt(lgx, bgy);
+          if (v === -1 || v === 3) return 0; // off-map / avoid zone: reject
+          if (slopeAt(lgx, bgy) > 0) {
+            if (y + halfH - 2 > slopeSurfaceY(lgx, bgy, leadX)) {
+              if (this._canJumpTrace) console.log(`  [sim] t=${t.toFixed(2)} slope-wall at (${lgx},${bgy}) pos=(${x.toFixed(0)},${y.toFixed(0)})`);
+              vx = 0; nx = x; break;
+            }
+          } else if (v === 1) {
+            if (this._canJumpTrace) console.log(`  [sim] t=${t.toFixed(2)} wall at (${lgx},${bgy}) pos=(${x.toFixed(0)},${y.toFixed(0)}) vy=${vy.toFixed(0)}`);
+            vx = 0; nx = x; break;           // wall face: horizontal speed dies
+          }
+        }
       }
 
-      // Only check center column — Platform behavior handles wall collisions at runtime.
-      // This allows jumps through 1-tile-wide gaps and past adjacent walls.
-      for (let h = 0; h <= headCells; h++) {
-        const checkGy = grid.gy - h;
-        if (checkGy < 0) return 0;
-        const index = checkGy * this.gridWidth + grid.gx;
-        const cellVal = this.obstacleMap ? this.obstacleMap[index] : 0;
-
-        if (h === 0) {
-          if (cellVal === 1) return 0;
-          if (cellVal === 3) return 0;
-          if (cellVal === 2) {
-            const prevT = Math.max(0, (i - 1) / numSteps);
-            const prevOneMinusT = 1 - prevT;
-            const prevArcY = from.y * prevOneMinusT * prevOneMinusT + 2 * controlY * prevT * prevOneMinusT + to.y * prevT * prevT;
-            if (arcY > prevArcY) return 0;
+      if (vy < 0) {
+        // Rising: head against ceilings — C3 "stop" zeroes the rise but the
+        // flight continues (this is how stair hops under low ceilings work).
+        const headGy = Math.floor((ny - halfH) / cs);
+        const hgx0 = Math.floor((nx - halfW + 2) / cs);
+        const hgx1 = Math.floor((nx + halfW - 2) / cs);
+        for (let bgx = hgx0; bgx <= hgx1; bgx++) {
+          const v = cellAt(bgx, headGy);
+          if (v === 3) return 0;
+          if (v === 1 && slopeAt(bgx, headGy) === 0) {
+            if (!preserveMomentum) vy = 0;
+            ny = y;
+            break;
           }
-          // Slope blocking: only block arcs that pass through the SOLID BODY of a slope
-          // tile (below the slope's surface line). Arcs passing above the slope surface
-          // are in clear air and must not be blocked — e.g. a jump from (31,6) to (25,7)
-          // legitimately passes over slope tiles (30,7) and (29,7) which are walkable ground.
-          // The old "block any slope cell at i>0" approach caused 83 fewer jump connections
-          // when slopes were registered vs not registered.
-          // The destination cell is always exempt — it's the landing zone.
-          const isDestCell = (grid.gx === to.gx && grid.gy === to.gy);
-          if (i > 0 && i < numSteps && !isDestCell && this.slopeMap && this.slopeMap[index] > 0) {
-            // Calculate the slope's surface Y at the arc's X position within the cell.
-            // Block only when arcY > surfaceY (arc is inside the solid body below the surface).
-            const cs = this.cellSize;
-            const slopeType = this.slopeMap[index];
-            const localX = x - grid.gx * cs; // X offset within the tile [0, cs)
-            let surfaceY;
-            if (slopeType === 1) {
-              // slope_left (/): surface from bottom-left to top-right
-              surfaceY = (grid.gy + 1) * cs - localX;
-            } else if (slopeType === 2) {
-              // slope_right (\): surface from top-left to bottom-right
-              surfaceY = grid.gy * cs + localX;
-            } else if (slopeType === 3) {
-              // gentle_left (/): 22.5° — spans two same-row tiles.
-              // Right half if the same-row left neighbour is also gentle_left.
-              const leftIdx = grid.gy * this.gridWidth + (grid.gx - 1);
-              const isRightHalf = grid.gx > 0 && this.slopeMap[leftIdx] === 3;
-              surfaceY = isRightHalf
-                ? (grid.gy + 0.5) * cs - localX * 0.5   // right half: mid→top-right
-                : (grid.gy + 1) * cs - localX * 0.5;    // left half: bottom-left→mid
-            } else {
-              // gentle_right (\): 22.5° — spans two same-row tiles.
-              const leftIdx = grid.gy * this.gridWidth + (grid.gx - 1);
-              const isRightHalf = grid.gx > 0 && this.slopeMap[leftIdx] === 4;
-              surfaceY = isRightHalf
-                ? (grid.gy + 0.5) * cs + localX * 0.5   // right half: mid→bottom-right
-                : grid.gy * cs + localX * 0.5;           // left half: top-left→mid
-            }
-            if (arcY > surfaceY) return 0;
-          }
-        } else {
-          if (cellVal === 1 && this.platformProps.ceilingCollisionMode === "stop") {
-            return 0;
-          }
-          if (cellVal === 3) return 0;
         }
+      } else {
+        // Falling: feet against floors — the landing decides the verdict.
+        const feetY = ny + halfH;
+        const feetGy = Math.floor(feetY / cs);
+        const fgx0 = Math.floor((nx - halfW + 2) / cs);
+        const fgx1 = Math.floor((nx + halfW - 2) / cs);
+        for (let bgx = fgx0; bgx <= fgx1; bgx++) {
+          const v = cellAt(bgx, feetGy);
+          if (v === 3) return 0;
+          let landedGy = -1;
+          if (slopeAt(bgx, feetGy) > 0) {
+            // Slope: land when the feet reach the surface line (the node
+            // lives IN the slope cell).
+            if (feetY >= slopeSurfaceY(bgx, feetGy, nx)) landedGy = feetGy;
+          } else if (v === 1) {
+            landedGy = feetGy - 1;           // stand on top of the solid
+          } else if (v === 2 && y + halfH <= feetGy * cs + 1) {
+            landedGy = feetGy - 1;           // jump-thru: only from above
+          }
+          if (landedGy >= 0) {
+            const nearTargetX =
+              Math.floor(nx / cs) === to.gx || Math.abs(nx - to.x) <= cs * 0.55;
+            if (this._canJumpTrace) console.log(`  [sim] t=${t.toFixed(2)} landed gy=${landedGy} at pos=(${nx.toFixed(0)},${ny.toFixed(0)}) target=(${to.gx},${to.gy}) nearX=${nearTargetX}`);
+            return landedGy === to.gy && nearTargetX ? actualPeakHeight : 0;
+          }
+        }
+      }
+
+      x = nx;
+      y = ny;
+
+      // Fell past the landing height without touching down near the target.
+      // Only meaningful while DESCENDING, and measured against the lower of
+      // the two endpoints — an upward jump legitimately starts below its
+      // target, so comparing against to.y alone rejected every rising jump
+      // at t=0 before the first physics step.
+      if (vy > 0 && y > Math.max(from.y, to.y) + cs * 2 && Math.abs(x - to.x) > cs * 0.55) {
+        if (this._canJumpTrace) console.log(`  [sim] t=${t.toFixed(2)} fell past target: pos=(${x.toFixed(0)},${y.toFixed(0)})`);
+        return 0;
       }
     }
 
-    return actualPeakHeight;
+    return 0; // never landed within the time budget
   },
 
   /** Returns true if a straight vertical fall from one node to another is unobstructed. */
@@ -920,13 +1112,14 @@ export default {
     return added;
   },
 
-  /** Returns true if a diagonal fall path (parabolic approximation) is unobstructed, checking character width. */
+  /** Returns true if a diagonal fall path (parabolic approximation) is unobstructed, checking character width AND height. */
   _canDiagonalFall(from, to, direction) {
     const dx = to.x - from.x;
     const dy = to.y - from.y;
     if (dy <= 0) return false;
     const widthCells = this._getWidthCells();
     const cs = this.cellSize;
+    const halfH = (this.characterHeight || cs) / 2;
 
     // For each row, check the full horizontal span the arc sweeps through.
     // A single center-sample per row misses cells when the arc crosses a column
@@ -934,10 +1127,17 @@ export default {
     // character transitions from gx=19 into gx=18 before gy changes, but cell
     // (18,gy) is the solid slope body of the adjacent slope tile).
     // Parabolic path: x(t) = from.x + dx*t, y(t) = from.y + dy*t²
-    // t at top/bottom of each row: t = sqrt((rowEdgeY - from.y) / dy)
+    // The row's time window is padded by the character's HALF HEIGHT: the body
+    // spans [y-halfH, y+halfH], so it overlaps row gy while the center is inside
+    // (gy*cs - halfH, (gy+1)*cs + halfH). Without this padding an arc can thread
+    // a gap on paper while the real character's head clips a solid's corner —
+    // horizontal speed dies against the wall face and the fall lands short
+    // (or misses the platform entirely). The real trajectory also crosses early
+    // columns FASTER than the average-speed parabola (i.e. higher up), which the
+    // height padding absorbs.
     for (let gy = from.gy; gy <= to.gy; gy++) {
-      const tEnter = Math.sqrt(Math.max(0, (gy * cs - from.y) / dy));
-      const tExit  = Math.sqrt(Math.max(0, ((gy + 1) * cs - from.y) / dy));
+      const tEnter = Math.sqrt(Math.max(0, (gy * cs - halfH - from.y) / dy));
+      const tExit  = Math.sqrt(Math.max(0, ((gy + 1) * cs + halfH - from.y) / dy));
       if (tEnter > 1.0) break;
       const xEnter = from.x + dx * Math.min(tEnter, 1.0);
       const xExit  = from.x + dx * Math.min(tExit,  1.0);
@@ -945,7 +1145,15 @@ export default {
       const gxMax  = Math.floor(Math.max(xEnter, xExit) / cs);
       for (let gx = gxMin; gx <= gxMax; gx++) {
         for (let w = -widthCells; w <= widthCells; w++) {
-          if (this.isCellBlocked(gx + w, gy)) return false;
+          const cgx = gx + w;
+          // Skip the launch platform's own cells: at/behind the departure
+          // column below the node row. The character departs from the platform
+          // EDGE (center already past node center + cs/2 + halfW), so its body
+          // never overlaps those columns once it is below the node row — but
+          // the height-padded sweep would otherwise flag the platform itself
+          // and reject every diagonal fall.
+          if (gy > from.gy && (cgx - from.gx) * direction <= 0) continue;
+          if (this.isCellBlocked(cgx, gy)) return false;
         }
       }
     }

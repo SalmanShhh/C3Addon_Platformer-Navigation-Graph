@@ -1,47 +1,34 @@
 <img src="./src/icon.svg" width="100" /><br>
 # Platformer Navigation Graph
 <i>Smart pathfinding for platformer games. Characters automatically jump across gaps, fall between platforms, and find optimal routes through complex levels. Includes instant portals (teleporters, doors) and gradual portals (elevators, ladders, ziplines) with pause/resume support for custom animations. Features hazard avoidance, multiple path strategies, coyote jumps, ledge restriction, and multi-agent support. Works with the built-in Platform behavior — just add the behavior and go.</i> <br>
-### Version 0.6.0.0
+### Version 0.7.0.0
 
-[<img src="https://placehold.co/200x50/4493f8/FFF?text=Download&font=montserrat" width="200"/>](https://github.com/SalmanShhh/Platformer-Navigation-Graph-V2/releases/download/salmanshh_platformer_navigationgraph-0.6.0.0.c3addon/salmanshh_platformer_navigationgraph-0.6.0.0.c3addon)
+[<img src="https://placehold.co/200x50/4493f8/FFF?text=Download&font=montserrat" width="200"/>](https://github.com/SalmanShhh/Platformer-Navigation-Graph-V2/releases/download/salmanshh_platformer_navigationgraph-0.7.0.0.c3addon/salmanshh_platformer_navigationgraph-0.7.0.0.c3addon)
 <br>
 <sub> [See all releases](https://github.com/SalmanShhh/Platformer-Navigation-Graph-V2/releases) </sub> <br>
 
-#### What's New in 0.6.0.0
+#### What's New in 0.7.0.0
 **Added:**
-- Map Tags: instances with the same Map Tag share one navigation map, so one layout can host several shared maps (ghosts, flyers, giants). Empty tag = the default shared map.
-- Portals, hazards, cell-size auto-detection, avoidance, and builds all operate per map tag.
-- One map copy per map: instances share obstacle/slope/hazard data by reference.
-- Map-setup actions run once per picked set; the other instances adopt the result.
-- Debug warning when an instance's jump physics differ >20% from the shared graph (suggests a separate Map Tag).
-- Debug aids for tag typos: console lists active tags when a new one appears; debugger shows each instance's tag.
-- MapTag expression (Obstacles).
-- Detect Slopes property: solid scans probe collision shapes and auto-register 45/22.5-degree slopes, no tile ID lists needed.
-- AutoDetectSlopeTiles rebuilt on the documented collision API (containsPoint), with flip handling and per-shape caching.
-- Hazard changes now apply automatically: costs re-bake lazily once per map per tick, O(nodes + hazard area), so hundreds of hazards stay cheap.
-- Tracked hazards (AddTrackedHazard / ClearAllTrackedHazards / TrackedHazardCount): hazards that follow objects with no per-frame events and auto-remove on destroy.
-- LastHazardID expression for removing or tracking a just-added hazard.
-- Portal move-in-place (SetPortalPosition / SetPortalPositionFromObjects): preserves ID, type, cost, speed, and tags; connections re-wire immediately.
-- Enabled property (panel bottom) plus Set enabled action and Is enabled condition; disabling freezes navigation with all state kept.
-- PathEndX / PathEndY expressions: the path's actual final position (differs from the target in Nearest mode).
-- BREAKING: PathTargetX/Y(type) and PathTargetGridX/Y replaced by parameterless TargetX / TargetY / TargetGridX / TargetGridY.
+- Shortest Distance now uses a time model: each jump carries a flat stop penalty (brake, re-center, re-launch) and momentum jumps carry no premium under it, so it skips intermediate platforms with momentum jumps where that is faster.
+- Momentum (run-up) jumps: gaps too wide for a standstill jump are automatically re-validated with a run-up launch from the tile edge (~45% more horizontal range), including launches from slope tops. The AI backs up, sprints, and leaps - no events needed; connections show as [mom] in debug path logs.
+- Path strategies now shape the A* search itself (not just the final candidate pick), so strategies genuinely diverge wherever the map offers real alternatives.
+- Safest Route scales fall costs with drop height and jump costs with jump length (both capped), preferring chained short hops and drops via intermediate ledges over single long leaps and falls.
+- Off-course landing recovery: landing far from a jump/fall waypoint re-paths immediately instead of waiting out the stuck timer.
+- Debug aids for arc misses: compact per-arc logs (departure and first wall contact for each jump/fall) and fall-braking markers.
+- Isolated-region warning (debug): after each graph build, the console names any node clusters that cannot reach the rest of the map, so unreachable pockets are diagnosed at build time instead of failing silently.
 
 **Changed:**
-- Drop-in defaults: Auto-Build Graph = Auto, Detect Slopes = on, Tile Size = 32 (0 = auto-detect). Working pathfinding from a single Find path event.
-- BREAKING: Graph Mode property and Per-Instance mode removed; Map Tags supersede them. Property indices after slot 5 shifted, so re-check properties in older projects.
-- ACE categories reorganized to mirror the built-in Pathfinding behavior: Pathfinding, Movement, Obstacles, Hazards, Portals, Debug (IDs unchanged, saves unaffected).
-- List names matched to the built-in behavior: On arrived, On failed to find path, Stop, Is moving along path, Is calculating path (IDs unchanged).
-- BREAKING: Debug graph ACEs renamed with a Graph prefix (GraphNodeCount, GraphNodeAtIndex*, NearestGraphNode*, Graph node exists...) since the built-in behavior uses node to mean path waypoint. Path steps stay Waypoint*. Scripting names follow.
-- Set multi-agent avoidance labels normalized to Enabled/Disabled.
-- Guide: new map tags section; reference tables regrouped into the six new categories.
+- Simplest Path is rebranded and reworked as Ground-Hugging: walking is free, jumps cost 4x per pixel plus a large flat fee, falls 2x plus a smaller fee - the AI walks long detours and only leaves the ground when the map gives it no choice. The internal key stays simplest, so saved projects and scripts are unaffected.
+- Jump validation is now a kinematic flight simulation of the arc the character actually flies: full jump height when Jump Sustain is 0, executor-style acceleration and braking, harmless ceiling bonks, fatal wall hits. Replaces the minimal-peak Bezier sweep that approved jumps the character could not physically make (it then flew into walls and dropped short).
+- Upward jumps respect the kinematic height/distance envelope: near-max height leaves near-zero horizontal range, so max-height-AND-max-distance corner jumps are no longer generated.
+- Diagonal fall clearance accounts for the character's half-height, so falls no longer thread gaps that clip the head on a solid's corner mid-arc.
+- Jumps to lower targets are only downgraded to walk-off falls when plain fall physics can actually cover the horizontal distance; otherwise the jump arc is kept.
 
 **Fixed:**
-- Instances that never ran a map-setup action (late spawns, second object types) had no grid dimensions, silently breaking node lookups; map state is now shared to every subscriber.
-- Starting a graph build cancels another instance's in-flight build for the same map instead of both mutating the shared graph.
-- Multi-agent avoidance spatial hash is cached per map instead of globally.
-- Hazards added or removed mid-game had no effect until a full graph rebuild.
-- Hazard IDs now come from a shared counter; per-instance counters could collide in shared maps.
-- Undocumented-API audit: layout name replaces layout.uid (read undefined), isJumping replaces the nonexistent isRising, jumpSustain normalized for the seconds-vs-milliseconds ambiguity.
+- The Path Strategy property was ignored: a leftover constructor default overwrote it, so every instance always ran Balanced (only the Set path strategy action worked).
+- Horizontal braking read the Platform behavior's overall speed, which includes vertical fall speed - mid-fall stopping distances ballooned, drift input cut out at the ledge, and long diagonal falls dropped short into pits. All braking now uses the horizontal velocity (vectorX).
+- Characters could park on a ledge corner forever when arrival braking stopped them inside the fall dead zone while still standing above the drop; they now creep off the edge.
+- Jump drift had no mid-air braking (input flip-flopped around the target X), so jumps onto one-tile islands missed or landed depending on oscillation phase.
 
 <sub>[View full changelog](#changelog)</sub>
 
@@ -86,7 +73,7 @@ npm run dev
 | Max Search Nodes | Maximum pathfinding effort before giving up. Higher = finds paths in larger levels but may cause lag. Lower = faster but may fail on complex paths. | integer |
 | Max Fall Distance | Maximum fall distance in pixels. 0 = auto-detect from Platform behavior. -1 = unlimited (any fall). Positive value = custom max in pixels. | integer |
 | Auto-Control Movement | When enabled, AI automatically controls the character (moves left/right, jumps). When disabled, you handle movement yourself using the path data. | check |
-| Path Strategy | How the AI picks the best route when multiple paths exist. Balanced: weighs distance and difficulty equally, good for most platformers and adventure games. Shortest Distance: always takes the fastest route even with risky jumps, ideal for speedrunner games and time trials. Safest Route: avoids jumps and falls when possible, great for stealth games, escort missions, or fragile NPCs. Simplest Path: fewest waypoints for predictable movement, best for simple enemies and tower defense creeps. | combo |
+| Path Strategy | How the AI picks the best route when multiple paths exist. Balanced: weighs distance and difficulty equally, good for most platformers and adventure games. Shortest Distance: always takes the fastest route, using long momentum jumps to skip platforms, ideal for speedrunner games and time trials. Safest Route: prefers chains of short hops and drops over long leaps and falls, great for stealth games, escort missions, or fragile NPCs. Ground-Hugging: walks whenever a walking route exists and only jumps or falls when unavoidable, best for patrols, tower defense creeps, and predictable simple enemies. | combo |
 | Smooth Paths | Remove unnecessary waypoints for more natural movement. AI will take direct routes when possible instead of zigzagging. | check |
 | Max Waypoint Time | How long (in seconds) AI tries to reach each waypoint before giving up and recalculating path. Prevents infinite loops when stuck. | float |
 | Coyote Time | Seconds after walking off a ledge where a jump can still be executed. Allows AI to walk off edges and jump mid-air for greater reach, making slightly out-of-range platforms reachable. Important: only works when 'Ledge Restriction' is disabled — if Ledge Restriction is enabled, characters won't walk off edges, so coyote jumps can never execute and the connections will go unused. 0 = disabled. | float |
@@ -145,7 +132,7 @@ npm run dev
 | Find path to object | Calculate a path to another object's position (e.g. the player) using sensible defaults: start and target snap to the nearest walkable ground, and if the exact target is unreachable the character paths as close as possible (never fails outright). Uses the first picked instance of the object. | Target object             *(object)* <br> |
 | Set max paths per tick | Set how many pathfinding requests can be processed per game tick. Higher values reduce latency but increase CPU cost per frame. Default is 1. | Count             *(number)* <br> |
 | Set multi-agent avoidance | Enable or disable path-level multi-agent avoidance. When enabled, agents try to avoid choosing overlapping paths when multiple agents share the same navigation map. | Enabled             *(combo)* <br> |
-| Set path strategy | Change how the AI picks the best route when multiple paths exist. Balanced: weighs distance and difficulty equally. Shortest Distance: always takes the fastest route. Safest Route: avoids jumps and falls. Simplest Path: fewest waypoints. | Strategy             *(combo)* <br> |
+| Set path strategy | Change how the AI picks the best route when multiple paths exist. Balanced: weighs distance and difficulty equally. Shortest Distance: always takes the fastest route, using momentum jumps to skip platforms. Safest Route: prefers short hops and drops over long leaps and falls. Ground-Hugging: walks whenever possible, jumping or falling only when unavoidable. | Strategy             *(combo)* <br> |
 | Set re-path cooldown | Set the minimum time in seconds between automatic re-path attempts. Lower values = more responsive re-pathing but more CPU usage. Default is 0.5 seconds. | Seconds             *(number)* <br> |
 | Set re-path threshold | Set how many tiles the character can drift from the path before automatic re-pathing triggers. Higher values = more tolerance for deviation. | Tiles             *(number)* <br> |
 | Stop | Stop the character immediately and clear the current path. Use when you want to cancel AI navigation and regain manual control. |  |
@@ -280,7 +267,7 @@ npm run dev
 | PathEndY | The world Y of the calculated path's final position — the last waypoint, where the character will actually end up. In Nearest mode this can differ from the requested target (the path stops at the closest reachable spot). Returns 0 if no path has been calculated. | number |  | 
 | PathFailReason | Get the reason the last pathfinding attempt failed. Returns: 'no_start_node', 'no_goal_node', 'max_nodes_reached', 'no_path', or empty string if path succeeded. | string |  | 
 | PathQueueSize | Get the number of pathfinding requests currently waiting in the queue. | number |  | 
-| PathStrategy | Get the current path strategy preset (balanced, shortest, safest, simplest). | string |  | 
+| PathStrategy | Get the current path strategy preset (balanced, shortest, safest, simplest). Note: 'simplest' is the Ground-Hugging strategy — the key kept its original name for save compatibility. | string |  | 
 | RePathCooldown | Get the current re-path cooldown in seconds. This is the minimum time between automatic re-path attempts. | number |  | 
 | RePathThreshold | Get the current re-path threshold in tiles. This is how far the character can drift before automatic re-pathing triggers. | number |  | 
 | TargetGridX | The grid X coordinate of the requested path target (after ground correction snaps it to walkable ground). | number |  | 
@@ -308,6 +295,31 @@ npm run dev
 
 ---
 ## Changelog
+
+### Version 0.7.0.0
+
+**Added:**
+- Shortest Distance now uses a time model: each jump carries a flat stop penalty (brake, re-center, re-launch) and momentum jumps carry no premium under it, so it skips intermediate platforms with momentum jumps where that is faster.
+- Momentum (run-up) jumps: gaps too wide for a standstill jump are automatically re-validated with a run-up launch from the tile edge (~45% more horizontal range), including launches from slope tops. The AI backs up, sprints, and leaps - no events needed; connections show as [mom] in debug path logs.
+- Path strategies now shape the A* search itself (not just the final candidate pick), so strategies genuinely diverge wherever the map offers real alternatives.
+- Safest Route scales fall costs with drop height and jump costs with jump length (both capped), preferring chained short hops and drops via intermediate ledges over single long leaps and falls.
+- Off-course landing recovery: landing far from a jump/fall waypoint re-paths immediately instead of waiting out the stuck timer.
+- Debug aids for arc misses: compact per-arc logs (departure and first wall contact for each jump/fall) and fall-braking markers.
+- Isolated-region warning (debug): after each graph build, the console names any node clusters that cannot reach the rest of the map, so unreachable pockets are diagnosed at build time instead of failing silently.
+
+**Changed:**
+- Simplest Path is rebranded and reworked as Ground-Hugging: walking is free, jumps cost 4x per pixel plus a large flat fee, falls 2x plus a smaller fee - the AI walks long detours and only leaves the ground when the map gives it no choice. The internal key stays simplest, so saved projects and scripts are unaffected.
+- Jump validation is now a kinematic flight simulation of the arc the character actually flies: full jump height when Jump Sustain is 0, executor-style acceleration and braking, harmless ceiling bonks, fatal wall hits. Replaces the minimal-peak Bezier sweep that approved jumps the character could not physically make (it then flew into walls and dropped short).
+- Upward jumps respect the kinematic height/distance envelope: near-max height leaves near-zero horizontal range, so max-height-AND-max-distance corner jumps are no longer generated.
+- Diagonal fall clearance accounts for the character's half-height, so falls no longer thread gaps that clip the head on a solid's corner mid-arc.
+- Jumps to lower targets are only downgraded to walk-off falls when plain fall physics can actually cover the horizontal distance; otherwise the jump arc is kept.
+
+**Fixed:**
+- The Path Strategy property was ignored: a leftover constructor default overwrote it, so every instance always ran Balanced (only the Set path strategy action worked).
+- Horizontal braking read the Platform behavior's overall speed, which includes vertical fall speed - mid-fall stopping distances ballooned, drift input cut out at the ledge, and long diagonal falls dropped short into pits. All braking now uses the horizontal velocity (vectorX).
+- Characters could park on a ledge corner forever when arrival braking stopped them inside the fall dead zone while still standing above the drop; they now creep off the edge.
+- Jump drift had no mid-air braking (input flip-flopped around the target X), so jumps onto one-tile islands missed or landed depending on oscillation phase.
+---
 
 ### Version 0.6.0.0
 

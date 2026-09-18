@@ -194,8 +194,9 @@ export default function (parentClass) {
       this.FALL_COST = 0.5;
       this.COYOTE_JUMP_COST = 1.6;
       this.SLOPE_COST = 1.0;
-
-      this.pathStrategy = "balanced";
+      // NOTE: pathStrategy is set from the Path Strategy property near the top
+      // of the constructor — do not reassign it here (a stale default here
+      // silently disabled the property for every instance).
 
     }
 

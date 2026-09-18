@@ -142,14 +142,16 @@ export const properties = [
     type: PROPERTY_TYPE.COMBO,
     id: "path_strategy",
     name: "Path Strategy",
-    desc: "How the AI picks the best route when multiple paths exist. Balanced: weighs distance and difficulty equally, good for most platformers and adventure games. Shortest Distance: always takes the fastest route even with risky jumps, ideal for speedrunner games and time trials. Safest Route: avoids jumps and falls when possible, great for stealth games, escort missions, or fragile NPCs. Simplest Path: fewest waypoints for predictable movement, best for simple enemies and tower defense creeps.",
+    desc: "How the AI picks the best route when multiple paths exist. Balanced: weighs distance and difficulty equally, good for most platformers and adventure games. Shortest Distance: always takes the fastest route, using long momentum jumps to skip platforms, ideal for speedrunner games and time trials. Safest Route: prefers chains of short hops and drops over long leaps and falls, great for stealth games, escort missions, or fragile NPCs. Ground-Hugging: walks whenever a walking route exists and only jumps or falls when unavoidable, best for patrols, tower defense creeps, and predictable simple enemies.",
     options: {
       initialValue: "balanced",
       items: [
         { balanced: "Balanced (recommended for most games)" },
         { shortest: "Shortest Distance (speedrunners, time trials)" },
         { safest: "Safest Route (stealth, escort missions)" },
-        { simplest: "Simplest Path (simple enemies, predictable AI)" }
+        // Key stays "simplest" (combo values are stored by index/key — only
+        // the display text may change). Rebranded Ground-Hugging in 0.6.1.0.
+        { simplest: "Ground-Hugging (patrols, predictable AI)" }
       ]
     }
   },

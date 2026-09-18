@@ -1,7 +1,7 @@
 export const config = {
   listName: "Set path strategy",
   displayText: "{my}: Set path strategy to {0}",
-  description: "Change how the AI picks the best route when multiple paths exist. Balanced: weighs distance and difficulty equally. Shortest Distance: always takes the fastest route. Safest Route: avoids jumps and falls. Simplest Path: fewest waypoints.",
+  description: "Change how the AI picks the best route when multiple paths exist. Balanced: weighs distance and difficulty equally. Shortest Distance: always takes the fastest route, using momentum jumps to skip platforms. Safest Route: prefers short hops and drops over long leaps and falls. Ground-Hugging: walks whenever possible, jumping or falling only when unavoidable.",
   params: [
     {
       id: "strategy",
@@ -13,7 +13,7 @@ export const config = {
         { balanced: "Balanced" },
         { shortest: "Shortest Distance" },
         { safest: "Safest Route" },
-        { simplest: "Simplest Path" }
+        { simplest: "Ground-Hugging" }
       ]
     }
   ]

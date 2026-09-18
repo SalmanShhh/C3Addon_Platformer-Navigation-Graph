@@ -4,6 +4,17 @@ Features and enhancements to consider for future versions of the Platformer Navi
 
 ---
 
+## Momentum-Chained Jumps — v1 SHIPPED in 0.6.1.0 (run-up variant)
+
+Shipped as **run-up jumps**: when a jump fails standstill validation, the graph re-validates it with an edge launch at ~0.78 maxSpeed (the kinematic sim with a different launch state) and tags it `requiresMomentum`. The executor backs up across the launch tile, sprints, and leaps from the edge — self-contained per stone, so A* needs no arrival-direction gating and optimal substructure is preserved. Unlocks ~45% more horizontal range (e.g. flat 8-tile gaps, and 6-across-4-up island jumps).
+
+Deliberate v1 deviation: this is a RUN-UP, not carried momentum. True chaining (land at full speed from the previous arc and re-jump the same tick without braking) remains future work:
+- Requires re-validating the APPROACH arc with no terminal braking (land anywhere on the stone at speed), which couples pairs of connections.
+- A* would need arrival-direction state (or an approximation via parent direction) to know chain launches are available.
+- Payoff: no stutter-step, even longer reach, and genuinely speedrun-like Shortest Distance movement.
+
+---
+
 ## Moving Platform Support
 
 Moving platforms change position at runtime, making static graph nodes invalid.

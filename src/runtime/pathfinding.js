@@ -77,8 +77,8 @@ export default {
         const action = walkDir > 0 ? "walk_right" : "walk_left";
         this._log(`Early exit: direct walk ${action}`);
         return [
-          { x: startNode.x, y: startNode.y, node: startNode, action: "start", requiresDoubleJump: false, peakHeight: 0 },
-          { x: goalNode.x, y: goalNode.y, node: goalNode, action, requiresDoubleJump: false, peakHeight: 0 }
+          { x: startNode.x, y: startNode.y, node: startNode, action: "start", requiresDoubleJump: false, requiresMomentum: false, peakHeight: 0 },
+          { x: goalNode.x, y: goalNode.y, node: goalNode, action, requiresDoubleJump: false, requiresMomentum: false, peakHeight: 0 }
         ];
       }
     }
@@ -121,12 +121,12 @@ export default {
     if (validForward && validReversed) {
       bestPath = this._combinePaths(validForward, validReversed);
     } else if (validForward) {
-      const _fmtPath = (p) => p.map((wp, i) => `${i}:(${wp.node ? wp.node.gx : '?'},${wp.node ? wp.node.gy : '?'})${wp.action}${wp.requiresDoubleJump ? '[dbl]' : ''}`).join(' → ');
+      const _fmtPath = (p) => p.map((wp, i) => `${i}:(${wp.node ? wp.node.gx : '?'},${wp.node ? wp.node.gy : '?'})${wp.action}${wp.requiresDoubleJump ? '[dbl]' : ''}${wp.requiresMomentum ? '[mom]' : ''}`).join(' → ');
       this._log(`Using forward path only (no valid reverse)`);
       this._log(`  Path: ${_fmtPath(validForward)}`);
       bestPath = validForward;
     } else if (validReversed) {
-      const _fmtPath = (p) => p.map((wp, i) => `${i}:(${wp.node ? wp.node.gx : '?'},${wp.node ? wp.node.gy : '?'})${wp.action}${wp.requiresDoubleJump ? '[dbl]' : ''}`).join(' → ');
+      const _fmtPath = (p) => p.map((wp, i) => `${i}:(${wp.node ? wp.node.gx : '?'},${wp.node ? wp.node.gy : '?'})${wp.action}${wp.requiresDoubleJump ? '[dbl]' : ''}${wp.requiresMomentum ? '[mom]' : ''}`).join(' → ');
       this._log(`Using reversed path only (no valid forward)`);
       this._log(`  Path: ${_fmtPath(validReversed)}`);
       bestPath = validReversed;
@@ -173,6 +173,9 @@ export default {
       node.parentAction = null;
       node.parentPortalId = null;
       node.parentSpeed = null;
+      node.parentPeakHeight = 0;
+      node.parentRequiresDoubleJump = false;
+      node.parentRequiresMomentum = false;
     }
 
     startNode.gScore = 0;
@@ -247,7 +250,11 @@ export default {
 
         const tentativeG =
           current.gScore +
-          conn.cost * hazardMultiplier * agentAvoidanceCost;
+          conn.cost * hazardMultiplier * agentAvoidanceCost *
+            this._strategyEdgeFactor(
+              conn.action, conn.target.y - current.y, conn.cost, conn.requiresMomentum
+            ) +
+          this._strategyEdgePenalty(conn.action);
 
         if (tentativeG < neighbor.gScore) {
           // Diagnostic: log every update to the goal node
@@ -260,6 +267,7 @@ export default {
           neighbor.parentSpeed = conn.speed || 0;
           neighbor.parentPeakHeight = conn.peakHeight || 0;
           neighbor.parentRequiresDoubleJump = conn.requiresDoubleJump || false;
+          neighbor.parentRequiresMomentum = conn.requiresMomentum || false;
           neighbor.gScore = tentativeG;
           neighbor.hScore = this.distance(
             neighbor.x,
@@ -317,6 +325,7 @@ export default {
       reversed[i + 1].speed = conn.speed || 0;
       reversed[i + 1].peakHeight = conn.peakHeight || 0;
       reversed[i + 1].requiresDoubleJump = conn.requiresDoubleJump || false;
+      reversed[i + 1].requiresMomentum = conn.requiresMomentum || false;
     }
     reversed[0].action = "start";
     return reversed;
@@ -345,6 +354,7 @@ export default {
         path[i + 1].speed = conn.speed || 0;
         path[i + 1].peakHeight = conn.peakHeight || 0;
         path[i + 1].requiresDoubleJump = conn.requiresDoubleJump || false;
+        path[i + 1].requiresMomentum = conn.requiresMomentum || false;
       }
     }
     return path;
@@ -376,11 +386,120 @@ export default {
     return cost;
   },
 
+  /** Safest strategy: extra multiplier (>= 1.0) applied to a fall connection's
+   *  cost based on how FAR DOWN it goes. Per-pixel pricing alone makes one
+   *  6-tile drop cost the same as three 2-tile drops, so Safest had no reason
+   *  to step down via intermediate ledges. Used identically by the A* search
+   *  (_strategyEdgeFactor) and candidate selection (_strategyCost).
+   *  dropPx: vertical drop of the connection in pixels (<= 0 means not a drop). */
+  /** Flat per-connection cost added during the A* search, by strategy.
+   *  Shortest: a stop penalty on each jump — every landing costs real time
+   *  (brake, re-center, re-launch), so one long jump beats a chain of short
+   *  hops covering the same pixels. This is what makes "Shortest Distance"
+   *  behave like "fastest route" and actually use momentum skip-jumps.
+   *  Simplest (Ground-Hugging): big flat fees on airborne actions — walking
+   *  is free, so the AI stays on the ground and only jumps or falls when no
+   *  walking route exists at all. */
+  _strategyEdgePenalty(action) {
+    if (this.pathStrategy === "simplest") {
+      if (action === "jump" || action === "coyote_jump") return this.cellSize * 10;
+      if (action.includes("fall")) return this.cellSize * 4;
+      return 0;
+    }
+    if (
+      this.pathStrategy === "shortest" &&
+      (action === "jump" || action === "coyote_jump")
+    )
+      return this.cellSize * 2;
+    return 0;
+  },
+
+  /** Safest strategy: extra multiplier (>= 1.0) on a JUMP connection's cost
+   *  based on its length. Per-pixel pricing makes one long leap cost the same
+   *  as two short hops covering the same distance, so Safest had no reason to
+   *  prefer stepping-stone chains. Quadratic growth (reference: 4 tiles) makes
+   *  long leaps genuinely expensive; capped so an unavoidable big jump cannot
+   *  dominate the whole path cost. */
+  _safestJumpRiskMultiplier(distPx) {
+    if (distPx <= 0) return 1.0;
+    const ref = distPx / (this.cellSize * 4);
+    return Math.min(6, 1 + ref * ref);
+  },
+
+  _safestFallRiskMultiplier(dropPx) {
+    if (dropPx <= 0) return 1.0;
+    // Linear risk growth with a 3-tile reference drop: a 3-tile fall costs
+    // 2x per pixel, 6 tiles 3x, and so on, capped at 5x so an unavoidable
+    // huge drop can't dominate every other cost in the path. Linear (rather
+    // than quadratic) keeps Safest cautious without making it refuse
+    // reasonable drops entirely.
+    return Math.min(5, 1 + dropPx / (this.cellSize * 3));
+  },
+
+  /** Per-connection cost factor applied DURING the A* search so the search
+   *  itself follows the active strategy, not just the final pick among the
+   *  forward/reverse/hybrid candidates. Without this, all strategies return
+   *  identical paths whenever both searches converge on the same route (the
+   *  common case), because baked connection costs always encode the balanced
+   *  weighting (WALK 1.0 / JUMP 1.5 / FALL 0.5 / COYOTE 1.6 per pixel).
+   *  Factors rescale relative to that baked baseline; costs only ever grow or
+   *  shrink proportionally, so the distance heuristic stays admissible. */
+  _strategyEdgeFactor(action, dropPx, rawCost, isMomentum) {
+    switch (this.pathStrategy) {
+      case "shortest":
+        // Undo the action weighting AND the momentum premium — optimize raw
+        // travel plus the per-jump stop penalty added at the relaxation site.
+        // Without dropping the 1.25 premium, a skip-jump's raw distance ties
+        // the hop chain it replaces (colinear stones), and the premium makes
+        // it always lose — Shortest could never skip stones.
+        if (action === "jump")
+          return 1 / (this.JUMP_COST * (isMomentum ? 1.25 : 1));
+        if (action === "coyote_jump") return 1 / this.COYOTE_JUMP_COST;
+        if (action.includes("fall")) return 1 / this.FALL_COST;
+        return 1.0;
+      case "safest":
+        // Rescale to the safest weights (jump 2.5, fall 1.5 per pixel),
+        // matching _strategyCost's candidate weighting. Falls additionally
+        // scale with drop height and jumps with jump length, so chained short
+        // moves beat single long ones. Jump distance is recovered from the
+        // baked cost (cost = distance × action constant).
+        if (action === "jump")
+          return (2.5 / this.JUMP_COST) *
+            this._safestJumpRiskMultiplier((rawCost || 0) / this.JUMP_COST);
+        if (action === "coyote_jump")
+          return (2.5 / this.COYOTE_JUMP_COST) *
+            this._safestJumpRiskMultiplier((rawCost || 0) / this.COYOTE_JUMP_COST);
+        if (action.includes("fall"))
+          return (1.5 / this.FALL_COST) * this._safestFallRiskMultiplier(dropPx || 0);
+        return 1.0;
+      case "simplest":
+        // Ground-Hugging: walking is the baseline, airborne pixels are
+        // expensive (jumps 4x, falls 2x per pixel; flat fees come from
+        // _strategyEdgePenalty). The AI walks long detours before it jumps,
+        // but still jumps when the map leaves no walking route.
+        if (action === "jump") return 4 / this.JUMP_COST;
+        if (action === "coyote_jump") return 4 / this.COYOTE_JUMP_COST;
+        if (action.includes("fall")) return 2 / this.FALL_COST;
+        return 1.0;
+      default:
+        // balanced uses the baked costs as-is.
+        return 1.0;
+    }
+  },
+
   /** Evaluates a path's cost using the active strategy (balanced, shortest, safest, or simplest). */
   _strategyCost(path) {
     switch (this.pathStrategy) {
-      case "shortest":
-        return this._pathCost(path);
+      case "shortest": {
+        // Match the search: raw distance plus the per-jump stop penalty.
+        let cost = 0;
+        for (let i = 1; i < path.length; i++) {
+          cost += this.distance(path[i - 1].x, path[i - 1].y, path[i].x, path[i].y);
+          if (path[i].action === "jump" || path[i].action === "coyote_jump")
+            cost += this.cellSize * 2;
+        }
+        return cost;
+      }
 
       case "safest": {
         let cost = 0;
@@ -388,17 +507,32 @@ export default {
           const dist = this.distance(path[i - 1].x, path[i - 1].y, path[i].x, path[i].y);
           const action = path[i].action;
           if (action === "jump" || action === "coyote_jump")
-            cost += dist * 2.5;
+            cost += dist * 2.5 * this._safestJumpRiskMultiplier(dist);
           else if (action.includes("fall"))
-            cost += dist * 1.5;
+            cost += dist * 1.5 *
+              this._safestFallRiskMultiplier(path[i].y - path[i - 1].y);
           else
             cost += dist * 1.0;
         }
         return cost;
       }
 
-      case "simplest":
-        return path.length * 10000 + this._pathCost(path);
+      case "simplest": {
+        // Ground-Hugging: match the search weights (walk 1x; jump 4x + 10
+        // tiles flat; fall 2x + 4 tiles flat).
+        let cost = 0;
+        for (let i = 1; i < path.length; i++) {
+          const dist = this.distance(path[i - 1].x, path[i - 1].y, path[i].x, path[i].y);
+          const action = path[i].action;
+          if (action === "jump" || action === "coyote_jump")
+            cost += dist * 4 + this.cellSize * 10;
+          else if (action.includes("fall"))
+            cost += dist * 2 + this.cellSize * 4;
+          else
+            cost += dist;
+        }
+        return cost;
+      }
 
       case "balanced":
       default: {
@@ -464,6 +598,7 @@ export default {
           hybrid1[fwdIdx].speed = conn.speed || 0;
           hybrid1[fwdIdx].peakHeight = conn.peakHeight || 0;
           hybrid1[fwdIdx].requiresDoubleJump = conn.requiresDoubleJump || false;
+          hybrid1[fwdIdx].requiresMomentum = conn.requiresMomentum || false;
         }
       }
       const cost1 = this._strategyCost(hybrid1);
@@ -486,6 +621,7 @@ export default {
           hybrid2[revIdx].speed = conn.speed || 0;
           hybrid2[revIdx].peakHeight = conn.peakHeight || 0;
           hybrid2[revIdx].requiresDoubleJump = conn.requiresDoubleJump || false;
+          hybrid2[revIdx].requiresMomentum = conn.requiresMomentum || false;
         }
       }
       const cost2 = this._strategyCost(hybrid2);
@@ -495,7 +631,7 @@ export default {
       }
     }
 
-    const _fmtPath = (p) => p.map((wp, i) => `${i}:(${wp.node ? wp.node.gx : '?'},${wp.node ? wp.node.gy : '?'})${wp.action}${wp.requiresDoubleJump ? '[dbl]' : ''}`).join(' → ');
+    const _fmtPath = (p) => p.map((wp, i) => `${i}:(${wp.node ? wp.node.gx : '?'},${wp.node ? wp.node.gy : '?'})${wp.action}${wp.requiresDoubleJump ? '[dbl]' : ''}${wp.requiresMomentum ? '[mom]' : ''}`).join(' → ');
     this._log(`Combined path: cost=${Math.round(bestCost)} (fwd=${Math.round(forwardCost)}, rev=${Math.round(reverseCost)}, strategy=${this.pathStrategy})`);
     this._log(`  Forward path:  ${_fmtPath(forwardPath)}`);
     this._log(`  Reversed path: ${_fmtPath(reversedPath)}`);
@@ -516,6 +652,7 @@ export default {
         speed: current.parentSpeed || 0,
         peakHeight: current.parentPeakHeight || 0,
         requiresDoubleJump: current.parentRequiresDoubleJump || false,
+        requiresMomentum: current.parentRequiresMomentum || false,
         x: current.x,
         y: current.y,
       });
@@ -741,6 +878,9 @@ export default {
       this.isHoldingJump = false;
       this.coyoteJumpPending = false;
       this.departureCommitted = false;
+      this._wpWasAirborne = false;
+      this._arcTraceState = 0;
+      this._momentumArmed = false;
 
       // Resolve strict jump positioning for this path
       // Priority: FindPath param > ACE/property setting
@@ -782,6 +922,9 @@ export default {
     this.isHoldingJump = false;
     this.departureCommitted = false;
     this.coyoteJumpPending = false;
+    this._wpWasAirborne = false;
+    this._arcTraceState = 0;
+    this._momentumArmed = false;
     // Reset portal state
     if (this.portalState === "traversing" && this.platformBehavior && this.platformWasEnabled) {
       this.platformBehavior.isEnabled = true;

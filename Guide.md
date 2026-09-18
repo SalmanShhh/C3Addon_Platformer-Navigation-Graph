@@ -143,7 +143,7 @@ Graph generation is time-sliced. On big maps the build spreads across several ti
 | **Max Search Nodes** | Integer (100 to 10000) | 2000 | How many graph nodes A* may visit before giving up. Raise for very large open levels; lower to cap worst-case path cost. |
 | **Max Fall Distance** | Integer | 0 | Maximum safe fall in pixels. 0 auto-detects from Platform physics. -1 means unlimited. A positive value is an explicit override. |
 | **Auto-Control Movement** | Boolean | On | When on, the behavior drives the Platform behavior automatically. When off, path data is exposed through expressions for manual movement. |
-| **Path Strategy** | Combo | Balanced | How the AI picks between valid routes: Balanced, Shortest Distance, Safest Route, or Simplest Path. See [Movement Control](#7-movement-control). |
+| **Path Strategy** | Combo | Balanced | How the AI picks between valid routes: Balanced, Shortest Distance, Safest Route, or Ground-Hugging. See [Movement Control](#7-movement-control). |
 | **Smooth Paths** | Boolean | On | Removes redundant waypoints so characters take direct walks instead of zigzagging between tile centers. |
 | **Max Waypoint Time** | Float (1 to 30) | 5.0 | Seconds before the behavior gives up on a waypoint and fires `On waypoint stuck`. |
 | **Coyote Time** | Float (0 to 1) | 0 | Seconds after walking off a ledge in which the AI may still jump. Only useful with Ledge Restriction off. 0 disables it. |
@@ -426,9 +426,11 @@ The **Path Strategy** property controls how A* weighs movement costs. Change it 
 | Strategy | Behavior | Best for |
 |---|---|---|
 | **Balanced** | Weighs distance and movement difficulty equally | Most games, the sensible default |
-| **Shortest Distance** | Minimizes path length, including risky jumps | Speedrunner rivals, aggressive enemies |
-| **Safest Route** | Strongly prefers walking over jumping or falling | Stealth NPCs, escorts, fragile characters |
-| **Simplest Path** | Minimizes waypoint count for predictable movement | Tower defense creeps, simple patrols |
+| **Shortest Distance** | Fastest route: counts each landing as lost time and uses long momentum jumps to skip platforms | Speedrunner rivals, aggressive enemies |
+| **Safest Route** | Prefers chains of short hops and drops; long leaps and falls cost extra the bigger they are | Stealth NPCs, escorts, fragile characters |
+| **Ground-Hugging** | Walks whenever a walking route exists; jumps or falls only when unavoidable | Patrols, tower defense creeps, predictable enemies |
+
+Note for scripting and the PathStrategy expression: Ground-Hugging keeps its original internal key `simplest` for save compatibility.
 
 ```
 Event: Boss enters phase 2
@@ -801,7 +803,7 @@ Categories mirror the built-in Pathfinding behavior's groups: Pathfinding (findi
 | **Find path to object** Target | Same defaults as Find path, but reads the position of the target object's first picked instance. |
 | **FindPath (advanced)** X, Y, CorrectToGround, Mode, JumpPositioning | Full-control pathing. CorrectToGround snaps to solid ground; Mode Reach fails when no complete path exists; JumpPositioning overrides precision per path. |
 | **Stop** | Immediately stop the character and clear the active path. |
-| **SetPathStrategy** Strategy | Switch the route weighting: Balanced, Shortest Distance, Safest Route, Simplest Path. |
+| **SetPathStrategy** Strategy | Switch the route weighting: Balanced, Shortest Distance, Safest Route, Ground-Hugging. |
 | **SetRePathThreshold** Tiles | Tiles of drift that trigger automatic re-pathing. |
 | **SetRePathCooldown** Seconds | Minimum time between automatic re-path attempts. |
 | **SetMaxPathsPerTick** Count | Limit A* calculations per tick; extra requests queue. 0 means unlimited. |
@@ -1537,6 +1539,10 @@ Event: Every 0.5 seconds
 
 The elite reaches high ledges the grunts route around. Capability filtering is per instance at search time, so one shared graph serves both.
 
+### Momentum (run-up) jumps
+
+Some gaps are too wide for a jump from a standing start but makeable with a running start, the way a player backs up on a small stone, sprints, and leaps from its edge. The graph detects these automatically: when a jump fails validation from a standstill, it is re-checked with a run-up launch, and if the arc works it becomes a momentum connection (up to roughly 45 percent more horizontal range). No events or properties are needed. When the AI executes one, it visibly backs up across the launch tile, sprints, and leaps from the edge, so a short stutter-step before a long jump is expected behavior. In debug path logs these connections are tagged [mom]. Momentum jumps cost slightly more than regular jumps, so the AI prefers ordinary hops when both work; Shortest Distance uses them eagerly to skip intermediate platforms.
+
 ### 20. Boss arena with a burning floor phase
 
 **Scenario:** In phase 2 the arena floor ignites and the boss should keep to the platforms.
@@ -1646,7 +1652,7 @@ Ground correction snaps each marker to the nearest walkable node, so markers can
 
 **Survival horror.** A single stalker enemy uses Nearest mode to relentlessly close in through vents modeled as one-way instant portals, with PauseAtPortal driving crawl-in and crawl-out animations.
 
-**Lemmings-style automation.** Autonomous workers with auto-control walk routes between task markers; Simplest Path keeps their movement predictable enough for the player to plan around.
+**Lemmings-style automation.** Autonomous workers with auto-control walk routes between task markers; Ground-Hugging keeps their movement predictable enough for the player to plan around.
 
 **Wave defense / horde survival.** Spawners dump mobs on a timer, MaxPathsPerTick keeps A* cost flat, and OnWaypointStuck feeds a cull list for mobs wedged by player-built barricades.
 
@@ -1664,7 +1670,7 @@ Ground correction snaps each marker to the nearest walkable node, so markers can
 
 **Brawler with arenas.** Enemies keep to platforms with Ledge Restriction while approaching, then disable it and lunge when in range, mixing safe navigation with committed attacks.
 
-**Tactics-lite auto battler.** Units walk to assigned lane markers using Simplest Path so their approach is legible; portals model deployment tubes that drop units into the arena.
+**Tactics-lite auto battler.** Units walk to assigned lane markers using Ground-Hugging so their approach is legible; portals model deployment tubes that drop units into the arena.
 
 **Sandbox physics game.** Player contraptions add and remove solid tiles constantly; time-sliced rebuilds absorb the churn, and creatures re-path from OnGraphGenerated so they always respect the latest contraption.
 
@@ -1768,7 +1774,7 @@ nav.StopPathfinding();
 | `SetStrictJumpPositioning(enabled)` | `enabled` | 0 = Enabled, 1 = Disabled |
 | `SetLedgeRestriction(enabled)` | `enabled` | 0 = Enabled, 1 = Disabled |
 | `SetMultiAgentAvoidance(enabled)` | `enabled` | 0 = Enabled, 1 = Disabled |
-| `SetPathStrategy(strategy)` | `strategy` | 0 = balanced, 1 = shortest, 2 = safest, 3 = simplest |
+| `SetPathStrategy(strategy)` | `strategy` | 0 = balanced, 1 = shortest, 2 = safest, 3 = simplest (Ground-Hugging) |
 | `UsePathfindingObstacleMap(autoRegen)` | `autoRegen` | 0 = Yes, 1 = No |
 
 String keys: `nav.SetPathStrategy("safest")`, `nav.FindPath(x, y, "yes", "nearest", "default")`.
