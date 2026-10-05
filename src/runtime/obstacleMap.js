@@ -32,50 +32,40 @@ export default {
   _claimSharedSetup(actionKey) {
     const navKey = this._getNavKey();
     if (navKey === null) return true;
-    const key = navKey + "#" + actionKey;
-    const now = this.instance.runtime.gameTime;
-    const rec = globalNavManager.setupStamps.get(key);
-    if (rec && rec.time === now && rec.owner !== this && rec.owner.instance) {
-      this._adoptMapStateFrom(rec.owner);
+    const claim = this._claimSameTick(navKey + "#" + actionKey);
+    if (claim.peer) {
+      this._adoptMapStateFrom(claim.peer.owner);
       return false;
     }
-    globalNavManager.setupStamps.set(key, { time: now, owner: this });
     return true;
   },
 
-  /** Attempts to copy the obstacle map from the Pathfinding behavior, or starts polling if not ready.
-   *  When Auto-Build Graph is set to "solids" (or "auto" with no Pathfinding behavior attached),
-   *  builds the obstacle map by scanning Solid/Jump-thru objects instead. */
+  /** The same-tick ownership rule shared by every per-picked-instance dedupe
+   *  (map setup, portal adds, portal removal): if ANOTHER live instance already
+   *  stamped `key` this tick (and `isPeerValid`, when given, accepts its
+   *  record), returns { peer: thatRecord }. Otherwise stamps this instance and
+   *  returns { own: newRecord } so the caller can attach data (e.g. an ID).
+   *  gameTime is frozen while paused, so repeats during a hard pause coalesce. */
+  _claimSameTick(key, isPeerValid) {
+    const now = this.instance.runtime.gameTime;
+    const rec = globalNavManager.setupStamps.get(key);
+    if (rec && rec.time === now && rec.owner !== this && rec.owner.instance &&
+        (!isPeerValid || isPeerValid(rec))) {
+      return { peer: rec };
+    }
+    const own = { time: now, owner: this };
+    globalNavManager.setupStamps.set(key, own);
+    return { own };
+  },
+
+  /** Builds the obstacle map by scanning Solid/Jump-thru objects when Auto-Build
+   *  Graph is "auto". "off" does nothing here: the map is set up with actions. */
   _scanObstacles() {
     if (this.obstacleMapSource === "custom" || this.obstacleMapSource === "collision") {
-      return; // Obstacle map was built externally — don't overwrite with Pathfinding copy
+      return; // Obstacle map was built externally — don't overwrite it
     }
-
-    // Zero-event startup: build the map from Solid/Jump-thru objects when the
-    // Auto-Build Graph property asks for it. "auto" prefers the Pathfinding
-    // behavior when one is attached to this object, else falls back to solids.
-    if (this.autoBuildMode === "solids" ||
-        (this.autoBuildMode === "auto" && !this.pathfindingBehavior)) {
+    if (this.autoBuildMode === "auto") {
       this._autoBuildFromSolids();
-      return;
-    }
-
-    if (this.pathfindingBehavior) {
-      const success = this._copyObstacleMapFromPathfinding();
-      if (!success) {
-        this.isWaitingForPathfindingMap = true;
-        this.waitTickCount = 0;
-        this._log("Pathfinding behavior found but map not ready, starting poll...");
-      } else if (this.slopeMap) {
-        // Re-apply slope overrides: slope cells must be clear in obstacleMap
-        // (the pathfinding copy may have set them as solid)
-        for (let i = 0; i < this.slopeMap.length && i < this.obstacleMap.length; i++) {
-          if (this.slopeMap[i] > 0) this.obstacleMap[i] = 0;
-        }
-      }
-    } else {
-      this.isWaitingForPathfindingMap = true;
-      this.waitTickCount = 0;
     }
   },
 
@@ -165,96 +155,6 @@ export default {
     }
   },
 
-  /** Polls each tick to check if the Pathfinding behavior's obstacle map is ready; triggers graph generation when it is. */
-  _checkPathfindingMapReady() {
-    this.waitTickCount++;
-    if (this.waitTickCount >= this.maxWaitTicks) {
-      this._warn(
-        "Pathfinding map not ready after max wait time (" + this.maxWaitTicks + " ticks)."
-      );
-      this.isWaitingForPathfindingMap = false;
-      this._trigger("OnPathfindingMapTimeout");
-      return;
-    }
-
-    if (!this.pathfindingBehavior) {
-      this.pathfindingBehavior = this._getPathfindingBehavior();
-    }
-
-    if (!this.pathfindingBehavior) return;
-
-    // Check if the map data is actually ready via .map interface
-    const pfMap = this.pathfindingBehavior.map;
-    if (!pfMap) return;
-    const w = pfMap.widthInCells;
-    const h = pfMap.heightInCells;
-    if (!w || !h || w <= 0 || h <= 0) return;
-
-    // Map is ready — copy obstacle data FIRST so the map is available
-    // when OnPathfindingMapReady fires (user may add slopes in that trigger)
-    this.isWaitingForPathfindingMap = false;
-    this.waitTickCount = 0;
-
-    const success = this._copyObstacleMapFromPathfinding();
-    if (!success) {
-      this._trigger("OnPathfindingMapFailed");
-      return;
-    }
-
-    this._trigger("OnPathfindingMapReady");
-
-    if (this.autoRegenOnReady) {
-      this._restartGraphBuild();
-    }
-  },
-
-  /** Copies the cell-by-cell obstacle data from the C3 Pathfinding behavior's map into our obstacleMap array. */
-  _copyObstacleMapFromPathfinding() {
-    if (!this.pathfindingBehavior) return false;
-
-    try {
-      const pfMap = this.pathfindingBehavior.map;
-      if (!pfMap) {
-        this._log("Pathfinding .map interface not available");
-        return false;
-      }
-
-      const w = pfMap.widthInCells;
-      const h = pfMap.heightInCells;
-
-      if (!w || !h || w <= 0 || h <= 0) {
-        this._log("Pathfinding map not ready yet (widthInCells=" + w + ", heightInCells=" + h + ")");
-        return false;
-      }
-
-      // Auto Tile Size: the Pathfinding map's cell size IS the grid size we must use
-      if (!this._cellSizeResolved) {
-        this._resolveCellSize(pfMap.cellSize, "Pathfinding behavior cell size");
-      }
-
-      this.gridWidth = w;
-      this.gridHeight = h;
-
-      const cellCount = w * h;
-      this.obstacleMap = new Uint8Array(cellCount);
-
-      for (let gy = 0; gy < h; gy++) {
-        for (let gx = 0; gx < w; gx++) {
-          if (pfMap.isCellObstacle(gx, gy)) {
-            this.obstacleMap[gy * w + gx] = 1;
-          }
-        }
-      }
-
-      this.obstacleMapSource = "pathfinding";
-      this._log(`Copied obstacle map from Pathfinding: ${w}x${h} (${cellCount} cells)`);
-      return true;
-    } catch (e) {
-      this._error("Error copying obstacle map from Pathfinding:", e);
-      return false;
-    }
-  },
-
   /** Sets a single cell solid (blocked=true) or clear. Bounds-checked no-op otherwise. */
   aceSetObstacleCell(gx, gy, blocked) {
     if (
@@ -297,7 +197,6 @@ export default {
     this.gridHeight = Math.ceil(layoutHeight / cs);
     this.obstacleMap = new Uint8Array(this.gridWidth * this.gridHeight);
     this.obstacleMapSource = "collision";
-    this.isWaitingForPathfindingMap = false;
     this._log(`Built obstacle map from layout: ${this.gridWidth}x${this.gridHeight} (${this.gridWidth * this.gridHeight} cells)`);
     this._trigger("OnObstacleMapCreated");
   },
@@ -573,45 +472,6 @@ export default {
     } catch (e) {
       this._error("Error loading obstacle map from JSON:", e);
     }
-  },
-
-  /** "Generate navigation graph" action: marks the graph dirty so the next tick
-   *  starts a (time-sliced) build. OnGraphGenerated fires when it completes. */
-  aceGenerateNodesFromCustomMap() {
-    this._cancelGraphBuild();
-    this.graphGenerated = false;
-  },
-
-  /** Switches the map source to the Pathfinding behavior: copies its map now if
-   *  ready (then builds the graph), otherwise polls each tick until it is
-   *  (OnPathfindingMapReady / OnPathfindingMapTimeout fire accordingly). */
-  aceUsePathfindingObstacleMap(autoRegen) {
-    // Remember the auto-regen choice even when another picked instance already
-    // did the work this tick (matters if this instance builds later).
-    this.autoRegenOnReady = autoRegen !== false;
-    if (!this._claimSharedSetup("usePathfindingMap")) return;
-    this._cancelGraphBuild();
-    this.obstacleMapSource = null;
-    this.obstacleMap = null;
-    this.graphGenerated = false;
-    this.autoRegenOnReady = autoRegen !== false;
-
-    // Try to copy immediately if pathfinding behavior is already available and ready
-    if (this.pathfindingBehavior) {
-      const success = this._copyObstacleMapFromPathfinding();
-      if (success) {
-        this._trigger("OnPathfindingMapReady");
-        if (this.autoRegenOnReady) {
-          this._restartGraphBuild();
-        }
-        return;
-      }
-    }
-
-    // Not ready yet — start polling
-    this.isWaitingForPathfindingMap = true;
-    this.waitTickCount = 0;
-    this._log("Waiting for Pathfinding obstacle map...");
   },
 
   /** Sets a tile's state by name ("solid", "clear", "jump_thru", "avoid", or a
@@ -1011,6 +871,9 @@ export default {
   /** Returns true if a cell is a walkable slope tile (has a non-zero slopeMap value). */
   _isSlopeWalkable(gx, gy) {
     if (!this.slopeMap) return false;
+    // Same row-aliasing hazard as getNode: out-of-range columns would read a
+    // neighbouring row's slope value.
+    if (gx < 0 || gx >= this.gridWidth || gy < 0 || gy >= this.gridHeight) return false;
     const index = gy * this.gridWidth + gx;
     return this.slopeMap[index] > 0;
   },
@@ -1121,13 +984,9 @@ export default {
     return this.aceSaveObstacleMapToJSON();
   },
 
-  /** Returns the source of the current obstacle map (e.g. "pathfinding", "custom", "collision", or "none"). */
+  /** Returns the source of the current obstacle map ("custom", "collision", or "none"). */
   aceGetObstacleMapSource() {
     return this.obstacleMapSource || "none";
   },
 
-  /** Returns the number of ticks spent waiting during pathfinding setup. */
-  aceGetWaitTickCount() {
-    return this.waitTickCount || 0;
-  },
 };

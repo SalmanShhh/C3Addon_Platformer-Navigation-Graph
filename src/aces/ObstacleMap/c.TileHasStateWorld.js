@@ -6,7 +6,7 @@ export const config = {
   params: [
     { id: "x", name: "X", desc: "The X co-ordinate, in pixels.", type: "number", initialValue: "0" },
     { id: "y", name: "Y", desc: "The Y co-ordinate, in pixels.", type: "number", initialValue: "0" },
-    { id: "state", name: "State", desc: "The tile state to check for.", type: "combo", initialValue: "solid",
+    { id: "state", name: "State", desc: "Solid blocks movement. Clear is open space. Jump-thru is a one-way platform. Avoid is walkable but costly. Slope (any) matches every slope type; Gentle slope matches only 22.5° tiles.", type: "combo", initialValue: "solid",
       items: [
         { solid: "Solid" },
         { clear: "Clear" },

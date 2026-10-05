@@ -95,6 +95,12 @@ export default {
 
   /** Looks up a navigation node by grid coordinates; returns undefined if no node exists there. */
   getNode(gx, gy) {
+    // Out-of-range cells have no node. Without this check the row-major key
+    // (gy * gridWidth + gx) ALIASES across rows: column -1 of row r is the
+    // last column of row r-1 and column gridWidth is column 0 of row r+1, so
+    // edge-column neighbour lookups linked tiles straight across the map and
+    // off-map positions resolved to nodes on the opposite side.
+    if (gx < 0 || gx >= this.gridWidth || gy < 0 || gy >= this.gridHeight) return undefined;
     const graph = this._getNavigationGraph();
     return graph.get(this.gridKey(gx, gy));
   },
@@ -158,6 +164,41 @@ export default {
     }
   },
 
+  /** Makes graph-dependent actions safe in "On start of layout", which runs
+   *  BEFORE the behavior's first tick: initializes the instance if needed,
+   *  finishes any in-progress build (own or another instance's), and
+   *  otherwise builds the graph synchronously right now (auto-build scan
+   *  included). Returns whether a generated graph is available afterwards. */
+  _ensureGraphReadyNow() {
+    this._ensureInitialized();
+    if (!this.navEnabled) return false;
+    if (this._graphBuild) {
+      this._finishGraphBuildNow();
+    } else {
+      globalNavManager.finishBuildFor(this.navKey);
+    }
+    if (this.graphGenerated) return true;
+    if (this._startGraphBuild()) {
+      this._finishGraphBuildNow();
+    }
+    return this.graphGenerated;
+  },
+
+  /** Readiness for READ-ONLY graph queries that events poll every tick
+   *  (same-platform checks). Unlike _ensureGraphReadyNow, never completes a
+   *  mid-game rebuild synchronously (that would reintroduce the frame hitch
+   *  time-slicing exists to prevent): while a map that was built before is
+   *  rebuilding, the query answers "no". Only a map that has never been
+   *  built is built now, so queries still work from On start of layout. */
+  _graphReadyForQuery() {
+    this._ensureInitialized();
+    if (!this.navEnabled) return false;
+    if (this.graphGenerated) return true;
+    if (this._graphBuild || globalNavManager.isBuildInProgress(this.navKey)) return false;
+    if (globalNavManager.getGraphCapabilities(this.navKey)) return false; // rebuild pending
+    return this._ensureGraphReadyNow();
+  },
+
   /** Ordered connection phases for the current configuration. Order must stay
    *  walk → jump → fall → coyote → fall-through → slope (falls read their
    *  landing targets' walk connections). */
@@ -184,7 +225,6 @@ export default {
    *  the phase state. Returns false when the build cannot start yet (waiting
    *  for the Pathfinding map, no obstacle map, or missing agent params). */
   _startGraphBuild() {
-    if (this.isWaitingForPathfindingMap) return false;
 
     // A rebuild replaces every node OBJECT, so goal claims keyed by the old
     // nodes are meaningless — drop them; agents re-claim on their next path.
@@ -1189,8 +1229,7 @@ export default {
 
   /** Returns whether a navigation node exists at the given grid coordinates. */
   aceNodeExistsGrid(gx, gy) {
-    const graph = this._getNavigationGraph();
-    return graph.has(this.gridKey(gx, gy));
+    return !!this.getNode(gx, gy);
   },
 
   /** Returns whether a navigation node exists at the given world position (converts to grid internally). */
@@ -1201,23 +1240,20 @@ export default {
 
   /** Returns whether the node at the given grid coordinates is a ledge (left or right edge). */
   aceIsNodeLedge(gx, gy) {
-    const graph = this._getNavigationGraph();
-    const node = graph.get(this.gridKey(gx, gy));
+    const node = this.getNode(gx, gy);
     if (!node) return false;
     return node.isLeftLedge || node.isRightLedge;
   },
 
   /** Returns the world X position of the node at the given grid coordinates. Returns 0 if not found. */
   aceGetNodeWorldX(gx, gy) {
-    const graph = this._getNavigationGraph();
-    const node = graph.get(this.gridKey(gx, gy));
+    const node = this.getNode(gx, gy);
     return node ? node.x : 0;
   },
 
   /** Returns the world Y position of the node at the given grid coordinates. Returns 0 if not found. */
   aceGetNodeWorldY(gx, gy) {
-    const graph = this._getNavigationGraph();
-    const node = graph.get(this.gridKey(gx, gy));
+    const node = this.getNode(gx, gy);
     return node ? node.y : 0;
   },
 

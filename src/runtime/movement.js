@@ -27,7 +27,11 @@ export default {
       }
       this.hasPath = false;
       this.departureCommitted = false;
+      // Snapshot the side goal BEFORE the trigger: an On arrived handler
+      // issuing a fresh Find path would otherwise clear or re-arm it.
+      const sideGoal = this._takeSideGoal();
       this._trigger("OnPathComplete");
+      this._checkSideGoalReached(sideGoal);
       return;
     }
 
@@ -1026,6 +1030,7 @@ export default {
   /** Immediately jump toward a target position from the current position. No pathfinding involved. */
   aceJumpTowardPosition(targetX, targetY) {
     if (!this.navEnabled) return;
+    this._ensureInitialized(); // acquires the Platform behavior pre-first-tick
     if (!this.platformBehavior) return;
 
     const onFloor = this.platformBehavior.isOnFloor;
@@ -1148,6 +1153,184 @@ export default {
   /** Returns the separation cooldown in seconds. */
   aceGetSeparationCooldown() {
     return this.separationCooldown;
+  },
+
+  // ============================================================================
+  // MOVEMENT - Ledge-to-Ledge Patrol
+  // ============================================================================
+
+  /** Follows walk connections from a node to the platform's end in one
+   *  direction: stops at the matching ledge flag or a missing walk connection
+   *  (wall). Slope runs continue naturally because slope traversals are walk
+   *  connections. */
+  _findPatrolBound(startNode, dir) {
+    let node = startNode;
+    let steps = 0;
+    const maxSteps = 100000;
+    const action = dir < 0 ? "walk_left" : "walk_right";
+    while (steps < maxSteps) {
+      if (dir < 0 && node.isLeftLedge) break;
+      if (dir > 0 && node.isRightLedge) break;
+      let next = null;
+      for (const c of node.connections) {
+        if (c.action === action) { next = c.target; break; }
+      }
+      if (!next) break;
+      node = next;
+      steps++;
+    }
+    return node;
+  },
+
+  /** Discovers patrol bounds from the character's current standing position:
+   *  the platform's ends, pulled inward by the edge distance (_patrolRange,
+   *  in pixels) so the character turns that far short of each edge. The
+   *  bounds always lie INSIDE the platform: when the margins would cross on
+   *  a short platform, both collapse to the platform's midpoint and the
+   *  degenerate-width check in _updatePatrol has the character stand, like
+   *  on an island — an oversized distance can never walk it off a ledge.
+   *  Returns true when a platform was found. */
+  _discoverPatrolBounds() {
+    let grid = this.worldToGrid(this.instance.x, this.instance.y);
+    let node = this.getNode(grid.gx, grid.gy);
+    if (!node) {
+      const corrected = this._correctToGround(this.instance.x, this.instance.y);
+      grid = this.worldToGrid(corrected.x, corrected.y);
+      node = this.getNode(grid.gx, grid.gy);
+    }
+    if (!node) return false;
+    const left = this._findPatrolBound(node, -1);
+    const right = this._findPatrolBound(node, 1);
+    const margin = this._patrolRange;
+    let leftX = left.x + margin;
+    let rightX = right.x - margin;
+    if (leftX > rightX) {
+      const mid = (left.x + right.x) / 2;
+      leftX = mid;
+      rightX = mid;
+    }
+    this._patrolLeftX = leftX;
+    this._patrolRightX = rightX;
+    this._patrolY = node.y;
+    return true;
+  },
+
+  /** Starts a ledge-to-ledge patrol on the current platform: walk to one end,
+   *  dwell, turn, walk to the other. Cancels any active path. */
+  aceStartPatrol(dwellSeconds, edgeDistancePx) {
+    this._ensureGraphReadyNow(); // safe in On start of layout
+    if (!this.platformBehavior) return;
+    if (!this.graphGenerated) {
+      this._warn("Start patrol: the navigation graph is not generated yet");
+      return;
+    }
+    this._patrolDwell = Math.max(0, dwellSeconds || 0);
+    this._patrolRange = Math.max(0, edgeDistancePx || 0);
+    if (!this._discoverPatrolBounds()) {
+      this._warn("Start patrol: no walkable node at the character's position");
+      return;
+    }
+    if (this.hasPath) this.aceClearPath();
+    // Head for the farther end first so the opening leg is meaningful.
+    const toLeft = Math.abs(this.instance.x - this._patrolLeftX);
+    const toRight = Math.abs(this.instance.x - this._patrolRightX);
+    this._patrolDir = toRight >= toLeft ? 1 : -1;
+    this._patrolDwellTimer = 0;
+    this._patrolActive = true;
+    this._log(`Patrol started: ${Math.round(this._patrolLeftX)} to ${Math.round(this._patrolRightX)}, dwell ${this._patrolDwell}s`);
+  },
+
+  /** Stops the patrol (the character simply stands). */
+  aceStopPatrol() {
+    this._patrolActive = false;
+  },
+
+  /** Returns whether a patrol is active. */
+  aceIsPatrolling() {
+    return !!this._patrolActive;
+  },
+
+  /** Returns the patrol walk direction: -1 left, 1 right, 0 when not patrolling. */
+  aceGetPatrolDirection() {
+    return this._patrolActive && this._patrolDwellTimer <= 0 ? this._patrolDir : 0;
+  },
+
+  /** Per-tick patrol drive: brake into each end, dwell, turn. */
+  _updatePatrol(dt) {
+    if (!this.platformBehavior) return;
+    try {
+      if (!this.platformBehavior.isOnFloor) return; // knocked airborne: wait
+
+      // Landed on a different platform (knockback, fall): re-anchor there.
+      if (Math.abs(this.instance.y - this._patrolY) > this.cellSize * 1.5) {
+        if (!this._discoverPatrolBounds()) {
+          this.aceStopPatrol();
+          return;
+        }
+      }
+
+      // Degenerate bounds (island, or edge margins that crossed on a short
+      // platform): walk to the single stand point, then hold there. This is
+      // what the docs promise ("stands at the platform's middle").
+      if (this._patrolRightX - this._patrolLeftX < this.cellSize * 0.5) {
+        const standX = (this._patrolLeftX + this._patrolRightX) / 2;
+        const delta = standX - this.instance.x;
+        if (Math.abs(delta) > this.cellSize * 0.2) {
+          const dirName = delta > 0 ? "right" : "left";
+          let blocked = false;
+          try { blocked = this.platformBehavior.isByWall(dirName); } catch (e) {}
+          const v = Math.abs(this.platformBehavior.vectorX) || Math.abs(this.estimatedVelocityX);
+          const brake = (v * v) / (2 * this.platformProps.deceleration);
+          if (!blocked && Math.abs(delta) > brake + this.cellSize * 0.1) {
+            this.platformBehavior.simulateControl(dirName);
+          }
+        }
+        return;
+      }
+
+      if (this._patrolDwellTimer > 0) {
+        this._patrolDwellTimer -= dt;
+        if (this._patrolDwellTimer <= 0) {
+          // Flip BEFORE the trigger so PatrolDirection reports the new walk
+          // direction inside 'On patrol dwell finished' (sprite mirroring).
+          this._patrolDir *= -1;
+          this._trigger("OnPatrolDwellFinished");
+        }
+        return;
+      }
+
+      const targetX = this._patrolDir > 0 ? this._patrolRightX : this._patrolLeftX;
+      const dirName = this._patrolDir > 0 ? "right" : "left";
+      const dist = (targetX - this.instance.x) * this._patrolDir;
+      let walled = false;
+      try { walled = this.platformBehavior.isByWall(dirName); } catch (e) {}
+
+      if (dist <= this.cellSize * 0.2 || walled) {
+        // End reached: dwell (or turn immediately with no dwell). The dwell
+        // start/finished pair fires only for real waits (dwell > 0); with
+        // dwell 0 the turn is instantaneous and end reached IS that moment.
+        this._trigger("OnPatrolEndReached");
+        // The trigger's user events run synchronously and may end the patrol
+        // (Stop patrol, or any Find path): no dwell for a dead patrol.
+        if (!this._patrolActive) return;
+        if (this._patrolDwell > 0) {
+          this._patrolDwellTimer = this._patrolDwell;
+          this._trigger("OnPatrolDwellStarted");
+        } else {
+          this._patrolDir *= -1;
+        }
+        return;
+      }
+
+      // Deceleration-based braking so momentum never carries the character
+      // past the bound and off the ledge.
+      const vx =
+        Math.abs(this.platformBehavior.vectorX) || Math.abs(this.estimatedVelocityX);
+      const stopDist = (vx * vx) / (2 * this.platformProps.deceleration);
+      if (dist > stopDist + this.cellSize * 0.1) {
+        this.platformBehavior.simulateControl(dirName);
+      }
+    } catch (e) {}
   },
 
   /** Sets how long a character keeps trying to separate before giving up. */
@@ -1275,11 +1458,6 @@ export default {
     const grid = this.worldToGrid(this.instance.x, this.instance.y);
     const node = this.getNode(grid.gx, grid.gy);
     return node ? node.isIsland : false;
-  },
-
-  /** Returns whether the pathfinding system is still initializing (waiting for obstacle map setup). */
-  aceIsSettingUpPathfinding() {
-    return this.isWaitingForPathfindingMap || false;
   },
 
   /** Returns whether multi-agent avoidance is currently enabled. */

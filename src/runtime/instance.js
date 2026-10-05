@@ -33,7 +33,7 @@ export default function (parentClass) {
       this.maxSearchNodes = properties[2];
       this.maxFallDistanceSetting = properties[3];
       this.autoControl = properties[4];
-      const strategyMap = ["balanced", "shortest", "safest", "simplest"];
+      const strategyMap = ["balanced", "shortest", "safest", "simplest", "no_drop", "walk_only"];
       this.pathStrategy = strategyMap[properties[5]] || "balanced";
       this.smoothPaths = properties[6];
       this.maxWaypointTime = properties[7];
@@ -44,7 +44,7 @@ export default function (parentClass) {
       this.rePathThreshold = properties[12];
       this.hazardRadius = properties[13];
       // Auto-Build Graph: zero-event startup mode
-      const autoBuildMap = ["off", "auto", "pathfinding", "solids"];
+      const autoBuildMap = ["off", "auto"];
       this.autoBuildMode = autoBuildMap[properties[14]] || "off";
       // Map Tag: instances with the same tag on a layout share one navigation
       // map/graph. "" (default) shares with everyone.
@@ -87,7 +87,6 @@ export default function (parentClass) {
       this.layoutUID = null;
       this.navKey = null; // layoutUID + "|" + mapTag — key for all shared nav state
       this.platformBehavior = null;
-      this.pathfindingBehavior = null;
       this._initialized = false;
 
       // Use C3 SDK's built-in ticking mechanism (available on base class without this.instance)
@@ -137,12 +136,11 @@ export default function (parentClass) {
         ceilingCollisionMode: "stop",
       };
 
-      this.hazards = new Map();
+      // Hazard, portal, and elevator-group RECORDS live per map on
+      // globalNavManager (see _getHazardsMap / _getPortalsMap); only the
+      // "last ID this instance created" is per instance.
       this.lastHazardId = 0;
-
-      this.portals = new Map();
-      this.nextPortalId = 1;
-      this.lastPortalId = 0;
+      this.lastPortalId = 0; // IDs come from globalNavManager.nextPortalId
 
       this.coyoteTimer = 0;
       this.wasOnFloor = false;
@@ -182,17 +180,42 @@ export default function (parentClass) {
       this._inPortalEntryTrigger = false;
       this.portalPauseTimer = 0;
       this.portalPauseWarned = false;
-      this.elevatorGroups = new Map();
 
       this.multiAgentAvoidance = false;
       this.pathPending = false;
+
+      // Ledge-to-ledge patrol state (movement.js). _patrolRange is the edge
+      // distance in PIXELS (turn that far short of each platform end);
+      // _patrolDir: 1 = right, -1 = left, meaningful only while active.
+      this._patrolActive = false;
+      this._patrolDir = 1;
+      this._patrolDwell = 0;
+      this._patrolDwellTimer = 0;
+      this._patrolRange = 0;
+      this._patrolLeftX = 0;
+      this._patrolRightX = 0;
+      this._patrolY = 0;
+
+      // Find path to side of object state (pathfinding.js). The armed goal
+      // (_sideGoalInst + side/dist) is consumed at arrival by
+      // _checkSideGoalReached; _reachedObjectSide backs the ReachedObjectSide
+      // expression (-1/1 inside OnObjectSideReached, 0 otherwise).
+      this._sideGoalInst = null;
+      this._sideGoalSide = 0;
+      this._sideGoalDist = 0;
+      this._reachedObjectSide = 0;
+
+      // Find object on same platform result (pathfinding.js): UID for the
+      // PlatformObjectUID expression, -1 = none found.
+      this._platformObjectUid = -1;
+
+      // Per-agent descent limit in pixels: airborne edges with a larger net
+      // drop are skipped at search time. -1 = unlimited (default), 0 = never
+      // descend by air at all (ramps and portals only). ACE-only, no property.
+      this.maxTraversalDrop = -1;
+
       this._jumpParamsOverridden = false;
       this._physicsMismatchWarned = false;
-
-      this.isWaitingForPathfindingMap = false;
-      this.waitTickCount = 0;
-      this.autoRegenOnReady = true;
-      this.maxWaitTicks = 600;
 
       // Incremental (chunked) graph build state — see graphBuild.js
       this._graphBuild = null;
@@ -213,24 +236,23 @@ export default function (parentClass) {
 
     }
 
-    /** Per-frame update: first-tick initialization, behavior acquisition, graph
-     *  build slices, coyote/jump-toward timers, path queue, and path following. */
-    _tick() {
-      const dt = this.instance.dt;
-
-      // First-tick initialization: acquire layout UID, behaviors, and graph mode
+    /** First-run initialization: layout key, behaviors, graph mode, agent
+     *  params. Normally runs on the first tick, but graph-dependent actions
+     *  call it too so they work from "On start of layout" (which runs BEFORE
+     *  the first tick). Idempotent. */
+    _ensureInitialized() {
       if (!this._initialized) {
         this._initialized = true;
         // ILayout has no uid in the documented API (it read undefined) —
         // the layout NAME is documented and unique per project.
         this.layoutUID = this.instance.layout.name;
         this.navKey = this.layoutUID + "|" + this.mapTag;
+        globalNavManager.hookLayoutEnd(this.instance.runtime);
         this.characterHeight = Math.abs(this.instance.height);
         this.characterWidth = Math.abs(this.instance.width);
         this._log(`Character dimensions: ${this.characterWidth}x${this.characterHeight}px (instance: ${this.instance.width}x${this.instance.height})`);
         this._initializeGraphMode();
         this.platformBehavior = this._getPlatformBehavior();
-        this.pathfindingBehavior = this._getPathfindingBehavior();
         if (this.platformBehavior) {
           this._readPlatformProperties();
           this._calculateJumpParametersFromPlatform();
@@ -260,6 +282,13 @@ export default function (parentClass) {
           }
         }
       }
+    }
+
+    /** Per-frame update: behavior acquisition, graph build slices,
+     *  coyote/jump-toward timers, path queue, and path following. */
+    _tick() {
+      const dt = this.instance.dt;
+      this._ensureInitialized();
 
       // Use "Lazy Loading" - only find them if we don't have them yet
     if (!this.platformBehavior) {
@@ -272,28 +301,15 @@ export default function (parentClass) {
     }
 
 
-    if (!this.pathfindingBehavior) {
-        this.pathfindingBehavior = this._getPathfindingBehavior();
-    }
-
       // Behavior disabled: initialization and subscriptions above stay live so
       // re-enabling resumes seamlessly, but no navigation work happens. Note a
       // frozen gradual-portal traversal stays frozen (Platform stays disabled)
       // until this behavior is re-enabled.
       if (!this.navEnabled) return;
 
-    // If either behavior is present but disabled, skip all processing and log a warning
+    // If the Platform behavior is present but disabled, skip all processing
       if (this.platformBehavior && !this.platformBehavior.isEnabled) {
         return;
-      }
-
-      if (this.pathfindingBehavior && !this.pathfindingBehavior.isEnabled) {
-        console.log("Pathfinding behavior is disabled, make sure it is enabled.");
-        return;
-      }
-
-      if (this.isWaitingForPathfindingMap) {
-        this._checkPathfindingMapReady();
       }
 
       // Graph generation is time-sliced: continue an in-progress build, or start
@@ -351,6 +367,11 @@ export default function (parentClass) {
 
       if (this.hasPath && !this.pathPending) {
         this._followPath(dt);
+      } else if (this._patrolActive) {
+        // Ledge-to-ledge patrol: drives the character between its platform's
+        // ends. Mutually exclusive with idle separation (a patroller is a
+        // mover, so idle neighbors step aside for it instead).
+        this._updatePatrol(dt);
       } else {
         // Idle separation: idle agents drift apart when overlapping (no-op
         // unless Idle Separation > 0 and a same-map neighbor is too close).
@@ -376,8 +397,9 @@ export default function (parentClass) {
       if (this.navKey !== null) {
         globalNavManager.unsubscribe(this.navKey, this);
       }
-      this.portals.clear();
-      this.hazards.clear();
+      // Portal/hazard records are per map: unsubscribe drops them only when
+      // this was the map's last instance, so one destroyed character no
+      // longer takes the whole map's portals and hazards with it.
       if (this.portalState === "traversing" && this.platformBehavior) {
         this.platformBehavior.isEnabled = this.platformWasEnabled;
       }
@@ -419,6 +441,12 @@ export default function (parentClass) {
         idleSeparation: this.idleSeparation,
         separationCooldown: this.separationCooldown,
         separationGiveUpTime: this.separationGiveUpTime,
+        maxTraversalDrop: this.maxTraversalDrop,
+        // Patrol survives savegames (bounds re-discover on load anyway via
+        // re-anchoring). The side-of-object goal is deliberately NOT saved:
+        // instance references don't serialize, so a save mid-path loses only
+        // that arrival's OnObjectSideReached trigger.
+        patrol: { active: this._patrolActive, dir: this._patrolDir, dwell: this._patrolDwell, range: this._patrolRange, leftX: this._patrolLeftX, rightX: this._patrolRightX, y: this._patrolY },
         currentPath: this.currentPath.map((wp) => ({
           x: wp.x,
           y: wp.y,
@@ -453,9 +481,12 @@ export default function (parentClass) {
         gridHeight: this.gridHeight,
         slopeMap: this.slopeMap ? Array.from(this.slopeMap) : null,
         hazardMap: this.hazardMap ? Array.from(this.hazardMap) : null,
-        hazards: Array.from(this.hazards.values()),
+        // Every instance saves its map's FULL shared set (read without
+        // initializing: saving must not subscribe as a side effect), so the
+        // records survive no matter which instances exist at load time.
+        hazards: Array.from(this._peekMapStore(globalNavManager.sharedHazards)?.values() || []),
         lastHazardId: this.lastHazardId,
-        portals: Array.from(this.portals.values()),
+        portals: Array.from(this._peekMapStore(globalNavManager.sharedPortals)?.values() || []),
         lastPortalId: this.lastPortalId,
         portalState: this.portalState,
         portalTraverseProgress: this.portalTraverseProgress,
@@ -466,7 +497,10 @@ export default function (parentClass) {
         portalTraverseSpeed: this.portalTraverseSpeed,
         platformWasEnabled: this.platformWasEnabled,
         currentPortalId: this.currentPortalId,
-        elevatorGroups: Object.fromEntries(this.elevatorGroups),
+        elevatorGroups: Object.fromEntries(this._peekMapStore(globalNavManager.sharedElevatorGroups) || []),
+        // False before this instance has a map: its empty lists above mean
+        // "not captured", and load must not let them clear the shared stores.
+        hasMapStores: this.navKey !== null,
         coyoteTimer: this.coyoteTimer,
         wasOnFloor: this.wasOnFloor,
         coyoteJumpPending: this.coyoteJumpPending,
@@ -518,6 +552,16 @@ export default function (parentClass) {
       this.idleSeparation = Math.max(0, o.idleSeparation || 0);
       this.separationCooldown = typeof o.separationCooldown === "number" ? Math.max(0, o.separationCooldown) : 5;
       this.separationGiveUpTime = typeof o.separationGiveUpTime === "number" ? Math.max(0, o.separationGiveUpTime) : 1.2;
+      this.maxTraversalDrop = typeof o.maxTraversalDrop === "number" ? o.maxTraversalDrop : -1;
+      if (o.patrol) {
+        this._patrolActive = !!o.patrol.active;
+        this._patrolDir = o.patrol.dir || 1;
+        this._patrolDwell = o.patrol.dwell || 0;
+        this._patrolRange = o.patrol.range || 0;
+        this._patrolLeftX = o.patrol.leftX || 0;
+        this._patrolRightX = o.patrol.rightX || 0;
+        this._patrolY = o.patrol.y || 0;
+      }
       this.currentWaypoint = o.currentWaypoint;
       this.hasPath = o.hasPath;
       this.timeAtWaypoint = o.timeAtWaypoint;
@@ -551,25 +595,38 @@ export default function (parentClass) {
       this.pathPending = false; // Queue doesn't persist
       this._jumpParamsOverridden = o._jumpParamsOverridden || false;
 
-      this.hazards.clear();
-      if (o.hazards) {
-        for (const h of o.hazards) {
-          this.hazards.set(h.id, h);
-          // Global counter: never re-issue an ID a loaded hazard already uses
-          globalNavManager.nextHazardId = Math.max(globalNavManager.nextHazardId, h.id + 1);
+      // Portals, hazards, and elevator groups are shared per map and every
+      // initialized instance saves the full set, so each loading instance on a
+      // map restores the same records (clear + refill is idempotent). A save
+      // from an instance that had not initialized yet (hasMapStores false)
+      // holds NO records rather than "no portals", so it must not clear the
+      // stores other instances restored. _getNavKey, not _ensureInitialized:
+      // init would re-read Platform properties over the values just restored.
+      const loadNavKey = this._getNavKey();
+      globalNavManager.hookLayoutEnd(this.instance.runtime);
+      const restoreStores = o.hasMapStores !== false;
+      if (restoreStores) {
+        const hazardsMap = globalNavManager.getSharedHazards(loadNavKey);
+        hazardsMap.clear();
+        if (o.hazards) {
+          for (const h of o.hazards) {
+            hazardsMap.set(h.id, h);
+            // Global counter: never re-issue an ID a loaded hazard already uses
+            globalNavManager.nextHazardId = Math.max(globalNavManager.nextHazardId, h.id + 1);
+          }
+        }
+
+        const portalsMap = globalNavManager.getSharedPortals(loadNavKey);
+        portalsMap.clear();
+        if (o.portals) {
+          for (const p of o.portals) {
+            portalsMap.set(p.id, p);
+            globalNavManager.nextPortalId = Math.max(globalNavManager.nextPortalId, p.id + 1);
+          }
         }
       }
       this.lastHazardId = o.lastHazardId || 0;
-
-      this.portals.clear();
-      this.nextPortalId = 1;
       this.lastPortalId = o.lastPortalId || 0;
-      if (o.portals) {
-        for (const p of o.portals) {
-          this.portals.set(p.id, p);
-          this.nextPortalId = Math.max(this.nextPortalId, p.id + 1);
-        }
-      }
 
       // Restore portal execution state
       this.portalState = o.portalState || "none";
@@ -582,11 +639,14 @@ export default function (parentClass) {
       this.platformWasEnabled = o.platformWasEnabled !== undefined ? o.platformWasEnabled : true;
       this.currentPortalId = o.currentPortalId || 0;
 
-      // Restore elevator groups
-      this.elevatorGroups.clear();
-      if (o.elevatorGroups) {
-        for (const [key, val] of Object.entries(o.elevatorGroups)) {
-          this.elevatorGroups.set(key, val);
+      // Restore elevator groups (shared per map, see above)
+      if (restoreStores) {
+        const elevatorGroups = globalNavManager.getSharedElevatorGroups(loadNavKey);
+        elevatorGroups.clear();
+        if (o.elevatorGroups) {
+          for (const [key, val] of Object.entries(o.elevatorGroups)) {
+            elevatorGroups.set(key, val);
+          }
         }
       }
 
@@ -656,11 +716,11 @@ export default function (parentClass) {
       }, {
         title: prefix + " - Portals",
         properties: [
-          { name: "$portalCount", value: this._getPortalsMap().size },
+          { name: "$portalCount", value: this._peekMapStore(globalNavManager.sharedPortals)?.size || 0 },
           { name: "$portalState", value: this.portalState },
           { name: "$currentPortalId", value: this.currentPortalId },
           { name: "$traverseProgress", value: Math.round(this.portalTraverseProgress * 100) + "%" },
-          { name: "$elevatorGroups", value: this.elevatorGroups.size },
+          { name: "$elevatorGroups", value: this._peekMapStore(globalNavManager.sharedElevatorGroups)?.size || 0 },
         ]
       }, {
         title: prefix + " - Settings",
@@ -672,8 +732,6 @@ export default function (parentClass) {
           { name: "$maxFallDistance", value: Math.round(this.maxFallDistance) },
           { name: "$debug", value: this.enableDebug },
           { name: "$platformBehavior", value: this.platformBehavior ? "found" : "not found" },
-          { name: "$pathfindingBehavior", value: this.pathfindingBehavior ? "found" : "not found" },
-          { name: "$waitingForMap", value: this.isWaitingForPathfindingMap },
         ]
       }];
     }
@@ -681,11 +739,6 @@ export default function (parentClass) {
     /** Finds and returns the Platform behavior instance on this object. */
     _getPlatformBehavior() {
       return this._GetBehaviorByType("Platform");
-    }
-
-    /** Finds and returns the Pathfinding behavior instance on this object. */
-    _getPathfindingBehavior() {
-      return this._GetBehaviorByType("Pathfinding");
     }
 
     // Utility to find a behavior by its plugin type name, even if renamed in the editor
@@ -869,25 +922,33 @@ export default function (parentClass) {
       return globalNavManager.getSharedGraph(this.navKey);
     }
 
-    /** Returns the portals Map (shared per nav key).
+    /** Returns the portals Map (shared per nav key, stored on the manager).
      *  Portals are per map tag: a door portal added by a "ghost"-tagged instance
-     *  exists only in the ghost map. Falls back to the own map before the first
-     *  tick subscribes this instance. */
+     *  exists only in the ghost map. Initializes first so actions in "On start
+     *  of layout" (before the first tick) reach the right map's store. */
     _getPortalsMap() {
-      const subs = globalNavManager.subscribers.get(this.navKey);
-      if (subs && subs.size > 0) {
-        return subs.values().next().value.portals;
-      }
-      return this.portals;
+      this._ensureInitialized();
+      return globalNavManager.getSharedPortals(this.navKey);
     }
 
-    /** Returns the hazards Map (shared per nav key), like portals. */
+    /** Returns the hazards Map (shared per nav key), like portals, including
+     *  the same pre-first-tick initialization. */
     _getHazardsMap() {
-      const subs = globalNavManager.subscribers.get(this.navKey);
-      if (subs && subs.size > 0) {
-        return subs.values().next().value.hazards;
-      }
-      return this.hazards;
+      this._ensureInitialized();
+      return globalNavManager.getSharedHazards(this.navKey);
+    }
+
+    /** Returns the elevator groups Map (shared per nav key), like portals. */
+    _getElevatorGroups() {
+      this._ensureInitialized();
+      return globalNavManager.getSharedElevatorGroups(this.navKey);
+    }
+
+    /** Reads one of the manager's per-map stores WITHOUT initializing (save and
+     *  debugger paths must not subscribe as a side effect). Null before this
+     *  instance has a nav key or when the map has no store yet. */
+    _peekMapStore(stores) {
+      return this.navKey !== null ? (stores.get(this.navKey) || null) : null;
     }
 
     /** Returns true if the navigation graph needs to be regenerated. */

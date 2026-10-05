@@ -5,7 +5,7 @@ export const config = {
   params: [
     { id: "gx", name: "Grid X", desc: "The tile X co-ordinate.", type: "number", initialValue: "0" },
     { id: "gy", name: "Grid Y", desc: "The tile Y co-ordinate.", type: "number", initialValue: "0" },
-    { id: "state", name: "State", desc: "The tile state to set.", type: "combo", initialValue: "solid",
+    { id: "state", name: "State", desc: "Solid blocks movement. Clear is open space. Jump-thru can be stood on and jumped through from below. Avoid is walkable but costly. Slope states set the surface angle; the / and \\ glyphs show the shape.", type: "combo", initialValue: "solid",
       items: [
         { solid: "Solid" },
         { clear: "Clear" },

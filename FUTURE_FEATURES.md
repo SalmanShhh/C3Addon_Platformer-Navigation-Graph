@@ -4,6 +4,249 @@ Features and enhancements to consider for future versions of the Platformer Navi
 
 ---
 
+## Streaming / Unbounded Worlds (grid origin offset + growable, chunked grid)
+
+Procedural levels generated INSIDE the layout rectangle already work (SetTileState / rescans + Regenerate graph, time-sliced; portals and hazards survive rebuilds). Worlds that extend OUTSIDE it do not: the grid is anchored at world (0, 0) and sized once from the layout (auto-build uses layout.width/height; Build obstacle map from layout takes explicit dimensions, still from origin 0,0). Negative co-ordinates, unbounded-scrolling content past the layout size, and endless runners / chunk streamers have no nodes.
+
+### Prerequisite bug: FIXED in 0.9.0.0 (getNode + _isSlopeWalkable bounds checks; Debug node ACEs routed through getNode)
+- `getNode(gx, gy)` (graphBuild.js) keys the graph by `gy * gridWidth + gx` with NO bounds check, and `_isSlopeWalkable` (obstacleMap.js) indexes slopeMap the same way. Column -1 of row r ALIASES to the last column of row r-1; column gridWidth aliases to column 0 of row r+1.
+- Consequences: (1) off-layout start/target positions resolve to nodes on the OPPOSITE side of the map (ground correction and the Nearest fallback inherit it), so characters head confidently to the wrong place instead of failing cleanly; (2) during graph builds, edge-column neighbour lookups (walk, and jump/fall/ledge checks) can create bogus links ACROSS the map when the far-edge cell one row up/down is standable, giving A* a one-tile "shortcut" that makes characters walk into the layout edge and re-path loop. Affects ordinary levels with uneven terrain touching both side edges, not just procedural ones.
+- Fix: bounds-check in getNode (return undefined outside 0..gridWidth-1 / 0..gridHeight-1) and in _isSlopeWalkable. Central, small, no API change.
+
+### Design for real streaming support
+- **Origin offset**: grid origin (originX, originY) in world pixels, used by worldToGrid / gridToWorld (and every place that assumes cell 0 = world 0, e.g. scan rectangles, tile-hazard and slope indices, JSON export/import of the map). Unlocks negative co-ordinates.
+- **Grow / shift**: an action to extend the grid (e.g. "Extend obstacle map to include rectangle" or by tile counts per side) that reallocates obstacle/slope/hazard arrays with the old data copied at an offset, then rebuilds. gridKey changes with gridWidth, so node keys must be recomputed (a full rebuild is simplest; incremental is an optimization).
+- **Chunking (the scalable version)**: fixed-size chunks keyed by chunk co-ordinates, each with its own obstacle data and nodes; build/connect a chunk when loaded, rebuild only the seams with its neighbours, drop nodes (and goal claims/paths through them) when unloaded. Edge connections across chunk seams (walk, jump, fall arcs) are the hard part: arc validation must read tiles from neighbouring chunks.
+- Unloaded regions read as solid or empty? Decide per mode: "unknown = blocked" keeps characters from walking into unloaded space.
+- ACE surface: keep it C3-shaped (no JSON for users). E.g. "Load nav chunk from tilemap at X, Y" / "Unload nav chunk" or simply auto-scan new solids that appear within a configurable margin.
+
+### Considerations
+- Portals/hazards are already keyed per map and survive rebuilds; with chunk unloads, portals whose ends fall in unloaded chunks should stay registered but unconnected until the chunk returns (the build-end _connectAllPortals pattern already behaves this way).
+- Memory: a grid sized to a huge layout wastes memory on empty space (Uint8Array per cell); chunking fixes this.
+- The getNode bounds fix landed in 0.9.0.0. An origin offset must keep that check in grid space (after subtracting the origin), or the aliasing returns.
+
+---
+
+## Background Graph Builds in a Dedicated Worker (profile first)
+
+Idea: run the expensive navigation calculations on a separate thread for real parallelism. Not tied to the project's "Use worker" setting: worker mode moves the WHOLE runtime (this addon included) off the page's main thread, which keeps the tab responsive, but the addon still shares that one thread with game logic. Parallelism needs the addon's OWN second worker, in either mode.
+
+### Blockers (checked against the C3 scripting reference, Oct 2026)
+- **No documented worker-creation API for addons.** IRuntime documents `isInWorker` (read-only mode flag) but no createWorker-style method. The addon would have to call `new Worker(...)` itself, which is a NESTED worker in worker mode (browser-support dependent) and outside documented C3 addon patterns, conflicting with the documented-API-only rule. Re-check the reference before starting; if Construct adds a documented route, this becomes much more viable.
+- The worker script must ship as a separate file in the .c3addon (CAW file dependency) and be loadable from the exported project in both modes.
+
+### Design: offload graph BUILDS only, keep pathfinding synchronous
+- Moving A* to the worker makes Find path ASYNC (results a frame or more later), which breaks documented same-tick semantics: PathEndX/Y right after Find path, start-of-layout pathing, Is on same platform / OnSamePlatform, NearestLedge* expressions, crowd goal claims, the side-of-object arrival snapshot. That is a breaking redesign; avoid it.
+- Instead: the runtime keeps the current graph for synchronous A*; the worker builds the NEXT graph from transferable inputs (obstacleMap / slopeMap / hazardMap Uint8Arrays, Platform physics, character size, cell size, coyote/double-jump capabilities) and posts it back; the runtime swaps it in atomically (portals reconnect, hazard costs re-bake, OnGraphGenerated fires as today).
+- Costs: graph would need a flat typed-array (CSR-style) representation, since object graphs with cyclic node references do not transfer cheaply; rebuilding node objects on the runtime thread is itself O(nodes + edges) unless A* is refactored to read the arrays directly; the build code (kinematic jump sim, slope logic) must run without the instance (pure functions over the transferred data).
+- Fallback: when a worker cannot be created, keep today's time-sliced in-thread build. Results must be identical either way.
+
+### Why profile first
+- Builds are already time-sliced (6 ms/tick) so they do not hitch; A* is capped by Max Search Nodes and spread by Max Paths Per Tick. Measure a heavy scene (large map, many agents, frequent SetTileState + Regenerate) and confirm navigation actually dominates the frame before taking on this architecture change.
+
+---
+
+## Multiplayer: Host-Only Mode (automatic if possible)
+
+Construct's Multiplayer plugin is host-authoritative: the host simulates, peers receive synced object state (position, angle, instance variables) with interpolation. The addon already works on the HOST unchanged. On PEERS it must not run for synced objects: each peer would compute its own paths and drive its local Platform behavior, fighting the incoming synced positions (jitter / rubber-banding) and wasting CPU on graph builds nobody uses. Today users handle it with one event (`On joined room` + not host -> Set enabled "Disabled", plus disabling Platform on peer copies, as for any synced platformer object).
+
+### Goal
+Make "run only on the host" automatic, in keeping with the zero-setup principle.
+
+### Options
+- **A. Auto-detect (preferred, if documented).** If the Multiplayer plugin's DOCUMENTED scripting interface exposes the host/peer role (verify against the C3 scripting reference before building; the documented-API-only rule applies), the behavior idles itself on peers: navigation frozen exactly like Set enabled "Disabled" (state kept), no graph builds. Needs a re-check when the role is known (joining a room happens after layout start), and a user override for unusual setups (peer-side prediction, local-only cosmetic NPCs that are never synced).
+- **B. Property fallback.** A "Run on: Everywhere / Host only" combo appended at the END of the property list (index-safe; post-release new properties must go last, which conflicts with the Enabled-at-bottom convention, so decide before release). Users set it once; still one less event than today.
+- A + B together is likely best: auto by default, property as the explicit override.
+
+### Things that stay the user's job (document in the Guide)
+- Triggers fire on the host only (On portal entry, patrol dwell triggers, On arrived): cosmetic reactions peers must see need syncing (instance variables or broadcast messages), like any host-side logic.
+- Portal/hazard/tile setup and Regenerate graph belong on the host; peers need no map.
+- Player-controlled characters use input sync, not this behavior; it is for AI-driven objects (enemies, NPCs, co-op companions run on the host).
+
+### Considerations
+- A peer that becomes host (host migration) must start navigating: the role check has to be live, not one-shot, and the graph builds lazily on first use (start-of-layout-safe paths already exist).
+- Nothing the addon does is deterministic, so lockstep-style "every peer simulates" is out of scope; host authority is the only supported model.
+
+---
+
+## Ledge Grabs (grab the lip with the bounding-box top corner, hang, climb up)
+
+A jump that does not land ON the target platform but catches its lip: the character's bbox TOP CORNER passes through a small window at the ledge edge, the body hangs against the wall face below, then a scripted climb-up finishes on the platform. Extends effective vertical reach by ~characterHeight (hands at lip, body below), so platforms one body-height beyond maxJumpHeight become reachable. That changes level reachability, so it MUST be a property (default off) - existing graphs must not silently grow connections.
+
+### Design (per layer)
+- **Graph**: new `ledge_grab` connection type. Candidate targets already exist: isLeftLedge/isRightLedge nodes. Build-time filters: the face below the lip is SOLID (jump-thrus have no wall to hang on - exclude), not a slope lip (no vertical face), hang space beside the wall (body-height of clear cells below the lip) and headroom above the lip (for the climb) both clear.
+- **Validation**: the kinematic _canJump treats wall contact as FATAL; the grab variant inverts that - the arc deliberately ENDS in wall contact. Success = bbox top corner inside a few-px grab window at lip height when the arc reaches the wall column (target X = wall face minus half width). Clearance checks move to the hang space + climb headroom instead of a landing.
+- **Executor**: reuse the gradual-portal pattern (Platform behavior has NO hang state or gravity-off; portals already disable Platform and script movement). State machine: `grabbing` (freeze at hang position) -> `climbing` (short lerp: up characterHeight, in half-width) -> re-enable Platform standing on the lip. Serialize mid-hang state in save/load like portal state.
+- **Detection is connection-scoped ONLY**: grab logic runs solely while executing a ledge_grab waypoint. Free-form "grab anything you fall past" is a different, accident-prone feature - do not conflate.
+
+### Corner geometry gotchas
+- WHICH top corner is direction-dependent (right-facing lip = left-top corner and vice versa). Derive everything from the auto-detected bbox, never the origin, or mirrored/asymmetric sprites misalign the hang by pixels.
+- Runtime re-check of climb headroom before climbing (tiles can change between build and arrival).
+
+### Costs and strategies
+- Cost = jump cost + climb-duration time term. Shortest's time model penalizes honestly; Safest should PREFER grabs (a controlled catch beats a long leap); Ground-Hugging taxes like any jump. New CurrentPathAction string "ledge_grab" (additive, safe).
+
+### API sketch
+- Property `ledge_grabs` (CHECK, default off). Pre-release it can sit before Enabled; POST-release it would have to go last, breaking the Enabled-at-bottom convention - decide before going live.
+- Triggers mirroring the portal contract users already know: `On ledge grabbed` (+ a Pause-style hold for hang/climb animations), resume/complete actions. Default with no events: auto-climb after a short duration.
+- Grab reach joins the per-agent capability set (depends on characterHeight): the existing physics-mismatch warning covers short characters sharing a tall character's grab graph (Map Tag guidance applies).
+
+### Bonus: fall-grabs
+- Walking off a ledge and catching the lip BELOW on the same wall = descending one platform safely. Same validator with a fall arc instead of a jump arc. Safest Route's favorite move.
+
+### Phasing
+1. Graph connections + auto-climb behind the property (no animation hooks).
+2. Pause/resume triggers for hang/climb animations (portal-style).
+3. Fall-grabs.
+
+---
+
+## Wall Jumps (bounce off walls, chain up shafts)
+
+Jump at a wall, push off it up-and-away, optionally chaining between two facing walls to climb a shaft. The hardest feature on the roadmap: multi-phase arcs, no auto-detected physics source, and a timing-sensitive executor. **Build AFTER ledge grabs** - wall jumps reuse and iterate the ledge-grab machinery (the inverted wall-contact simulation), not the other way around.
+
+### The first-order problem: no physics source of truth
+- C3's Platform behavior has NO wall jump. Games with wall-jumping players implement it in EVENTS (detect isByWall airborne, set the vectors manually). The AI must do the same trick: set `vectorX`/`vectorY` directly at the bounce moment (both writable in the documented API, so the documented-only rule holds).
+- Consequence: NOTHING to auto-detect the impulses from. Wall-jump vertical strength and horizontal push-off must be explicit properties/actions the user sets to MATCH their own player implementation, or the AI wall-jumps differently than the player. Breaks the zero-config pattern by necessity.
+- Principle: the addon must not grant AI a move the game's characters don't have -> property-gated, default OFF, configured impulses.
+
+### Graph: composite connections, NOT wall nodes
+- The graph invariant is "nodes = standable ground" and everything leans on it (goal resolution, ground correction, crowd claims, patrol bounds). Airborne wall-contact positions must NOT become nodes.
+- A `wall_jump` connection stays ground-to-ground with the bounce sequence stored ON the connection (a bounce plan: contact points + directions), exactly like momentum jumps store `requiresMomentum`. A two-wall shaft climb = ONE connection with an N-bounce plan, not N graph hops.
+
+### Validation: the ledge-grab inversion, iterated
+- Multi-phase kinematic sim: fly to intended wall (contact = phase transition, not failure), apply impulse, fly again; repeat per chain; the FINAL phase must genuinely land on the target node.
+- Skip wall-slide windows in validation entirely (sim space explodes); handle slide as runtime forgiveness tolerance instead.
+
+### Executor: timing-sensitive like nothing else
+- Drive into the wall, on isByWall contact set the vectors, flip drive direction, repeat per plan. Every bounce is a one-tick-miss-changes-everything moment with limited mid-air correction, so the safety net matters more than the happy path: the existing off-course landing repath + stuck timer catch failed bounces (expect them to fire often during tuning).
+- Decide double-jump interplay explicitly: a wall bounce should NOT consume the double jump.
+
+### Costs / plumbing
+- Per-bounce cost scaling: Shortest loves shaft climbs (fast vertical), Safest taxes chains hard (each bounce is a failure point), Ground-Hugging near-bans.
+- CurrentPathAction gains "wall_jump" (additive, safe). Impulse values join the per-agent capability set (mismatch warnings -> Map Tag guidance).
+- Candidate generation is the expensive build phase (facing-wall pairs within reach for shafts + single-wall redirects); the time-sliced build absorbs it but pruning matters.
+- Mid-chain save/load: repath-on-load, do not serialize bounce plan progress.
+
+### Phasing
+1. Single-bounce redirects (jump, one bounce, land) with configured impulses.
+2. Two-wall shaft chains.
+3. Slide tolerance + animation triggers (On wall contact etc.).
+
+---
+
+## More Path Strategies (and per-agent cost shaping)
+
+The strategy system shapes the A* search itself via per-edge factors (`_strategyEdgeFactor`/`_strategyEdgePenalty`, 0.7.0.0), so new strategies are cheap. The current four (Balanced / Shortest / Safest / Ground-Hugging) leave real gaps — but the Path Strategy combo's item order is immutable once live, and four presets is already near the ceiling of what users hold in their head. Plan: ONE more preset at most; everything else ships as per-agent actions, which extend forever without touching the property.
+
+### Scattered (Route Variety) — the one candidate for a fifth preset
+- Deterministic per-agent cost jitter: a few percent, from a hash of (instance UID, edge), applied in `_strategyEdgeFactor`. ~15 lines.
+- Why: agents with the same start and goal compute the IDENTICAL optimal path and walk it single file. Avoidance fans them out laterally but not route-wise. Jitter makes hordes organically split between the high and low roads with zero events.
+- Deterministic (seeded by UID) so an agent's route is stable across re-paths; different agents differ. Would now be the SEVENTH preset (No Falling and Walk Only took slots 5-6 in 0.9.0.0); the preset budget is spent, so weigh carefully or route through the cost-multiplier builder instead. Appending stays index-safe; never reorder.
+
+### Per-agent hazard sensitivity (action, not preset)
+- `SetHazardSensitivity (multiplier)`: brave units charge through fire (0.2), timid units take long detours (3.0), same shared hazards.
+- Structural prerequisite: hazard costs are currently BAKED into shared node costs per map (lazy re-bake, see MEMORY), so all agents fear hazards equally. Requires storing the hazard portion separately per node and scaling it per-agent at search time. Moderate effort, whole personality axis from one number.
+
+### Custom strategy builder (actions, not presets)
+- `SetActionCostMultiplier (Action: Walk / Jump / Fall / Portal, Factor)` per instance, hooked into the same per-edge shaping the presets use. Every preset becomes user-composable; presets remain friendly defaults.
+- Acrobatic (inverse Ground-Hugging: discount jumps, tax walking - show-off rivals, monkeys, speedrun ghosts) falls out of this for free: jump factor 0.3, walk factor 2. Not worth its own combo slot.
+- Per-agent portal affinity too (heavy robot avoids ziplines, scout prefers them): portal costs are currently shared per portal (SetPortalCost), a Portal multiplier here makes them per-agent.
+
+### No-Drop descent (avoid pathing downwards by falling) - user idea, Sept 2026 - SHIPPED in 0.9.0.0
+Shipped THREE ways: the **No Falling** strategy preset (key `no_drop`, forces drop limit 0), the **Walk Only** strategy preset (key `walk_only`, excludes ALL non-walk non-portal edges - character never leaves its platform, Nearest mode parks it as close as its ground allows), and `a.SetMaxTraversalDrop` + `e.MaxTraversalDrop` (per-agent pixel threshold, -1 default, raises No Falling's allowance, standalone with any strategy). All filtered in the single A* expansion loop right after the requiresDoubleJump capability skip, by net drop of any non-walk non-portal edge. Saved/loaded (maxTraversalDrop + pathStrategy). The SOFT version still awaits the cost-multiplier builder below. NOTE: presets now number SIX - the one-preset budget below was spent twice over by user choice; Scattered would be the seventh.
+- Use case: heavy knights, wheeled robots, fall-damage games. Two genuinely different features hiding in one idea:
+- **Soft version = cost preference** (covered by the SetActionCostMultiplier builder): Fall factor 50 makes the character detour across the map for a ramp yet still drop when the level offers nothing else. Ground-Hugging and Safest already lean this way.
+- **Hard version = guarantee, needs an edge FILTER not a cost**: no multiplier can promise "never" (A* pays any finite price when the fall is the only route). Per-agent search-time filter: skip airborne edges whose NET DROP exceeds the agent's own threshold (0 = none at all). Note: jump edges that land lower count as falling too (fall damage cares about landing, not the edge's action name), so filter on net drop of ANY airborne edge, not just fall-action edges.
+- Descent then happens via slopes, portals, and elevators, or the path resolves like Nearest mode (stop at the upper level's closest point).
+- Layering: this is a per-agent SEARCH filter on the shared graph - a different layer than the Max Fall Distance property, which shapes which connections get BUILT (shared by every agent on the map).
+- API shape: an action (e.g. SetMaxTraversalDrop), not a preset - consistent with the one-preset budget.
+
+### High Road / Low Road (deferred, niche)
+- Elevation-weighted edge costs: archers seek vantage routes, sewer-crawlers hug the bottom. Evocative but biases toward climbing even when the goal is low; needs a cap so it never fights the destination. Only viable via the cost-multiplier builder (e.g. a Y-weighted factor), not as a preset.
+
+### Already covered today (no new feature needed)
+- Stealth / fear routing: `AddTrackedHazard` on the player = "afraid of the player" pathing; on lamp objects = light-avoiding stealth AI.
+- Congestion spreading: multi-agent avoidance already fans same-map agents out.
+
+---
+
+## Drop the Built-in Pathfinding Behavior Dependency — SHIPPED in 0.9.0.0 (Option B, full removal)
+
+Make the addon's own scanning pipeline the primary (eventually only) obstacle-map source, so no project ever needs to add the built-in Pathfinding behavior alongside this one. Today Auto-Build "auto" PREFERS the Pathfinding behavior's map when one is attached and only falls back to the native solids scan without it; the goal inverts that.
+
+**Shipped notes / deviations:**
+- Option B taken pre-release: deleted the copy/poll machinery (_copyObstacleMapFromPathfinding, _checkPathfindingMapReady, isWaitingForPathfindingMap/waitTickCount/maxWaitTicks/autoRegenOnReady), _getPathfindingBehavior, the disabled-Pathfinding tick check, and the debugger rows. ACEs removed: UsePathfindingObstacleMap, IsSettingUpPathfinding, OnPathfindingMapReady/Failed/Timeout, WaitTickCount.
+- Auto-Build combo collapsed to Off / Auto (pre-release, so index-stability rules did not bind): with the Pathfinding source gone, "auto" and "solids" were the same thing.
+- The parity ScanObjectsIntoObstacleMap action (arbitrary object types as obstacles, the built-in's "custom obstacles" equivalent) was NOT shipped with the removal; SetTileState / custom maps cover the niche until someone asks. Probe rasterization already existed in the scan path, and scan performance already rides the time-sliced build, so the other two gaps needed nothing.
+- obstacleMapSource can no longer be "pathfinding"; sources are collision / custom / none.
+
+### Motivation
+- **The copy path rides an undocumented API.** `_copyObstacleMapFromPathfinding` reads `pathfindingBehavior.map` (`widthInCells` / `heightInCells` / `cellSize` / per-cell reads) which is not in the documented scripting interface and could break on any C3 release. Same class of risk the 0.6.0.0 undocumented-API audit purged elsewhere (layout.uid, isRising).
+- **True one-behavior setup.** The drop-in goal currently has an asterisk: projects that already use Pathfinding get map sharing, but the recommendation to pair the behaviors doubles memory (two maps), couples cell sizes, and confuses users about which behavior owns what.
+- **A whole async subsystem exists only for this.** The wait/poll machinery (isWaitingForPathfindingMap, maxWaitTicks, WaitTickCount), condition Is setting up Pathfinding, and triggers On Pathfinding map ready / failed / timeout all serve the copy path. Native scanning is synchronous: none of it is needed without the dependency.
+
+### What Would Need to Change (parity gaps in the native scan)
+- **Custom obstacle objects.** The built-in behavior lets users mark arbitrary object types as obstacles via its own properties. Native equivalent: a ScanObjectsIntoObstacleMap action taking any object type (not just Solid/Jump-thru behaviors), mirroring the existing scan actions. This is the only real feature gap.
+- **Rotated / odd-shaped sprites.** The solids scan uses bounding boxes; the built-in rasterizes collision polygons. Upgrade: probe cell centers with the documented containsPoint API (the detect_slopes probe infrastructure already does exactly this) for objects whose bbox differs meaningfully from their collision poly.
+- **Scan performance on huge layouts.** The built-in map build is native and async. The native scan is JS but runs once; if it ever stalls a frame on giant tilemaps, fold it into the existing time-sliced build pipeline (scan phase before the connection phases).
+
+### Approach Options
+- **A. Parity first, then demote (safe, incremental).** Ship the ScanObjects action + probe rasterization; flip "auto" to prefer the native scan and use Pathfinding only when the property explicitly says "pathfinding". The copy path becomes legacy but keeps working for projects that curated a Pathfinding map.
+- **B. Full removal (clean, breaking).** Delete the copy/poll machinery, UsePathfindingObstacleMap, the three Pathfinding-map triggers, the setup condition, and WaitTickCount. Only palatable pre-release; post-release these ACE deletions break projects.
+- Recommended: A pre-release if time is short, B if this lands before going live (the addon has taken pre-release breaking changes deliberately before).
+
+### Considerations
+- The Auto-Build combo items (off / auto / pathfinding / solids) are index-stored: the "pathfinding" slot can be relabeled (e.g. "From Pathfinding (legacy)") but its position can NEVER be removed or reordered once released.
+- Tile Size auto-detect (0 = auto) currently reads the Pathfinding behavior's cell size first; without it, the tilemap tile-size source becomes the primary and should be documented as such.
+- Docs win: the Guide's setup section, the wait-state debugging example, and the C3 Debugger wait counters all simplify; "add only this behavior" becomes the whole quick-start.
+
+---
+
+## Ledge-to-Ledge Patrolling — SHIPPED in 0.9.0.0 (with both companions)
+
+Zero-event patrol: a character walks back and forth along its own platform, turning at the edges, with no waypoint markers or event logic. Today this takes the Ledge Restriction property plus hand-rolled direction-flip events (Guide example 2); the graph already knows everything needed to automate it.
+
+**Shipped notes / deviations:**
+- Patrol shipped as designed (StartPatrol/StopPatrol/Is patrolling/On patrol end reached/PatrolDirection), plus unplanned robustness: airborne wait, re-anchoring when landing on a different platform, savegame persistence. One semantic change from the sketch: the range parameter shipped as **Edge distance in pixels** (turn that far short of each platform edge; too big = stand at the platform middle), not a tile radius around the start, per user expectation. Auto-resume option NOT shipped: a Find path call always ends the patrol; restart from On arrived (two-event guard loop, as sketched below).
+- FindPathToNearestLedge shipped with the ledge-side direction filter as designed; candidate ranking is nearest-by-euclidean rather than reachability-ordered (the follow-up Find path runs in Nearest mode, which absorbs most unreachable-candidate cases). New PathFailReason: no_ledge_found.
+- NearestLedgeX/Y(direction) shipped as four parameterless expressions instead (NearestLedgeLeftX/Y, NearestLedgeRightX/Y): C3 expressions with string-enum params read poorly to C3 users.
+- FindPathToObjectSide shipped Left/Right/Any only (the design's "Either" option relabeled "Any" per user preference; both new combos use it); Facing/Behind deferred as allowed by the design. ObjectSideX/Y expressions skipped entirely: C3 expression parameters cannot take object types.
+
+### Design
+- The graph marks every node with isLeftLedge / isRightLedge / isIsland, so a platform's extent is discoverable at runtime: from the standing node, follow walk connections left until isLeftLedge (or a wall), right until isRightLedge. Slope connections count as walkable, so patrols continue across ramps.
+- Patrol mode is a movement-layer state (like _jumpTowardActive): walk toward the current end using the existing walk handler, and on reaching it, pause for a configurable dwell time, then reverse. No A* involved: patrolling is cheaper than pathfinding and never touches the path queue.
+- A Find path call interrupts the patrol (combat overrides patrol); an option controls whether the patrol auto-resumes on arrival/failure or ends. Graph rebuilds re-discover the platform extent on the next turn.
+
+### API sketch
+- Actions: `StartPatrol (DwellSeconds, RangeTiles)` where RangeTiles 0 = the whole platform, and `StopPatrol`. Possibly a "Patrol on start" property later.
+- Condition: `Is patrolling`; trigger: `On patrol end reached` (fires at each turn, for look-around animations).
+- Expression: `PatrolDirection` (-1/1/0).
+
+### Interactions and edge cases
+- Islands: a 1-tile platform degenerates to standing with the dwell animation hooks still firing.
+- Idle separation: patrollers count as movers, so idle characters step aside for them; two patrollers on one platform pass through each other unless lane yielding (see Crowd Arrivals extension) ships.
+- Ledge Restriction is implied while patrolling (the turn IS the restriction); Coyote Time conflicts do not arise because patrol never departs the platform.
+- Chase-and-return: combine with Find path in events (alert = Find path to player; calm = StartPatrol) for the classic guard loop with two actions.
+
+### Companion: Find path to nearest ledge
+An option to pathfind to the nearest ledge in a given horizontal direction, for vantage points, retreats to a platform edge, and pre-jump positioning:
+- Action: `FindPathToNearestLedge (Direction: Left / Right / Either)`. Scans graph nodes flagged isLeftLedge / isRightLedge on the required side of the character, ranked by path-relevant distance, and runs the normal Find path to the best candidate (Nearest mode semantics, so it never hard-fails while any ledge is reachable).
+- Direction filters on the ledge SIDE, not just position: "Left" means a left-facing ledge to the character's left, so a sniper retreats to an edge overlooking the approach rather than any nearby corner. An "Either" option takes the closest ledge of any facing.
+- Candidate ranking should reuse the nearest-reachable iteration (goal-distance ordered, first reachable wins) rather than raw euclidean, so an unreachable closer ledge does not beat a reachable farther one.
+- Expressions for events that need the target before committing: `NearestLedgeX/Y (direction)` returning the chosen ledge node position, 0/0 when none exists.
+- Plays into patrolling: StartPatrol after arrival gives "walk to the platform edge, then hold/patrol it", the standard sentry setup, in two actions.
+
+### Companion: Find path to a side of an object
+Ability to pathfind to the left or right side of an object, instead of onto it: melee flanking, standing beside a lever or door before using it, boss backstabs, ranged enemies keeping their firing side.
+- Action: `FindPathToObjectSide (Object, Side: Left / Right / Either / Facing / Behind, OffsetPixels)`. Target = the object's edge on the chosen side plus OffsetPixels, ground-corrected as usual; default offset = half the object's width + half the character's width, so 0 means "standing flush beside it".
+- "Either" tries the nearer side first and falls back to the other when unreachable (wall against one side, gap, etc.), using the normal Nearest-mode semantics. "Facing"/"Behind" resolve from the target object's mirrored state for backstab logic, if cheap to read via the documented API; otherwise ship Left/Right/Either first.
+- Follows the moving object the same way Find path to object does: each re-issued call re-resolves the side position, so a chase loop keeps the flank.
+- Composes with Crowd Arrivals: two attackers sent to opposite sides claim distinct goal nodes automatically, and a mob split across both sides gives the surround for free with one event per side.
+- Expressions: `ObjectSideX/Y (object, side, offset)` for pre-checks and for aiming markers, matching the NearestLedgeX/Y pattern.
+
+---
+
 ## Crowd Arrivals: Goal Reservation + Idle Separation — SHIPPED in 0.8.0.0
 
 Shipped as designed below (single Crowd Arrivals toggle: property [17] + Set/Is ACEs). Remaining future work from this design: **walking-lane yielding** (see the extension note at the end of this section).

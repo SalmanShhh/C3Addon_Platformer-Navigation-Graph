@@ -22,7 +22,7 @@
           },
           "cell_size": {
             "name": "Tile Size",
-            "desc": "Size of each grid tile in pixels. MUST match your tilemap's tile size / Pathfinding behavior's Cell Size; a mismatch misaligns the graph and characters walk into walls. Set to 0 to auto-detect it (reads the Pathfinding behavior's Cell Size, or the solid tilemap's tile size). Smaller = more precise paths but slower performance."
+            "desc": "Size of each grid tile in pixels. MUST match your tilemap's tile size; a mismatch misaligns the graph and characters walk into walls. Set to 0 to auto-detect it (reads the solid tilemap's tile size). Smaller = more precise paths but slower performance."
           },
           "max_search_nodes": {
             "name": "Max Search Nodes",
@@ -38,12 +38,14 @@
           },
           "path_strategy": {
             "name": "Path Strategy",
-            "desc": "How the AI picks the best route when multiple paths exist. Balanced: weighs distance and difficulty equally, good for most platformers and adventure games. Shortest Distance: always takes the fastest route, using long momentum jumps to skip platforms, ideal for speedrunner games and time trials. Safest Route: prefers chains of short hops and drops over long leaps and falls, great for stealth games, escort missions, or fragile NPCs. Ground-Hugging: walks whenever a walking route exists and only jumps or falls when unavoidable, best for patrols, tower defense creeps, and predictable simple enemies.",
+            "desc": "How the AI picks the best route when multiple paths exist. Balanced: weighs distance and difficulty equally, good for most platformers and adventure games. Shortest Distance: always takes the fastest route, using long momentum jumps to skip platforms, ideal for speedrunner games and time trials. Safest Route: prefers chains of short hops and drops over long leaps and falls, great for stealth games, escort missions, or fragile NPCs. Ground-Hugging: walks whenever a walking route exists and only jumps or falls when unavoidable, best for patrols, tower defense creeps, and predictable simple enemies. No Falling: never descends by jumping or falling at all, taking slopes and portals down instead, for heavy units and fall-damage games ('Set max traversal drop' raises the allowance). Walk Only: never jumps or falls in any direction, staying on its own platform (slopes and portals excepted) and getting as close to off-platform targets as its ground allows.",
             "items": {
               "balanced": "Balanced (recommended for most games)",
               "shortest": "Shortest Distance (speedrunners, time trials)",
               "safest": "Safest Route (stealth, escort missions)",
-              "simplest": "Ground-Hugging (patrols, predictable AI)"
+              "simplest": "Ground-Hugging (patrols, predictable AI)",
+              "no_drop": "No Falling (heavy units, fall damage)",
+              "walk_only": "Walk Only (never leaves its platform)"
             }
           },
           "smooth_paths": {
@@ -80,12 +82,10 @@
           },
           "auto_build": {
             "name": "Auto-Build Graph",
-            "desc": "Zero-event startup: automatically build the obstacle map and navigation graph on startup, no events needed. Auto (default): use the Pathfinding behavior's map if one is attached to this object, otherwise scan all objects with Solid/Jump-thru behaviors. Explicit map-setup actions in 'On start of layout' always take precedence. From Pathfinding: always wait for the Pathfinding behavior's map. From Solids: always scan Solid/Jump-thru objects. Off: set the map up yourself with actions (still picks up an attached Pathfinding behavior's map automatically).",
+            "desc": "Zero-event startup: automatically build the obstacle map and navigation graph on startup, no events needed. Auto (default): scan all objects with Solid and Jump-thru behaviors. Explicit map-setup actions in 'On start of layout' always take precedence. Off: set the map up yourself with actions.",
             "items": {
               "off": "Off (manual setup)",
-              "auto": "Auto (recommended)",
-              "pathfinding": "From Pathfinding behavior",
-              "solids": "From Solid/Jump-thru objects"
+              "auto": "Auto (recommended)"
             }
           },
           "map_tag": {
@@ -173,7 +173,7 @@
           "AddTrackedHazard": {
             "list-name": "Add tracked hazard (follows object)",
             "display-text": "{my}: Add tracked hazard following {0} [Radius: {1}] [Severity: {2}]",
-            "description": "Add a circular hazard that follows an object's position automatically every tick, for moving dangers like patrolling saws, fireballs, or spreading flames. No per-frame events are needed: path costs update only when the object actually moves, and the hazard removes itself when the object is destroyed. Read the new hazard's ID with LastHazardID; RemoveHazard removes it like any other hazard.",
+            "description": "Add a circular hazard that follows an object automatically, with no per-frame events. It removes itself when the object is destroyed. Read the new hazard's ID with LastHazardID.",
             "params": {
               "target": {
                 "name": "Object to follow",
@@ -189,23 +189,22 @@
               }
             }
           },
-          "ClearAllHazards": {
-            "list-name": "Clear all hazards",
-            "display-text": "{my}: Clear all circle and rectangle hazards",
-            "description": "Remove all circular and rectangular hazards. This does NOT clear tile-based hazards. Use when resetting a level or clearing all dynamic dangers.",
-            "params": {}
-          },
-          "ClearAllHazardTiles": {
-            "list-name": "Clear all tile hazards",
-            "display-text": "{my}: Clear all tile hazards",
-            "description": "Reset all tile hazard severities to 0. This does NOT remove circle/rect hazards. Use when you want to clear static tile dangers.",
-            "params": {}
-          },
-          "ClearAllTrackedHazards": {
-            "list-name": "Clear all tracked hazards",
-            "display-text": "{my}: Clear all tracked hazards",
-            "description": "Remove every tracked (object-following) hazard. Static circle/rect hazards and tile hazards are untouched.",
-            "params": {}
+          "ClearHazards": {
+            "list-name": "Clear hazards",
+            "display-text": "{my}: Clear {0} hazards",
+            "description": "Clear hazards by kind: Shapes (circles and rects, tracked included), Tiles, Tracked only, or Everything.",
+            "params": {
+              "which": {
+                "name": "Which",
+                "desc": "Shapes: circles and rects, tracked included. Tiles: tile severities only. Tracked only: object-following hazards. Everything: all of them.",
+                "items": {
+                  "shapes": "Shapes (circles and rects)",
+                  "tiles": "Tiles",
+                  "tracked": "Tracked only",
+                  "everything": "Everything"
+                }
+              }
+            }
           },
           "RemoveHazard": {
             "list-name": "Remove hazard",
@@ -251,7 +250,7 @@
           "JumpTowardPosition": {
             "list-name": "Jump toward position",
             "display-text": "{my}: Jump toward ({0}, {1})",
-            "description": "Immediately jump toward a target position. The character jumps from its current position with full strength, moving horizontally toward the target. No pathfinding is involved: the character simply lunges at the target. Use for: jump attacks, stomps, lunges. Triggers 'On jump toward executed' when the jump starts. The character must be on the floor to jump.",
+            "description": "Jump directly toward a position with full strength, no pathfinding. Works from the floor, or mid-air when double jump is enabled. Triggers 'On jump toward launched' when the jump starts.",
             "params": {
               "x": {
                 "name": "X",
@@ -292,7 +291,7 @@
           "SetEnabled": {
             "list-name": "Set enabled",
             "display-text": "{my}: Set {0}",
-            "description": "Enable or disable this behavior. While disabled, the character stops following paths and Find path actions are ignored; the current path, graph, and settings are kept and everything resumes when re-enabled. Map setup actions (scans, tiles, portals, hazards) still work while disabled.",
+            "description": "Enable or disable this behavior. Disabled freezes navigation with all state kept for a seamless resume; Find path is ignored, map setup actions still work.",
             "params": {
               "state": {
                 "name": "State",
@@ -318,7 +317,7 @@
           "SetLedgeRestriction": {
             "list-name": "Set ledge restriction",
             "display-text": "{my}: Set ledge restriction: {0}",
-            "description": "Prevents AI characters from walking off platform edges when they have no reason to leave. Useful for patrol guards that should stay on their platform, or NPCs that shouldn't wander off rooftops. This only stops characters from casually walking off edges: if the AI's path requires a jump or fall to reach its goal, it will still leave the platform.",
+            "description": "Toggle whether the character stops at platform edges instead of casually walking off. Paths that require a jump or fall still leave the platform.",
             "params": {
               "enabled": {
                 "name": "Enabled",
@@ -330,43 +329,30 @@
               }
             }
           },
-          "SetMaxFallDistance": {
-            "list-name": "Set max fall distance",
-            "display-text": "{my}: Set max fall distance to {0} px",
-            "description": "Override the maximum fall distance (in pixels) the AI is allowed to drop when pathfinding. Falls beyond this value will not be considered as valid connections. Calling this locks in the value.",
+          "SetMovementLimit": {
+            "list-name": "Set movement limit",
+            "display-text": "{my}: Set {0} limit to {1} px",
+            "description": "Override an auto-detected movement limit used to build graph connections. The value locks in and is no longer read from the Platform behavior; regenerate the graph afterwards.",
             "params": {
+              "limit": {
+                "name": "Limit",
+                "desc": "Jump height: the highest reachable jump. Jump distance: the widest standstill jump. Fall distance: the deepest safe drop.",
+                "items": {
+                  "jump_height": "Jump height",
+                  "jump_distance": "Jump distance",
+                  "fall_distance": "Fall distance"
+                }
+              },
               "value": {
-                "name": "Distance",
-                "desc": "The maximum fall distance, in pixels."
-              }
-            }
-          },
-          "SetMaxJumpDistance": {
-            "list-name": "Set max jump distance",
-            "display-text": "{my}: Set max jump distance to {0} px",
-            "description": "Override the maximum horizontal jump distance (in pixels) used to build navigation graph connections. Use this if the auto-detected value from the platform behavior is wrong for your setup. Calling this locks in the value; it won't be overridden by platform behavior properties.",
-            "params": {
-              "value": {
-                "name": "Distance",
-                "desc": "The maximum jump distance, in pixels."
-              }
-            }
-          },
-          "SetMaxJumpHeight": {
-            "list-name": "Set max jump height",
-            "display-text": "{my}: Set max jump height to {0} px",
-            "description": "Override the maximum jump height (in pixels) used to build navigation graph connections. Use this if the auto-detected value from the platform behavior is wrong for your setup. Calling this locks in the value; it won't be overridden by platform behavior properties.",
-            "params": {
-              "value": {
-                "name": "Height",
-                "desc": "The maximum jump height, in pixels."
+                "name": "Value",
+                "desc": "The limit, in pixels."
               }
             }
           },
           "SetStrictJumpPositioning": {
             "list-name": "Set strict jump positioning",
             "display-text": "{my}: Set strict jump positioning: {0}",
-            "description": "Toggle whether this AI character slows down and carefully positions itself before jumping or falling during pathfinding. This does NOT affect walking off edges (use 'Set ledge restriction' for that). Use this to change behavior at runtime: for example, disable when a boss enters 'rage mode' for reckless movement, or enable when an NPC needs to carefully cross a narrow bridge.",
+            "description": "Toggle whether the character slows down and centers itself before jumps and falls. Does not affect walking off edges (use 'Set ledge restriction' for that).",
             "params": {
               "enabled": {
                 "name": "Enabled",
@@ -378,10 +364,31 @@
               }
             }
           },
+          "StartPatrol": {
+            "list-name": "Start patrol",
+            "display-text": "{my}: Start patrol (dwell {0} s, edge distance {1} px)",
+            "description": "Patrol the current platform: walk to one end, wait for the dwell time, turn, and repeat. The ends are found automatically from the graph's ledges and walls, slopes included. Any Find path call ends the patrol.",
+            "params": {
+              "dwell": {
+                "name": "Dwell time",
+                "desc": "The wait time at each end, in seconds. 0 turns immediately."
+              },
+              "range": {
+                "name": "Edge distance",
+                "desc": "The distance to stop short of each platform edge, in pixels. 0 patrols edge to edge. A distance too big for the platform makes the character stand at its middle."
+              }
+            }
+          },
+          "StopPatrol": {
+            "list-name": "Stop patrol",
+            "display-text": "{my}: Stop patrol",
+            "description": "End the current patrol. The character simply stands where it is.",
+            "params": {}
+          },
           "AutoDetectSlopeTiles": {
             "list-name": "Auto-detect slope tiles from tilemap",
             "display-text": "{my}: Auto-detect slope tiles from {0} by collision shape",
-            "description": "Scan a Tilemap and automatically register slope tiles by probing their collision shapes: surfaces at 45° become slopes, surfaces at 22.5° become gentle slopes, and flipped tile placements are handled automatically. Uses the documented collision API, so it works wherever collisions work. Requires slope tiles to have sloped collision polygons set in the C3 editor; tiles that don't match a supported angle stay solid. For fully hands-off slope detection during scanning, enable the 'Detect Slopes' property instead.",
+            "description": "Scan a Tilemap and register slope tiles by probing their collision shapes: 45° surfaces become slopes, 22.5° surfaces become gentle slopes, flipped placements are handled. Tiles need sloped collision polygons; unsupported angles stay solid.",
             "params": {
               "tilemap": {
                 "name": "Tilemap",
@@ -392,7 +399,7 @@
           "BuildObstacleMapFromLayout": {
             "list-name": "Build obstacle map from layout",
             "display-text": "{my}: Build obstacle map [{0}×{1} px]",
-            "description": "Create an empty obstacle map grid from layout pixel dimensions. No Pathfinding behavior required. Follow with ScanSolidObjectsIntoObstacleMap and ScanJumpThruObjectsIntoObstacleMap to fill it.",
+            "description": "Create an empty obstacle map grid from layout pixel dimensions. Follow with ScanSolidObjectsIntoObstacleMap and ScanJumpThruObjectsIntoObstacleMap to fill it.",
             "params": {
               "layoutWidth": {
                 "name": "Layout width (px)",
@@ -419,7 +426,7 @@
           "CreateCustomObstacleMap": {
             "list-name": "Create custom obstacle map",
             "display-text": "{my}: Create custom obstacle map [Width: {0} tiles] [Height: {1} tiles]",
-            "description": "Create a custom obstacle map with the specified dimensions in tiles. All tiles are initialized to 'clear' state. Use this when not using the Pathfinding behavior's obstacle map.",
+            "description": "Create a custom obstacle map with the specified dimensions in tiles. All tiles are initialized to 'clear' state. Use this for fully manual tile setup.",
             "params": {
               "width": {
                 "name": "Width",
@@ -430,12 +437,6 @@
                 "desc": "The height, in tiles."
               }
             }
-          },
-          "GenerateNodesFromCustomMap": {
-            "list-name": "Generate navigation graph",
-            "display-text": "{my}: Generate navigation graph from obstacle map",
-            "description": "Generate the navigation graph from the current obstacle map. Call this after setting up all tiles and before pathfinding. This is an expensive operation.",
-            "params": {}
           },
           "LoadObstacleMapFromJSON": {
             "list-name": "Load obstacle map from JSON",
@@ -498,7 +499,7 @@
               },
               "direction": {
                 "name": "Direction",
-                "desc": "The slope direction.",
+                "desc": "The slope shape and steepness: the / and \\ glyphs show which way the surface rises, 45° is steep, 22.5° is gentle (2 tiles per 1 of height).",
                 "items": {
                   "slope_left": "Slope left / (45°)",
                   "slope_right": "Slope right \\ (45°)",
@@ -511,7 +512,7 @@
           "RegenerateGraph": {
             "list-name": "Regenerate navigation graph",
             "display-text": "{my}: Regenerate navigation graph",
-            "description": "Rebuild the navigation graph from scratch. Use after modifying the level layout, adding/removing obstacles, or changing platform positions.",
+            "description": "Build or rebuild the navigation graph from the current obstacle map. Call after setting up tiles manually, and after modifying the level layout, adding/removing obstacles, or changing platform positions. Fires 'On navigation graph generated' when done.",
             "params": {}
           },
           "ScanJumpThruObjectsIntoObstacleMap": {
@@ -551,7 +552,7 @@
               },
               "state": {
                 "name": "State",
-                "desc": "The tile state to set.",
+                "desc": "Solid blocks movement. Clear is open space. Jump-thru can be stood on and jumped through from below. Avoid is walkable but costly. Slope states set the surface angle; the / and \\ glyphs show the shape.",
                 "items": {
                   "solid": "Solid",
                   "clear": "Clear",
@@ -580,7 +581,7 @@
               },
               "state": {
                 "name": "State",
-                "desc": "The tile state to set.",
+                "desc": "Solid blocks movement. Clear is open space. Jump-thru can be stood on and jumped through from below. Avoid is walkable but costly. Slope states set the surface angle; the / and \\ glyphs show the shape.",
                 "items": {
                   "solid": "Solid",
                   "clear": "Clear",
@@ -594,17 +595,21 @@
               }
             }
           },
-          "UsePathfindingObstacleMap": {
-            "list-name": "Use Pathfinding obstacle map",
-            "display-text": "{my}: Use Pathfinding obstacle map [Auto-regenerate: {0}]",
-            "description": "Use the obstacle map from the Pathfinding behavior instead of a custom map. Enable auto-regenerate to automatically rebuild the graph when the Pathfinding map changes.",
+          "FindObjectOnPlatform": {
+            "list-name": "Find object on same platform",
+            "display-text": "{my}: Find {1} {0} on same platform",
+            "description": "Search the object's picked instances for the nearest or furthest one reachable by walking alone, no jumps or falls. Read the result with PlatformObjectUID and pick it with the System 'Pick by unique ID' condition (-1 = none).",
             "params": {
-              "autoRegen": {
-                "name": "Auto-regenerate",
-                "desc": "Whether to automatically regenerate the graph when the Pathfinding behavior's map changes.",
+              "target": {
+                "name": "Target object",
+                "desc": "The object to search (its picked instances)"
+              },
+              "which": {
+                "name": "Which",
+                "desc": "Nearest: the instance closest to the character. Furthest: the one farthest away, for retreat targets.",
                 "items": {
-                  "yes": "Yes",
-                  "no": "No"
+                  "nearest": "Nearest",
+                  "furthest": "Furthest"
                 }
               }
             }
@@ -652,7 +657,7 @@
           "FindPathTo": {
             "list-name": "Find path",
             "display-text": "{my}: Find path to ({0}, {1})",
-            "description": "Calculate a path to a position using sensible defaults: start and target snap to the nearest walkable ground, and if the exact target is unreachable the character paths as close as possible (never fails outright). This is the recommended action for most games. Use 'Find path to position (advanced)' for full control over ground correction, mode, and jump positioning.",
+            "description": "Calculate a path to a position with sensible defaults: positions snap to walkable ground, and an unreachable target paths as close as possible. Use 'Find path to position (advanced)' for full control.",
             "params": {
               "x": {
                 "name": "X",
@@ -664,10 +669,30 @@
               }
             }
           },
+          "FindPathToNearestLedge": {
+            "list-name": "Find path to nearest ledge",
+            "display-text": "{my}: Find path to nearest ledge ({0}) at distance {1}",
+            "description": "Calculate a path to the nearest platform edge in the given direction, stopping the given distance back from it. Triggers 'On failed to find path' if no ledge exists that way.",
+            "params": {
+              "direction": {
+                "name": "Direction",
+                "desc": "Left: a left-facing edge to the character's left. Right: a right-facing edge to the right. Any: the nearest edge of either facing.",
+                "items": {
+                  "left": "Left",
+                  "right": "Right",
+                  "any": "Any"
+                }
+              },
+              "distance": {
+                "name": "Distance",
+                "desc": "The distance to stop back from the edge, in pixels. 0 stands on the edge."
+              }
+            }
+          },
           "FindPathToObject": {
             "list-name": "Find path to object",
             "display-text": "{my}: Find path to {0}",
-            "description": "Calculate a path to another object's position (e.g. the player) using sensible defaults: start and target snap to the nearest walkable ground, and if the exact target is unreachable the character paths as close as possible (never fails outright). Uses the first picked instance of the object.",
+            "description": "Calculate a path to another object's position with sensible defaults: positions snap to walkable ground, and an unreachable target paths as close as possible. Uses the first picked instance.",
             "params": {
               "target": {
                 "name": "Target object",
@@ -675,10 +700,34 @@
               }
             }
           },
+          "FindPathToObjectSide": {
+            "list-name": "Find path to side of object",
+            "display-text": "{my}: Find path to {1} side of {0} at distance {2}",
+            "description": "Calculate a path to a position beside another object instead of on top of it, keeping the given distance (both widths are always cleared). 'Any' picks the nearer side, falling back if it has no ground. Uses the first picked instance.",
+            "params": {
+              "target": {
+                "name": "Target object",
+                "desc": "The object to path beside (first picked instance)"
+              },
+              "side": {
+                "name": "Side",
+                "desc": "Left / Right: stop on that side of the object. Any: the nearer side, falling back to the other if it has no ground.",
+                "items": {
+                  "left": "Left",
+                  "right": "Right",
+                  "any": "Any"
+                }
+              },
+              "distance": {
+                "name": "Distance",
+                "desc": "The distance to keep from the object's edge, in pixels. 0 stands flush beside it."
+              }
+            }
+          },
           "SetCrowdArrivals": {
             "list-name": "Set crowd arrivals",
             "display-text": "{my}: Set crowd arrivals: {0}",
-            "description": "Enable or disable crowd arrivals. When enabled, characters pathing to the same position each claim a landing spot so the others automatically target neighboring spots instead of stacking. Per map tag. Combine with 'Set idle separation' to also push overlapping idle characters apart.",
+            "description": "Enable or disable crowd arrivals: characters pathing to the same position each claim a landing spot, so later arrivals target neighboring spots instead of stacking. Per map tag.",
             "params": {
               "enabled": {
                 "name": "Enabled",
@@ -690,17 +739,6 @@
               }
             }
           },
-          "SetIdleSeparation": {
-            "list-name": "Set idle separation",
-            "display-text": "{my}: Set idle separation to {0} px",
-            "description": "Set the personal space in pixels for characters with no active path: idle characters closer than this to another character on the same map gently push apart. 0 disables it. Ledge-safe and never interferes with path following.",
-            "params": {
-              "pixels": {
-                "name": "Pixels",
-                "desc": "The minimum spacing between idle characters, in pixels. 0 disables it."
-              }
-            }
-          },
           "SetMaxPathsPerTick": {
             "list-name": "Set max paths per tick",
             "display-text": "{my}: Set max paths per tick to {0}",
@@ -709,6 +747,17 @@
               "count": {
                 "name": "Count",
                 "desc": "The maximum number of paths to calculate per tick. 0 means unlimited."
+              }
+            }
+          },
+          "SetMaxTraversalDrop": {
+            "list-name": "Set max traversal drop",
+            "display-text": "{my}: Set max traversal drop to {0} px",
+            "description": "Limit how far down this character will ever descend by air: jumps and falls with a larger net drop are excluded from its paths, so it descends via slopes and portals instead. For heavy units and fall damage.",
+            "params": {
+              "pixels": {
+                "name": "Drop",
+                "desc": "The maximum downward drop, in pixels. 0 never descends by air. -1 removes the limit."
               }
             }
           },
@@ -730,7 +779,7 @@
           "SetPathStrategy": {
             "list-name": "Set path strategy",
             "display-text": "{my}: Set path strategy to {0}",
-            "description": "Change how the AI picks the best route when multiple paths exist. Balanced: weighs distance and difficulty equally. Shortest Distance: always takes the fastest route, using momentum jumps to skip platforms. Safest Route: prefers short hops and drops over long leaps and falls. Ground-Hugging: walks whenever possible, jumping or falling only when unavoidable.",
+            "description": "Change how routes are picked. Balanced: distance and difficulty weighed equally. Shortest Distance: fastest route, momentum jumps included. Safest Route: short hops and drops over long leaps. Ground-Hugging: walk whenever possible. No Falling: never descend by air; slopes and portals only. Walk Only: never jump or fall at all; stay on the platform.",
             "params": {
               "strategy": {
                 "name": "Strategy",
@@ -739,7 +788,9 @@
                   "balanced": "Balanced",
                   "shortest": "Shortest Distance",
                   "safest": "Safest Route",
-                  "simplest": "Ground-Hugging"
+                  "simplest": "Ground-Hugging",
+                  "no_drop": "No Falling",
+                  "walk_only": "Walk Only"
                 }
               }
             }
@@ -766,25 +817,23 @@
               }
             }
           },
-          "SetSeparationCooldown": {
-            "list-name": "Set separation cooldown",
-            "display-text": "{my}: Set separation cooldown to {0} seconds",
-            "description": "Set how long characters rest after giving up on idle separation (when the crowd is too dense for the spacing to be satisfied) before trying again. 0 = never rest, keep trying continuously.",
+          "SetSeparationSetting": {
+            "list-name": "Set separation setting",
+            "display-text": "{my}: Set separation {0} to {1}",
+            "description": "Change an idle separation setting: Distance (personal space in pixels, 0 = off), Cooldown (rest after giving up, in seconds, 0 = never rest), or Give-up time (trying time before resting, in seconds).",
             "params": {
-              "seconds": {
-                "name": "Seconds",
-                "desc": "The rest time after giving up, in seconds. 0 means never rest."
-              }
-            }
-          },
-          "SetSeparationGiveUpTime": {
-            "list-name": "Set separation give-up time",
-            "display-text": "{my}: Set separation give-up time to {0} seconds",
-            "description": "Set how long a character keeps trying to push apart from overlapping neighbors before it gives up and rests for the Separation Cooldown. Default is 1.2 seconds. Larger values shuffle longer before settling; very small values settle almost immediately.",
-            "params": {
-              "seconds": {
-                "name": "Seconds",
-                "desc": "The time to keep trying, in seconds, before giving up."
+              "setting": {
+                "name": "Setting",
+                "desc": "Distance: personal space, in pixels (0 = off). Cooldown: rest after giving up, in seconds (0 = never rest). Give-up time: trying time before resting, in seconds.",
+                "items": {
+                  "distance": "Distance",
+                  "cooldown": "Cooldown",
+                  "give_up": "Give-up time"
+                }
+              },
+              "value": {
+                "name": "Value",
+                "desc": "The value, in pixels for Distance or seconds otherwise."
               }
             }
           },
@@ -797,7 +846,7 @@
           "AddElevatorStop": {
             "list-name": "Add elevator stop",
             "display-text": "{my}: Add elevator stop to group {0} at ({1}, {2}) [Speed: {3}] [Tag: {4}]",
-            "description": "Add a stop to an elevator group. Automatically creates two-way gradual portals between this stop and all other stops in the same group. Cost is auto-calculated from distance and speed. Use a unique group name (e.g. 'elevator_A') for each elevator. Use PortalExitX/PortalExitY in 'On portal entry' to determine which floor the AI is heading to.",
+            "description": "Add a stop to an elevator group: two-way gradual portals to every other stop in the group are created automatically, with cost from distance and speed. Use a unique group name per elevator.",
             "params": {
               "groupId": {
                 "name": "Group",
@@ -925,7 +974,7 @@
           "AddInstantPortal": {
             "list-name": "Add instant portal",
             "display-text": "{my}: Add {0} instant portal from ({1}, {2}) to ({3}, {4}) [Cost: {5}] [Tag: {6}]",
-            "description": "Add a portal that instantly teleports the AI from the entry to the exit. Use for: teleporters, doors, warp zones, or any portal where the character disappears and reappears at the exit. Use 'On portal entry' with 'Pause at portal' to play animations before the teleport happens.",
+            "description": "Add a portal that instantly teleports the character from entry to exit. Use 'On portal entry' with 'Pause at portal' to play animations before the teleport.",
             "params": {
               "direction": {
                 "name": "Direction",
@@ -992,22 +1041,16 @@
               }
             }
           },
-          "ClearAllPortals": {
-            "list-name": "Clear all portals",
-            "display-text": "{my}: Clear all portals",
-            "description": "Remove all portals from the navigation graph. Useful when resetting the level or switching layouts.",
-            "params": {}
-          },
           "CompletePortal": {
             "list-name": "Complete portal",
             "display-text": "{my}: Complete portal",
-            "description": "Finish a paused portal without executing its built-in movement. Use this when you've already moved the character yourself (e.g., custom animation, physics launch, manual position set). The AI will continue pathfinding from wherever the character is now. Also works mid-traverse to cut a gradual portal short.",
+            "description": "Finish a paused portal without its built-in movement, when your events moved the character themselves. Also works mid-traverse to cut a gradual portal short.",
             "params": {}
           },
           "PauseAtPortal": {
             "list-name": "Pause at portal",
             "display-text": "{my}: Pause at portal",
-            "description": "Call INSIDE 'On portal entry' to pause the AI before the portal executes. The character stops at the entry point and waits. Use this to play animations, open doors, trigger screen transitions, or run any custom events before the portal activates. Call 'Resume portal' to execute the built-in behavior, or 'Complete portal' if you moved the character yourself.",
+            "description": "Hold the character at the portal entry. Only valid inside 'On portal entry'. Call 'Resume portal' to run the built-in movement, or 'Complete portal' if your events moved the character.",
             "params": {}
           },
           "RemovePortal": {
@@ -1035,7 +1078,7 @@
           "RemovePortalsByTag": {
             "list-name": "Remove portals by tag",
             "display-text": "{my}: Remove all portals tagged {0}",
-            "description": "Remove every portal whose tag matches the given string. Connections are removed from the navigation graph immediately. Use this to deactivate a group of related portals: for example, removing all 'door' portals when a room is sealed, or clearing 'floor_2' portals when a floor is destroyed.",
+            "description": "Remove every portal whose tag matches the given string, or ALL portals when the tag is empty. Graph connections are removed immediately.",
             "params": {
               "tag": {
                 "name": "Tag",
@@ -1086,7 +1129,7 @@
           "SetPortalPosition": {
             "list-name": "Set portal position",
             "display-text": "{my}: Move portal {0} to entry ({1}, {2}) exit ({3}, {4})",
-            "description": "Move an existing portal to new entry and exit positions, preserving its ID, type, cost, speed, and tags. Graph connections re-wire immediately (cheap enough to call on a timer for moving teleporters). A character already traversing the portal keeps its original destination; the move never teleports anyone.",
+            "description": "Move a portal's entry and exit in place, keeping its ID, type, cost, speed, and tags; graph connections re-wire immediately. A character mid-traversal keeps its original destination.",
             "params": {
               "id": {
                 "name": "Portal ID",
@@ -1162,7 +1205,7 @@
           "TeleportToPosition": {
             "list-name": "Teleport to position",
             "display-text": "{my}: Teleport to ({0}, {1})",
-            "description": "Instantly move the character to the given position. Can be used anywhere: inside portal events, on button press, on collision, etc. Suppresses re-pathing for one tick to prevent the AI from thinking it's lost. Useful with 'Pause at portal' + 'Complete portal' for fully custom portal behavior.",
+            "description": "Instantly move the character to the given position. Suppresses drift re-pathing for one tick so the current path is not abandoned.",
             "params": {
               "x": {
                 "name": "X",
@@ -1254,6 +1297,12 @@
             "description": "True while this behavior is enabled (see the Enabled property and the 'Set enabled' action).",
             "params": {}
           },
+          "IsPatrolling": {
+            "list-name": "Is patrolling",
+            "display-text": "{my}: Is patrolling",
+            "description": "True while a ledge-to-ledge patrol is active.",
+            "params": {}
+          },
           "IsPlatformEnabled": {
             "list-name": "Is platform enabled",
             "display-text": "{my}: Platform behavior is enabled",
@@ -1272,6 +1321,24 @@
             "description": "Triggered when the AI arrives at the final destination. Use this to trigger arrival animations, next actions, or goal completion logic.",
             "params": {}
           },
+          "OnPatrolDwellFinished": {
+            "list-name": "On patrol dwell finished",
+            "display-text": "{my}: On patrol dwell finished",
+            "description": "Triggered when a patrolling character finishes its wait at a patrol end and turns to walk again. PatrolDirection already reports the new walk direction inside this trigger. Not fired when the dwell time is 0; use 'On patrol end reached' there.",
+            "params": {}
+          },
+          "OnPatrolDwellStarted": {
+            "list-name": "On patrol dwell started",
+            "display-text": "{my}: On patrol dwell started",
+            "description": "Triggered when a patrolling character begins its wait at a patrol end, right after 'On patrol end reached'. Use it to start idle or look-around animations. Not fired when the dwell time is 0.",
+            "params": {}
+          },
+          "OnPatrolEndReached": {
+            "list-name": "On patrol end reached",
+            "display-text": "{my}: On patrol end reached",
+            "description": "Triggered each time a patrolling character reaches an end of its patrol and is about to turn. Use it for look-around animations during the dwell.",
+            "params": {}
+          },
           "OnWaypointReached": {
             "list-name": "On waypoint reached",
             "display-text": "{my}: On waypoint reached",
@@ -1284,12 +1351,6 @@
             "description": "Triggered when the character has been stuck at a waypoint for too long (exceeds Max Waypoint Time). The path is automatically cancelled. Use this to handle stuck situations or repath.",
             "params": {}
           },
-          "IsSettingUpPathfinding": {
-            "list-name": "Is setting up Pathfinding",
-            "display-text": "{my}: Is setting up Pathfinding map",
-            "description": "Check if the behavior is currently waiting for the Pathfinding obstacle map to initialize. Returns true during async setup.",
-            "params": {}
-          },
           "OnObstacleMapCreated": {
             "list-name": "On obstacle map created",
             "display-text": "{my}: On obstacle map created",
@@ -1300,24 +1361,6 @@
             "list-name": "On obstacle map removed",
             "display-text": "{my}: On obstacle map removed",
             "description": "Triggered when the obstacle map is cleared or removed. Use this to clean up related data or reset systems.",
-            "params": {}
-          },
-          "OnPathfindingMapFailed": {
-            "list-name": "On Pathfinding map failed",
-            "display-text": "{my}: On Pathfinding map failed",
-            "description": "Triggered when the Pathfinding behavior's obstacle map fails to initialize. Use this to implement fallback error handling.",
-            "params": {}
-          },
-          "OnPathfindingMapReady": {
-            "list-name": "On Pathfinding map ready",
-            "display-text": "{my}: On Pathfinding map ready",
-            "description": "Triggered when the Pathfinding behavior's obstacle map is ready for use. Use this to start graph generation after Pathfinding initialization.",
-            "params": {}
-          },
-          "OnPathfindingMapTimeout": {
-            "list-name": "On Pathfinding map timeout",
-            "display-text": "{my}: On Pathfinding map timeout",
-            "description": "Triggered when waiting for the Pathfinding obstacle map times out. Use this to handle slow or stuck initialization.",
             "params": {}
           },
           "TileHasState": {
@@ -1335,7 +1378,7 @@
               },
               "state": {
                 "name": "State",
-                "desc": "The tile state to check for.",
+                "desc": "Solid blocks movement. Clear is open space. Jump-thru is a one-way platform. Avoid is walkable but costly. Slope (any) matches every slope type; Gentle slope matches only 22.5° tiles.",
                 "items": {
                   "solid": "Solid",
                   "clear": "Clear",
@@ -1362,7 +1405,7 @@
               },
               "state": {
                 "name": "State",
-                "desc": "The tile state to check for.",
+                "desc": "Solid blocks movement. Clear is open space. Jump-thru is a one-way platform. Avoid is walkable but costly. Slope (any) matches every slope type; Gentle slope matches only 22.5° tiles.",
                 "items": {
                   "solid": "Solid",
                   "clear": "Clear",
@@ -1392,6 +1435,17 @@
             "description": "True if multi-agent avoidance is currently active.",
             "params": {}
           },
+          "IsOnSamePlatform": {
+            "list-name": "Is on same platform as object",
+            "display-text": "{my}: Is on same platform as {0}",
+            "description": "True when the character can walk to the object without jumping or falling: both stand on the same connected stretch of ground, slopes included. Useful for picking a target to path to, or choosing between walking and lunging. Uses the first picked instance of the object.",
+            "params": {
+              "target": {
+                "name": "Target object",
+                "desc": "The object to check (first picked instance)"
+              }
+            }
+          },
           "IsPathPending": {
             "list-name": "Is calculating path",
             "display-text": "{my}: Is calculating path",
@@ -1402,6 +1456,12 @@
             "list-name": "On navigation graph generated",
             "display-text": "{my}: On navigation graph generated",
             "description": "Triggered when the navigation graph has been successfully generated. Use this to start pathfinding operations after map setup.",
+            "params": {}
+          },
+          "OnObjectSideReached": {
+            "list-name": "On side of object reached",
+            "display-text": "{my}: On side of object reached",
+            "description": "Triggered when a 'Find path to side of object' arrival lands with the character beside the target at the requested distance. A stopped-short arrival fires only 'On arrived'. Read the side with ReachedObjectSide.",
             "params": {}
           },
           "OnPathFailed": {
@@ -1443,7 +1503,7 @@
           "OnPortalEntry": {
             "list-name": "On portal entry",
             "display-text": "{my}: On portal entry",
-            "description": "Triggered when the AI arrives at a portal entry point, BEFORE the portal executes. Use 'Pause at portal' inside this event to delay execution and run your own events first (animations, sounds, screen effects). If you don't pause, the portal executes immediately. Use CurrentPortalID to identify which portal was reached.",
+            "description": "Triggered when the character arrives at a portal entry, before the portal executes. Call 'Pause at portal' here to run your own events first. CurrentPortalID identifies the portal.",
             "params": {}
           }
         },
@@ -1876,6 +1936,11 @@
             "description": "Get whether ledge restriction is enabled. Returns 1 if enabled, 0 if disabled.",
             "params": {}
           },
+          "PatrolDirection": {
+            "translated-name": "PatrolDirection",
+            "description": "The patrol walk direction: -1 walking left, 1 walking right, 0 when not patrolling or dwelling at an end. Useful for mirroring the sprite.",
+            "params": {}
+          },
           "StoppingDistance": {
             "translated-name": "StoppingDistance",
             "description": "Get the calculated stopping distance in pixels based on the Platform behavior's current speed. Used for waypoint arrival detection.",
@@ -1913,7 +1978,7 @@
           },
           "ObstacleMapSource": {
             "translated-name": "ObstacleMapSource",
-            "description": "Get the source of the current obstacle map. Returns 'custom', 'pathfinding', or 'none'.",
+            "description": "Get the source of the current obstacle map. Returns 'collision', 'custom', or 'none'.",
             "params": {}
           },
           "SlopeDirection": {
@@ -1943,11 +2008,6 @@
                 "desc": "The tile Y co-ordinate."
               }
             }
-          },
-          "WaitTickCount": {
-            "translated-name": "WaitTickCount",
-            "description": "Get the number of ticks spent waiting for the Pathfinding obstacle map to initialize. Used for debugging timeout issues.",
-            "params": {}
           },
           "WorldToGridX": {
             "translated-name": "WorldToGridX",
@@ -2014,10 +2074,49 @@
             "description": "Get the current maximum paths per tick setting.",
             "params": {}
           },
+          "MaxTraversalDrop": {
+            "translated-name": "MaxTraversalDrop",
+            "description": "The maximum downward drop this character will traverse by air, in pixels. -1 means no limit.",
+            "params": {}
+          },
           "NearbyAgentCount": {
             "translated-name": "NearbyAgentCount",
             "description": "Get the number of nearby agents sharing the same navigation map.",
             "params": {}
+          },
+          "NearestLedgeLeftX": {
+            "translated-name": "NearestLedgeLeftX",
+            "description": "The X co-ordinate of the nearest ledge to the left of the character, in pixels. Returns 0 if none exists.",
+            "params": {}
+          },
+          "NearestLedgeLeftY": {
+            "translated-name": "NearestLedgeLeftY",
+            "description": "The Y co-ordinate of the nearest ledge to the left of the character, in pixels. Returns 0 if none exists.",
+            "params": {}
+          },
+          "NearestLedgeRightX": {
+            "translated-name": "NearestLedgeRightX",
+            "description": "The X co-ordinate of the nearest ledge to the right of the character, in pixels. Returns 0 if none exists.",
+            "params": {}
+          },
+          "NearestLedgeRightY": {
+            "translated-name": "NearestLedgeRightY",
+            "description": "The Y co-ordinate of the nearest ledge to the right of the character, in pixels. Returns 0 if none exists.",
+            "params": {}
+          },
+          "OnSamePlatform": {
+            "translated-name": "OnSamePlatform",
+            "description": "1 if the position is on the same walkable platform as the character (reachable by walking only, no jumps or falls), else 0.",
+            "params": {
+              "x": {
+                "name": "X",
+                "desc": "The X co-ordinate, in pixels."
+              },
+              "y": {
+                "name": "Y",
+                "desc": "The Y co-ordinate, in pixels."
+              }
+            }
           },
           "PathCost": {
             "translated-name": "PathCost",
@@ -2046,7 +2145,17 @@
           },
           "PathStrategy": {
             "translated-name": "PathStrategy",
-            "description": "Get the current path strategy preset (balanced, shortest, safest, simplest). Note: 'simplest' is the Ground-Hugging strategy; the key kept its original name for save compatibility.",
+            "description": "Get the current path strategy preset (balanced, shortest, safest, simplest, no_drop, walk_only). Note: 'simplest' is the Ground-Hugging strategy and 'no_drop' is No Falling; keys keep their internal names for save compatibility.",
+            "params": {}
+          },
+          "PlatformObjectUID": {
+            "translated-name": "PlatformObjectUID",
+            "description": "The UID of the instance found by 'Find object on same platform', for the System 'Pick by unique ID' condition. -1 if none was on the platform.",
+            "params": {}
+          },
+          "ReachedObjectSide": {
+            "translated-name": "ReachedObjectSide",
+            "description": "Which side of the target the character reached: -1 left, 1 right. Valid after 'On side of object reached' fires, 0 otherwise.",
             "params": {}
           },
           "RePathCooldown": {

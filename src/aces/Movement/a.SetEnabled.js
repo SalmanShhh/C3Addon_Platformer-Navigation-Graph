@@ -1,7 +1,7 @@
 export const config = {
   listName: "Set enabled",
   displayText: "{my}: Set {0}",
-  description: "Enable or disable this behavior. While disabled, the character stops following paths and Find path actions are ignored; the current path, graph, and settings are kept and everything resumes when re-enabled. Map setup actions (scans, tiles, portals, hazards) still work while disabled.",
+  description: "Enable or disable this behavior. Disabled freezes navigation with all state kept for a seamless resume; Find path is ignored, map setup actions still work.",
   params: [
     { id: "state", name: "State", desc: "Whether the behavior is active", type: "combo", initialValue: "enabled",
       items: [

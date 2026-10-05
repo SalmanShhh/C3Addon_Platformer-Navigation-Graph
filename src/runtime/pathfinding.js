@@ -113,7 +113,7 @@ export default {
 
     // Try reverse path (goal → start), then reverse it for a start → goal path
     this._lastAStarFailDetail = "";
-    const reversePath = this._runAStar(goalNode, startNode);
+    const reversePath = this._runAStar(goalNode, startNode, true);
     const reverseFailDetail = this._lastAStarFailDetail;
     let reversedPath = null;
     if (reversePath) {
@@ -176,7 +176,7 @@ export default {
   },
 
   /** Runs A* search from startNode to goalNode; returns the reconstructed path or null if unreachable. */
-  _runAStar(startNode, goalNode) {
+  _runAStar(startNode, goalNode, isReverse) {
     const graph = this._getNavigationGraph();
     for (const [key, node] of graph) {
       node.gScore = Infinity;
@@ -233,10 +233,9 @@ export default {
         const neighbor = conn.target;
         if (closedSet.has(neighbor)) continue;
 
-        // Skip double-jump connections if this instance can't double jump.
-        // The graph is shared (SPOT), so connections built by a double-jump
-        // instance must not be traversed by non-double-jump instances.
-        if (conn.requiresDoubleJump && !this.platformProps.isDoubleJumpEnabled) continue;
+        // Per-character traversal rules (double jump, descent limit, Walk
+        // Only): shared with the Nearest fallback and reversed-path mapping.
+        if (!this._isEdgeAllowed(conn, current, neighbor, isReverse)) continue;
 
         const hazardMultiplier = conn.ignoreHazards
           ? 1.0
@@ -329,7 +328,9 @@ export default {
     for (let i = 0; i < reversed.length - 1; i++) {
       const fromNode = reversed[i].node;
       const toNode = reversed[i + 1].node;
-      const conn = this._findConnectionBetween(fromNode, toNode);
+      // allowedOnly: the cheapest parallel edge may be one this character's
+      // rules forbid (e.g. a fall beside a slope walk under Walk Only)
+      const conn = this._findConnectionBetween(fromNode, toNode, null, true);
       if (!conn) {
         return null;
       }
@@ -376,7 +377,7 @@ export default {
   /** Returns the best graph connection from one node to another, or null.
    *  If preferredAction is given, returns that action's connection if it exists;
    *  otherwise returns the cheapest connection to the target. */
-  _findConnectionBetween(fromNode, toNode, preferredAction) {
+  _findConnectionBetween(fromNode, toNode, preferredAction, allowedOnly) {
     const allConnections = [
       ...fromNode.connections,
       ...fromNode.portalConnections,
@@ -384,10 +385,52 @@ export default {
     let best = null;
     for (const conn of allConnections) {
       if (conn.target !== toNode) continue;
+      if (allowedOnly && !this._isEdgeAllowed(conn, fromNode, toNode, false)) continue;
       if (preferredAction && conn.action === preferredAction) return conn;
       if (!best || conn.cost < best.cost) best = conn;
     }
     return best;
+  },
+
+  /** Per-character traversal rules for one FORWARD connection from -> to (the
+   *  graph is shared, so rules that differ per character are applied at
+   *  search time). isReverse: the caller is the reverse (goal->start) A*,
+   *  whose traversal-frame climbs become forward-frame DESCENTS once
+   *  _reversePathDirection maps segments to real forward connections, so the
+   *  drop is measured in the forward frame either way. */
+  _isEdgeAllowed(conn, from, to, isReverse) {
+    // Connections built by a double-jump instance must not be traversed by
+    // non-double-jump instances sharing the graph.
+    if (conn.requiresDoubleJump && !this.platformProps.isDoubleJumpEnabled) return false;
+
+    // Walk edges (slopes included) and portals are grounded: always legal
+    // under the rules below, so restricted characters use ramps and lifts.
+    const isGroundedEdge =
+      conn.action === "walk_left" || conn.action === "walk_right" ||
+      conn.action === "portal_instant" || conn.action === "portal_gradual";
+    if (isGroundedEdge) return true;
+
+    // Walk Only: no jumps and no falls in ANY direction.
+    if (this.pathStrategy === "walk_only") return false;
+
+    // Descent limit: skip airborne edges whose NET drop exceeds the limit.
+    // No Falling forces 0 (Set max traversal drop can raise it); the action
+    // alone works with any strategy (-1 = off). Net drop, not edge type: a
+    // jump that lands lower is a fall as far as fall damage cares. A filter,
+    // not a cost, because no cost can promise "never" when a drop is the
+    // only route.
+    const dropLimit = this.pathStrategy === "no_drop"
+      ? Math.max(0, this.maxTraversalDrop)
+      : this.maxTraversalDrop;
+    const forwardDrop = isReverse ? from.y - to.y : to.y - from.y;
+    return !(dropLimit >= 0 && forwardDrop > dropLimit);
+  },
+
+  /** True when a per-character rule removes edges from the search (Walk Only,
+   *  No Falling, or a drop limit), so off-limits targets are routine. */
+  _isTraversalRestricted() {
+    return this.pathStrategy === "walk_only" || this.pathStrategy === "no_drop" ||
+      this.maxTraversalDrop >= 0;
   },
 
   /** Sums up the Euclidean distance cost of all segments in a path. */
@@ -762,6 +805,36 @@ export default {
 
   /** For "nearest" mode: finds the closest node to the goal that is actually reachable from the start. */
   _findNearestReachableNode(startX, startY, goalX, goalY) {
+    // Restricted characters (Walk Only, No Falling, drop limit): an off-limits
+    // target is routine, and the ring below only searches 10 tiles around the
+    // GOAL (running a full bidirectional search per cell), so a Walk Only
+    // character whose platform is farther away would not move at all. One
+    // forward flood of everything it may legally reach, then the closest of
+    // those to the goal, is both correct at any distance and far cheaper.
+    if (this._isTraversalRestricted()) {
+      const startGrid = this.worldToGrid(startX, startY);
+      const startNode = this.getNode(startGrid.gx, startGrid.gy);
+      if (!startNode) return null;
+      let best = startNode;
+      let bestDist = this.distance(startNode.x, startNode.y, goalX, goalY);
+      // Breadth-first and capped at Max Search Nodes, so the chosen node is
+      // one the (equally capped) A* that follows can actually reach.
+      this._floodGraph(
+        startNode,
+        (conn, from, to) => this._isEdgeAllowed(conn, from, to, false),
+        (node) => {
+          const d = this.distance(node.x, node.y, goalX, goalY);
+          if (d < bestDist) {
+            best = node;
+            bestDist = d;
+          }
+          return false;
+        },
+        this.maxSearchNodes
+      );
+      return best;
+    }
+
     const goalGrid = this.worldToGrid(goalX, goalY);
     let bestNode = null;
     let bestDist = Infinity;
@@ -830,19 +903,284 @@ export default {
     this.aceFindPath(inst.x, inst.y, true, "nearest", "default");
   },
 
+  // ============================================================================
+  // PATHFINDING - Ledge, Object-Side & Same-Platform Queries (0.9.0.0)
+  // Graph-flag based helpers: nearest-ledge targeting, pathing beside an
+  // object (with the OnObjectSideReached arrival check), and walk-only
+  // platform connectivity (flood fill over walk connections).
+  // ============================================================================
+
+  /** Finds the nearest ledge node in a horizontal direction. dir: -1 = a
+   *  left-facing ledge to the character's left, 1 = a right-facing ledge to
+   *  the right, 0 = the nearest ledge of either facing anywhere. The facing
+   *  filter matters: "left" retreats to an edge OVERLOOKING the left
+   *  approach, not just any nearby corner. Returns the node or null. */
+  _findNearestLedgeNode(dir) {
+    const graph = this._getNavigationGraph();
+    if (!graph) return null;
+    const x = this.instance.x;
+    const y = this.instance.y;
+    let best = null;
+    let bestDist = Infinity;
+    for (const [, node] of graph) {
+      if (dir < 0 && !(node.isLeftLedge && node.x < x)) continue;
+      if (dir > 0 && !(node.isRightLedge && node.x > x)) continue;
+      if (dir === 0 && !(node.isLeftLedge || node.isRightLedge)) continue;
+      const d = this.distance(node.x, node.y, x, y);
+      if (d > 1 && d < bestDist) {
+        best = node;
+        bestDist = d;
+      }
+    }
+    return best;
+  },
+
+  /** Paths to the nearest ledge in the given direction (Nearest mode, so the
+   *  character gets as close as reachability allows). distancePx backs the
+   *  stop position off the edge onto the platform: a left ledge backs off
+   *  rightward, a right ledge leftward. A node flagged both ways (a platform
+   *  a single tile wide) has no room to back into, so the node itself is
+   *  used. Overshooting a short platform is absorbed by ground correction
+   *  plus Nearest mode. */
+  aceFindPathToNearestLedge(dir, distancePx) {
+    this._ensureGraphReadyNow(); // safe in On start of layout
+    const node = this._findNearestLedgeNode(dir);
+    if (!node) {
+      this.lastPathFailReason = "no_ledge_found";
+      this._log("Find path to nearest ledge: no matching ledge node exists");
+      this._trigger("OnPathFailed");
+      return;
+    }
+    let targetX = node.x;
+    const back = distancePx || 0;
+    if (back > 0) {
+      if (node.isLeftLedge && !node.isRightLedge) targetX += back;
+      else if (node.isRightLedge && !node.isLeftLedge) targetX -= back;
+    }
+    this.aceFindPath(targetX, node.y, true, "nearest", "default");
+  },
+
+  /** Returns the nearest matching ledge node's X, or 0 when none exists. */
+  aceGetNearestLedgeX(dir) {
+    const node = this._findNearestLedgeNode(dir);
+    return node ? node.x : 0;
+  },
+
+  /** Returns the nearest matching ledge node's Y, or 0 when none exists. */
+  aceGetNearestLedgeY(dir) {
+    const node = this._findNearestLedgeNode(dir);
+    return node ? node.y : 0;
+  },
+
+  /** Paths to the left or right side of an object: melee flanking, standing
+   *  beside a lever before using it. side: -1 = left, 1 = right, 0 = either
+   *  (nearer side first, other side when it has no walkable ground). The
+   *  default standing distance is half the object's width plus half the
+   *  character's width; offsetPx adds to that. */
+  aceFindPathToObjectSide(objectClass, side, offsetPx) {
+    this._ensureGraphReadyNow(); // safe in On start of layout
+    const inst = objectClass ? objectClass.getFirstPickedInstance() : null;
+    if (!inst) {
+      this._warn("Find path to object side: no picked instance found");
+      return;
+    }
+    const gap =
+      Math.abs(inst.width) / 2 + (this.characterWidth || this.cellSize) / 2 +
+      (offsetPx || 0);
+    const leftX = inst.x - gap;
+    const rightX = inst.x + gap;
+
+    // A side is viable when ground correction can find a node near it.
+    const sideHasGround = (px) => {
+      const corrected = this._correctToGround(px, inst.y);
+      const grid = this.worldToGrid(corrected.x, corrected.y);
+      return !!this.getNode(grid.gx, grid.gy);
+    };
+
+    let targetX;
+    if (side < 0) targetX = leftX;
+    else if (side > 0) targetX = rightX;
+    else {
+      // Any: nearer side first, the other side as fallback.
+      const nearer = Math.abs(leftX - this.instance.x) <= Math.abs(rightX - this.instance.x) ? leftX : rightX;
+      const farther = nearer === leftX ? rightX : leftX;
+      targetX = sideHasGround(nearer) || !sideHasGround(farther) ? nearer : farther;
+    }
+    const ok = this.aceFindPath(targetX, inst.y, true, "nearest", "default");
+    // Arm the side-goal check AFTER aceFindPath (which clears it for fresh
+    // paths), and only when the request succeeded or was queued: a failed
+    // find must not leave a stale goal that an unrelated older path's
+    // arrival could satisfy. On arrival, OnObjectSideReached fires only if
+    // the character really stands beside the target at the requested
+    // distance.
+    if (ok) {
+      this._sideGoalInst = inst;
+      this._sideGoalSide = targetX < inst.x ? -1 : 1;
+      this._sideGoalDist = offsetPx || 0;
+    }
+  },
+
+  /** Returns the graph node under a world position, ground-corrected. */
+  _nodeAtCorrectedPosition(x, y) {
+    const corrected = this._correctToGround(x, y);
+    const grid = this.worldToGrid(corrected.x, corrected.y);
+    return this.getNode(grid.gx, grid.gy);
+  },
+
+  /** Breadth-first flood over a node's outgoing connections (walk and
+   *  portal). canTraverse(conn, from, to) filters edges; visit(node) sees each
+   *  newly reached node and returns true to stop early; maxNodes (optional)
+   *  caps how many nodes are visited. Returns the visited Set. The single
+   *  flood used by platform queries and the restricted Nearest fallback. */
+  _floodGraph(startNode, canTraverse, visit, maxNodes) {
+    const visited = new Set([startNode]);
+    const queue = [startNode];
+    const cap = maxNodes > 0 ? maxNodes : Infinity;
+    // Returns true when visit() asked to stop. Created once per flood, so the
+    // two connection lists are walked without a per-node array allocation.
+    const expand = (node, list) => {
+      for (const conn of list) {
+        const next = conn.target;
+        if (visited.has(next) || !canTraverse(conn, node, next)) continue;
+        visited.add(next);
+        if (visit && visit(next)) return true;
+        queue.push(next);
+      }
+      return false;
+    };
+    for (let head = 0; head < queue.length && visited.size < cap; head++) {
+      const node = queue[head];
+      if (expand(node, node.connections) || expand(node, node.portalConnections)) break;
+    }
+    return visited;
+  },
+
+  /** Flood-fills the connected stretch of walkable ground containing the
+   *  node, following ALL walk connections (not a first-match chain walk:
+   *  gentle slope nodes carry BOTH a diagonal and a mid-slope connection
+   *  with the same walk action, so following only the first match could
+   *  skip over a mid-slope node). Returns a Set of nodes; stops early once
+   *  `stopAt` (optional) is reached, so a yes/no query need not flood the
+   *  whole platform. */
+  _collectWalkPlatform(startNode, stopAt) {
+    return this._floodGraph(
+      startNode,
+      (conn) => conn.action === "walk_left" || conn.action === "walk_right",
+      stopAt ? (node) => node === stopAt : null
+    );
+  },
+
+  /** True when both nodes sit on the same connected stretch of walkable
+   *  ground: reachable from one another by walk connections alone, no jumps
+   *  or falls. Slope runs count because slope traversals are walk
+   *  connections. */
+  _isSameWalkPlatform(startNode, targetNode) {
+    if (!startNode || !targetNode) return false;
+    if (startNode === targetNode) return true;
+    return this._collectWalkPlatform(startNode, targetNode).has(targetNode);
+  },
+
+  /** "Is on same platform as object" condition: can the character walk to the
+   *  object's first picked instance without jumping or falling? */
+  aceIsOnSamePlatform(objectClass) {
+    if (!this._graphReadyForQuery()) return false;
+    const inst = objectClass ? objectClass.getFirstPickedInstance() : null;
+    if (!inst) return false;
+    const myNode = this._nodeAtCorrectedPosition(this.instance.x, this.instance.y);
+    const theirNode = this._nodeAtCorrectedPosition(inst.x, inst.y);
+    return this._isSameWalkPlatform(myNode, theirNode);
+  },
+
+  /** OnSamePlatform(x, y) expression: 1 when the position is on the
+   *  character's walkable platform, else 0. */
+  aceGetOnSamePlatform(x, y) {
+    if (!this._graphReadyForQuery()) return 0;
+    const myNode = this._nodeAtCorrectedPosition(this.instance.x, this.instance.y);
+    const theirNode = this._nodeAtCorrectedPosition(x, y);
+    return this._isSameWalkPlatform(myNode, theirNode) ? 1 : 0;
+  },
+
+  /** "Find object on same platform" action: searches the object's picked
+   *  instances for the nearest or furthest one on the character's walkable
+   *  platform and stores its UID in _platformObjectUid (-1 when none).
+   *  The platform is flooded once and every candidate tested against the
+   *  Set, so many candidates stay cheap. Behaviors cannot modify C3's
+   *  picked set, so events pick the result with System's 'Pick by unique
+   *  ID' using the PlatformObjectUID expression. */
+  aceFindObjectOnPlatform(objectClass, wantFurthest) {
+    this._ensureGraphReadyNow(); // safe in On start of layout
+    this._platformObjectUid = -1;
+    if (!objectClass) return;
+    const myNode = this._nodeAtCorrectedPosition(this.instance.x, this.instance.y);
+    if (!myNode) return;
+    const platform = this._collectWalkPlatform(myNode);
+    let best = null;
+    let bestD = 0;
+    for (const inst of objectClass.getPickedInstances()) {
+      if (inst === this.instance) continue; // searching own type: never pick self
+      const node = this._nodeAtCorrectedPosition(inst.x, inst.y);
+      if (!node || !platform.has(node)) continue;
+      const d = this.distance(inst.x, inst.y, this.instance.x, this.instance.y);
+      if (best === null || (wantFurthest ? d > bestD : d < bestD)) {
+        best = inst;
+        bestD = d;
+      }
+    }
+    if (best) this._platformObjectUid = best.uid;
+  },
+
+  /** Takes and clears the pending side goal. The arrival code snapshots it
+   *  BEFORE firing OnPathComplete: that trigger's user events run
+   *  synchronously and often issue a new Find path, which would clear (or
+   *  re-arm for the NEW path) the live fields and lose this arrival's
+   *  trigger. */
+  _takeSideGoal() {
+    const inst = this._sideGoalInst;
+    if (!inst) return null;
+    this._sideGoalInst = null;
+    return { inst, side: this._sideGoalSide, dist: this._sideGoalDist };
+  },
+
+  /** Arrival check for Find path to side of object: fires OnObjectSideReached
+   *  when the character genuinely stands beside the (possibly moved) target at
+   *  the requested distance, on the side that was pathed to. A Nearest-mode
+   *  arrival that stopped short fires only the general OnPathComplete. */
+  _checkSideGoalReached(goal) {
+    if (!goal) return;
+    const inst = goal.inst;
+    this._reachedObjectSide = 0;
+    try {
+      if (inst.isDestroyed) return;
+      const expectedGap =
+        Math.abs(inst.width) / 2 + (this.characterWidth || this.cellSize) / 2 +
+        goal.dist;
+      const dx = this.instance.x - inst.x;
+      const sideNow = dx < 0 ? -1 : 1;
+      if (sideNow !== goal.side) return;
+      // Path ends land on tile centers, so allow most of a tile of slack.
+      if (Math.abs(Math.abs(dx) - expectedGap) > this.cellSize * 0.75) return;
+      const dy = Math.abs(this.instance.y - inst.y);
+      if (dy > Math.max(this.characterHeight, Math.abs(inst.height)) / 2 + this.cellSize) return;
+      this._reachedObjectSide = sideNow;
+      this._trigger("OnObjectSideReached");
+    } catch (e) {
+      // Target gone between issue and arrival: no side to have reached.
+    }
+  },
+
   /** Calculates a path from the character's current position to the target coordinates. Supports ground correction and jump-toward mode. */
   aceFindPath(targetX, targetY, correctToGround, mode, strict, isRePath) {
     if (!this.navEnabled) {
       this._log("FindPath ignored: behavior is disabled");
       return false;
     }
-    // A chunked graph build may still be in progress — finish it synchronously
-    // so pathfinding always sees the complete graph.
-    if (this._graphBuild) {
-      this._finishGraphBuildNow();
-    } else {
-      globalNavManager.finishBuildFor(this.navKey);
-    }
+    // A fresh path supersedes any pending side-of-object goal. Re-paths and
+    // queued replays (isRePath) continue the same journey, so they keep it;
+    // aceFindPathToObjectSide re-arms it right after this call.
+    if (!isRePath) this._sideGoalInst = null;
+    // Works from "On start of layout" too: initialize if the first tick has
+    // not run yet, finish any in-progress build, or build the graph now.
+    this._ensureGraphReadyNow();
     // Hazards changed this tick? Re-bake node costs before searching
     this._applyHazardCostsIfDirty();
 
@@ -855,7 +1193,7 @@ export default {
       }
       if (globalNavManager._pathsThisTick >= globalNavManager.maxPathsPerTick) {
         globalNavManager.queuePathRequest(this, { targetX, targetY, correctToGround, mode, strict });
-        return;
+        return true; // request accepted (runs via the queue), not a failure
       }
       globalNavManager._pathsThisTick++;
     }
@@ -940,6 +1278,10 @@ export default {
         );
       }
 
+      // A successful path takes over movement: an active patrol ends (restart
+      // it from 'On arrived' for the classic chase-and-return guard loop).
+      this._patrolActive = false;
+
       // Crowd arrivals: claim the path's actual final node (swaps out any
       // previous claim). The claim persists while standing at the spot and is
       // released on Stop/clear, disable, or destroy.
@@ -962,6 +1304,7 @@ export default {
   aceClearPath() {
     // Stop is an explicit abandon — give the reserved spot back to the crowd.
     globalNavManager.releaseGoalClaim(this);
+    this._sideGoalInst = null;
     this.hasPath = false;
     this.currentPath = [];
     this.currentWaypoint = 0;

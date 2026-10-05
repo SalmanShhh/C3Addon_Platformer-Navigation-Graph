@@ -98,7 +98,7 @@ export const properties = [
     type: PROPERTY_TYPE.INTEGER,
     id: "cell_size",
     name: "Tile Size",
-    desc: "Size of each grid tile in pixels. MUST match your tilemap's tile size / Pathfinding behavior's Cell Size; a mismatch misaligns the graph and characters walk into walls. Set to 0 to auto-detect it (reads the Pathfinding behavior's Cell Size, or the solid tilemap's tile size). Smaller = more precise paths but slower performance.",
+    desc: "Size of each grid tile in pixels. MUST match your tilemap's tile size; a mismatch misaligns the graph and characters walk into walls. Set to 0 to auto-detect it (reads the solid tilemap's tile size). Smaller = more precise paths but slower performance.",
     options: {
       initialValue: 32,
       minValue: 0,
@@ -142,7 +142,7 @@ export const properties = [
     type: PROPERTY_TYPE.COMBO,
     id: "path_strategy",
     name: "Path Strategy",
-    desc: "How the AI picks the best route when multiple paths exist. Balanced: weighs distance and difficulty equally, good for most platformers and adventure games. Shortest Distance: always takes the fastest route, using long momentum jumps to skip platforms, ideal for speedrunner games and time trials. Safest Route: prefers chains of short hops and drops over long leaps and falls, great for stealth games, escort missions, or fragile NPCs. Ground-Hugging: walks whenever a walking route exists and only jumps or falls when unavoidable, best for patrols, tower defense creeps, and predictable simple enemies.",
+    desc: "How the AI picks the best route when multiple paths exist. Balanced: weighs distance and difficulty equally, good for most platformers and adventure games. Shortest Distance: always takes the fastest route, using long momentum jumps to skip platforms, ideal for speedrunner games and time trials. Safest Route: prefers chains of short hops and drops over long leaps and falls, great for stealth games, escort missions, or fragile NPCs. Ground-Hugging: walks whenever a walking route exists and only jumps or falls when unavoidable, best for patrols, tower defense creeps, and predictable simple enemies. No Falling: never descends by jumping or falling at all, taking slopes and portals down instead, for heavy units and fall-damage games ('Set max traversal drop' raises the allowance). Walk Only: never jumps or falls in any direction, staying on its own platform (slopes and portals excepted) and getting as close to off-platform targets as its ground allows.",
     options: {
       initialValue: "balanced",
       items: [
@@ -151,7 +151,10 @@ export const properties = [
         { safest: "Safest Route (stealth, escort missions)" },
         // Key stays "simplest" (combo values are stored by index/key; only
         // the display text may change). Rebranded Ground-Hugging in 0.7.0.0.
-        { simplest: "Ground-Hugging (patrols, predictable AI)" }
+        { simplest: "Ground-Hugging (patrols, predictable AI)" },
+        // Appended 0.9.0.0 (appending is index-safe; never reorder).
+        { no_drop: "No Falling (heavy units, fall damage)" },
+        { walk_only: "Walk Only (never leaves its platform)" }
       ]
     }
   },
@@ -253,16 +256,14 @@ export const properties = [
     type: PROPERTY_TYPE.COMBO,
     id: "auto_build",
     name: "Auto-Build Graph",
-    desc: "Zero-event startup: automatically build the obstacle map and navigation graph on startup, no events needed. Auto (default): use the Pathfinding behavior's map if one is attached to this object, otherwise scan all objects with Solid/Jump-thru behaviors. Explicit map-setup actions in 'On start of layout' always take precedence. From Pathfinding: always wait for the Pathfinding behavior's map. From Solids: always scan Solid/Jump-thru objects. Off: set the map up yourself with actions (still picks up an attached Pathfinding behavior's map automatically).",
+    desc: "Zero-event startup: automatically build the obstacle map and navigation graph on startup, no events needed. Auto (default): scan all objects with Solid and Jump-thru behaviors. Explicit map-setup actions in 'On start of layout' always take precedence. Off: set the map up yourself with actions.",
     options: {
       // NOTE: items order must never change (combo values are stored by index).
       // Only initialValue may change.
       initialValue: "auto",
       items: [
         { off: "Off (manual setup)" },
-        { auto: "Auto (recommended)" },
-        { pathfinding: "From Pathfinding behavior" },
-        { solids: "From Solid/Jump-thru objects" }
+        { auto: "Auto (recommended)" }
       ]
     }
   },

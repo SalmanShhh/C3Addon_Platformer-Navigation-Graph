@@ -1,6 +1,6 @@
 export const config = {
   returnType: "string",
-  description: "Get the current path strategy preset (balanced, shortest, safest, simplest). Note: 'simplest' is the Ground-Hugging strategy; the key kept its original name for save compatibility."
+  description: "Get the current path strategy preset (balanced, shortest, safest, simplest, no_drop, walk_only). Note: 'simplest' is the Ground-Hugging strategy and 'no_drop' is No Falling; keys keep their internal names for save compatibility."
 };
 
 export const expose = true;

@@ -7,7 +7,7 @@ export const config = {
     { id: "startGy", name: "Start Y", desc: "The starting tile Y co-ordinate.", type: "number", initialValue: "0" },
     { id: "endGx", name: "End X", desc: "The ending tile X co-ordinate.", type: "number", initialValue: "5" },
     { id: "endGy", name: "End Y", desc: "The ending tile Y co-ordinate.", type: "number", initialValue: "5" },
-    { id: "direction", name: "Direction", desc: "The slope direction.", type: "combo", initialValue: "slope_left",
+    { id: "direction", name: "Direction", desc: "The slope shape and steepness: the / and \\ glyphs show which way the surface rises, 45° is steep, 22.5° is gentle (2 tiles per 1 of height).", type: "combo", initialValue: "slope_left",
       items: [
         { slope_left: "Slope left / (45°)" },
         { slope_right: "Slope right \\ (45°)" },

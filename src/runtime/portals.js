@@ -1,3 +1,5 @@
+import { globalNavManager } from "./navigationManager.js";
+
 // Portal system: instant/gradual portals, elevator groups, tags, the portal
 // execution state machine (entry → pause/traverse → complete), and portal
 // expressions/conditions.
@@ -9,8 +11,26 @@ export default {
   aceAddPortal(direction, entryX, entryY, exitX, exitY, portalType, cost, speed, tag) {
     this.enablePortals = true;
     const portalsMap = this._getPortalsMap();
-    const portalId = this.nextPortalId++;
+
+    // Same-tick dedupe: an add action on an object type with N picked
+    // instances runs N times with identical parameters. Only the first run
+    // registers the portal; the rest adopt its ID, so LastPortalID matches on
+    // every instance and Set portal cost / Remove portal act on the ONE
+    // portal instead of one of N copies. A different instance adding a
+    // portal with different parameters, or the same instance repeating an
+    // add, still registers normally.
+    const signature = this._getNavKey() + "#portal:" + [
+      portalType, direction, entryX, entryY, exitX, exitY, cost, speed, tag,
+    ].join("|");
+    const claim = this._claimSameTick(signature, (peer) => portalsMap.has(peer.id));
+    if (claim.peer) {
+      this.lastPortalId = claim.peer.id;
+      return;
+    }
+
+    const portalId = globalNavManager.nextPortalId++;
     this.lastPortalId = portalId;
+    claim.own.id = portalId;
 
     const portal = {
       id: portalId,
@@ -60,6 +80,10 @@ export default {
       node.portalConnections = [];
     }
     portalsMap.clear();
+    // Clear-all removes elevator groups too (as documented): with shared
+    // groups, stale stops would otherwise re-link cleared floors on the next
+    // Add elevator stop.
+    this._getElevatorGroups().clear();
   },
 
   /** Adds portal connections from the nearest entry node to the nearest exit node (and reverse if two-way). */
@@ -140,6 +164,11 @@ export default {
     const inst = objectClass.getFirstPickedInstance();
     if (!inst) return;
     const portalsMap = this._getPortalsMap();
+    // With several instances of this behavior's type picked, the action runs
+    // once per instance and each run would remove the NEXT closest portal.
+    // Only the first run per object per tick removes one; a repeat from the
+    // same instance still does.
+    if (this._claimSameTick(this._getNavKey() + "#removePortalAt:" + inst.uid).peer) return;
     let closestId = -1;
     let closestDist = Infinity;
     for (const [id, portal] of portalsMap) {
@@ -241,6 +270,13 @@ export default {
 
   /** Removes all portals that contain the given tag token (checked within comma-separated tag string). */
   aceRemovePortalsByTag(tag) {
+    // Empty tag = remove ALL portals, matching the "empty tag searches all"
+    // convention of NearestPortalID / PortalCountByTag (absorbed the old
+    // ClearAllPortals action in 0.9.0.0).
+    if (!tag || !tag.trim()) {
+      this.aceClearAllPortals();
+      return;
+    }
     const portalsMap = this._getPortalsMap();
     for (const [id, portal] of portalsMap) {
       if (this._portalHasTag(portal, tag)) {
@@ -307,23 +343,50 @@ export default {
   },
 
   /** Adds an elevator stop: creates two-way gradual portals between the new stop
-   *  and every existing stop in the group (full mesh, so any floor reaches any floor). */
+   *  and every existing stop in the group (full mesh, so any floor reaches any floor).
+   *  Groups are shared per map, so any character on the map can add stops. */
   aceAddElevatorStop(groupId, x, y, speed, tag) {
-    if (!this.elevatorGroups.has(groupId)) {
-      this.elevatorGroups.set(groupId, []);
+    const groups = this._getElevatorGroups();
+    if (!groups.has(groupId)) {
+      groups.set(groupId, []);
     }
-    const stops = this.elevatorGroups.get(groupId);
-    const newStop = { x, y, speed };
+    let stops = groups.get(groupId);
 
-    // Create two-way gradual portals between this stop and all existing stops
+    // Prune stops whose linking portals were ALL removed (Remove portal,
+    // Remove portals by tag, Remove portal at object): otherwise the position
+    // dedupe below would block re-adding them (a "power restored" lift could
+    // never be rebuilt) and new stops would re-link removed floors. A lone
+    // first stop has no portals yet (portalIds empty) and is kept.
+    const portalsMap = this._getPortalsMap();
+    stops = stops.filter(s => {
+      const ids = s.portalIds || [];
+      return ids.length === 0 || ids.some(id => portalsMap.has(id));
+    });
+    groups.set(groupId, stops);
+
+    // A stop already at this position is the same floor. This is also how a
+    // multi-pick action (one run per picked instance) registers the stop once:
+    // later runs adopt the first run's LastPortalID instead of linking the
+    // floor to itself.
+    const existing = stops.find(s => s.x === x && s.y === y);
+    if (existing) {
+      if (existing.lastPortalId) this.lastPortalId = existing.lastPortalId;
+      return;
+    }
+
+    // Create two-way gradual portals between this stop and all existing stops,
+    // recording each link's ID on BOTH stops for the pruning above.
+    const newIds = [];
     for (const stop of stops) {
       const dist = Math.sqrt((x - stop.x) ** 2 + (y - stop.y) ** 2);
       const portalSpeed = speed || stop.speed || 100;
       const cost = dist > 0 ? (dist / portalSpeed) * this.WALK_COST : 1;
       this.aceAddPortal("two_way", stop.x, stop.y, x, y, "gradual", cost, portalSpeed, tag);
+      (stop.portalIds = stop.portalIds || []).push(this.lastPortalId);
+      newIds.push(this.lastPortalId);
     }
 
-    stops.push(newStop);
+    stops.push({ x, y, speed, portalIds: newIds, lastPortalId: stops.length > 0 ? this.lastPortalId : 0 });
   },
 
   /** Adds an elevator stop at the picked object's position. */

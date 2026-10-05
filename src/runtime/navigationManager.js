@@ -134,6 +134,23 @@ class NavigationManager {
     // per-instance counter would let two instances allocate the same ID and
     // silently overwrite each other's hazards.
     this.nextHazardId = 1;
+    // Portal IDs are global for the same reason: per-instance counters
+    // collided in shared maps (a second instance's portal 1 overwrote the
+    // first's, leaving its graph edges resolving to the wrong record).
+    this.nextPortalId = 1;
+
+    // Portal, hazard, and elevator-group records per map. These used to live
+    // on the first subscriber's own Maps, so destroying that one instance
+    // wiped every portal and hazard on the map (its graph edges kept pointing
+    // at the vanished IDs) and elevator stops were private to whichever
+    // instance added them. Their lifetime follows the LAYOUT, not the
+    // subscriber count: a wave game whose characters all die between waves
+    // keeps its doors and hazards, and a load that fills the stores before the
+    // old instances release keeps them too. Dropped on layout end (see
+    // hookLayoutEnd), so a restarted layout re-registers from a clean slate.
+    this.sharedPortals = new Map();        // navKey → Map<portalId → portal>
+    this.sharedHazards = new Map();        // navKey → Map<hazardId → hazard>
+    this.sharedElevatorGroups = new Map(); // navKey → Map<groupId → stops[]>
 
     // Single-flight stamp for the per-tick tracked-hazard update: navKey →
     // gameTime of the last update, so only one instance per map does the work.
@@ -185,6 +202,54 @@ class NavigationManager {
       return false;
     }
     return true;
+  }
+
+  /** Registers (once per runtime) the documented "beforeanylayoutend" runtime
+   *  event that drops the ending layout's portal/hazard/elevator stores. Called
+   *  from instance initialization and load, the first moments a runtime is
+   *  available to the addon. */
+  hookLayoutEnd(runtime) {
+    if (this._layoutEndHooked || !runtime) return;
+    this._layoutEndHooked = true;
+    runtime.addEventListener("beforeanylayoutend", () => {
+      const layout = runtime.layout;
+      if (layout) this.dropMapStoresForLayout(layout.name);
+    });
+  }
+
+  /** Drops every map store (all map tags) belonging to one layout. */
+  dropMapStoresForLayout(layoutName) {
+    const prefix = layoutName + "|";
+    for (const stores of [this.sharedPortals, this.sharedHazards, this.sharedElevatorGroups]) {
+      for (const key of stores.keys()) {
+        if (key.startsWith(prefix)) stores.delete(key);
+      }
+    }
+  }
+
+  /** Returns (or creates) a nav key's entry in one of the per-map stores. */
+  _getMapStore(stores, navKey) {
+    let store = stores.get(navKey);
+    if (!store) {
+      store = new Map();
+      stores.set(navKey, store);
+    }
+    return store;
+  }
+
+  /** Returns (or creates) the shared portals Map for a nav key. */
+  getSharedPortals(navKey) {
+    return this._getMapStore(this.sharedPortals, navKey);
+  }
+
+  /** Returns (or creates) the shared hazards Map for a nav key. */
+  getSharedHazards(navKey) {
+    return this._getMapStore(this.sharedHazards, navKey);
+  }
+
+  /** Returns (or creates) the shared elevator-groups Map for a nav key. */
+  getSharedElevatorGroups(navKey) {
+    return this._getMapStore(this.sharedElevatorGroups, navKey);
   }
 
   /** Returns (or creates) the shared navigation graph Map for a nav key. */
@@ -239,6 +304,7 @@ class NavigationManager {
         this.hazardCostsDirty.delete(navKey);
         this.trackedUpdateStamp.delete(navKey);
         this.goalClaims.delete(navKey);
+        // Portal/hazard/elevator stores deliberately survive: see hookLayoutEnd.
         for (const key of this.setupStamps.keys()) {
           if (key.startsWith(navKey + "#")) this.setupStamps.delete(key);
         }
@@ -322,6 +388,11 @@ class NavigationManager {
     if (this.pathQueue.length >= 200) {
       const dropped = this.pathQueue.shift();
       dropped.instance.pathPending = false;
+      // A discarded request takes its pending side-of-object goal with it:
+      // any armed goal belongs to the queued request (the fresh aceFindPath
+      // that queued it cleared prior goals), and a stale goal could fire on
+      // an unrelated older path's arrival.
+      dropped.instance._sideGoalInst = null;
       console.warn("[NavGraph] Path queue full (200), dropping oldest request");
     }
     this.pathQueue.push({ instance, params });
@@ -349,9 +420,14 @@ class NavigationManager {
     }
   }
 
-  /** Removes a queued path request for a specific instance. */
+  /** Removes a queued path request for a specific instance. A removed
+   *  request takes its pending side-of-object goal with it (see the drop
+   *  comment in queuePathRequest); the goal is cleared only when a request
+   *  was actually queued, so an ACTIVE side path's goal survives. */
   removeQueuedRequest(instance) {
+    const before = this.pathQueue.length;
     this.pathQueue = this.pathQueue.filter(r => r.instance !== instance);
+    if (this.pathQueue.length !== before) instance._sideGoalInst = null;
     instance.pathPending = false;
   }
 
@@ -359,6 +435,7 @@ class NavigationManager {
   clearQueue() {
     for (const req of this.pathQueue) {
       req.instance.pathPending = false;
+      req.instance._sideGoalInst = null;
     }
     this.pathQueue = [];
   }
