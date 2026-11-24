@@ -5,6 +5,31 @@ import { globalNavManager } from "./navigationManager.js";
 // and graph node query expressions.
 // Mixed into the instance class prototype — `this` is the behavior instance.
 //
+// How a level change reaches the graph:
+//
+//   Something changes in the level
+//     ├─ object moved / resized / created / destroyed / animation or Solid
+//     │  switch changed -> watcher (_pollMover, _checkMoverShape)
+//     ├─ tilemap tile set or erased -> watcher tile sweep (_sweepTilemaps)
+//     │     both mark a WORLD-space rect dirty (_markMoverDirty), debounced
+//     │     -> _regenerateDirtyBox: grow the grid first if the rect is outside
+//     │     -> _startScanJob(rect): rasterize those cells over a few frames
+//     │     -> _completeScanJob: copy the buffer into the live map
+//     ├─ Regenerate region / Regenerate region by object (same, "urgent")
+//     └─ Set tile state / Mark slope region (write the map directly)
+//           -> _markRegionChanged(cells): queue a patch area (a list per map;
+//              touching areas merge)
+//           -> _startPendingPatch: update nodes in the cells, clear and rebuild
+//              the connections of every node within jump/fall reach
+//           -> _finalizeGraphBuild: reconnect portals, re-bake hazards, bump
+//              graphVersion, re-path characters whose path crosses the change
+//
+//   Full rebuilds (startup, Regenerate obstacle map, Build obstacle map from
+//   layout, huge changes) use a full scan job + _markMapChanged + a full build.
+//
+// RULE: a connection builder writes only to its OWN node. Regional patches
+// depend on it (see the patch section below).
+//
 // The build runs in phases, each phase visiting every node once. Phase order
 // matters and must not change: fall connections read the walk connections of
 // their landing targets (_fallLandingCostMultiplier), so walks build first.
@@ -75,6 +100,7 @@ export default {
       connections: [],
       portalConnections: [],
       hazardMultiplier,
+      isHazard: false, // standing here would touch a hazard (Walk Only never enters)
       isLeftLedge,
       isRightLedge,
       isIsland,
@@ -140,15 +166,6 @@ export default {
     this._finishGraphBuildNow();
   },
 
-  /** Cancels any in-progress build, then starts a fresh one and runs the first
-   *  budgeted slice. Used where a rebuild is requested mid-game (slope
-   *  registration, Pathfinding map ready, etc.). */
-  _restartGraphBuild() {
-    this._cancelGraphBuild();
-    if (!this._startGraphBuild()) return;
-    this._stepGraphBuild(this.GRAPH_BUILD_BUDGET_MS);
-  },
-
   /** Abandons an in-progress incremental build (graph stays marked ungenerated). */
   _cancelGraphBuild() {
     if (this._graphBuild) {
@@ -171,15 +188,28 @@ export default {
    *  included). Returns whether a generated graph is available afterwards. */
   _ensureGraphReadyNow() {
     this._ensureInitialized();
-    if (!this.navEnabled) return false;
+    if (!this._isNavActive()) return false;
+    // A scan job lands first when nothing is built yet, or when an action
+    // asked for it this tick (Regenerate obstacle map / region, then Find
+    // path). Automatic refreshes are NOT forced: characters keep using the
+    // current graph for the few frames until the refreshed one is ready.
+    const job = globalNavManager.scanJobs.get(this.navKey);
+    if (job && (!this.obstacleMap || !globalNavManager.getGraphCapabilities(this.navKey) ||
+                job.urgentStamp === this.instance.runtime.gameTime)) {
+      this._finishScanJobNow();
+    }
     if (this._graphBuild) {
       this._finishGraphBuildNow();
     } else {
       globalNavManager.finishBuildFor(this.navKey);
     }
-    if (this.graphGenerated) return true;
-    if (this._startGraphBuild()) {
+    if (!this.graphGenerated && this._startGraphBuild()) {
       this._finishGraphBuildNow();
+    }
+    // A patch requested earlier (tile edits, regions) lands before searching
+    if (this.graphGenerated && this._startPendingPatch()) {
+      this._finishGraphBuildNow();
+      globalNavManager.finishBuildFor(this.navKey); // started by a matching agent
     }
     return this.graphGenerated;
   },
@@ -192,7 +222,7 @@ export default {
    *  built is built now, so queries still work from On start of layout. */
   _graphReadyForQuery() {
     this._ensureInitialized();
-    if (!this.navEnabled) return false;
+    if (!this._isNavActive()) return false;
     if (this.graphGenerated) return true;
     if (this._graphBuild || globalNavManager.isBuildInProgress(this.navKey)) return false;
     if (globalNavManager.getGraphCapabilities(this.navKey)) return false; // rebuild pending
@@ -293,7 +323,7 @@ export default {
     const stepStart = performance.now();
     const deadline = stepStart + budgetMs;
     build.ticks++;
-    const nodes = this.nodeIndexArray;
+    const nodes = build.nodes || this.nodeIndexArray;
 
     while (build.phaseIndex < build.phases.length) {
       const phase = build.phases[build.phaseIndex];
@@ -320,6 +350,11 @@ export default {
    *  generated, and fires OnGraphGenerated. */
   _finalizeGraphBuild() {
     const build = this._graphBuild;
+    if (build.patch) {
+      // Unpatched nodes still carry their portal links: strip every link so
+      // reconnecting all portals cannot duplicate them.
+      for (const node of this._getNavigationGraph().values()) node.portalConnections = [];
+    }
     this._connectAllPortals();
     this._updateHazardCosts();
 
@@ -328,19 +363,29 @@ export default {
     // Record what this graph was built with: capabilities let late joiners
     // trigger a rebuild (double jump), and the physics numbers power the
     // mismatch warning for characters that should be on their own Map Tag.
-    globalNavManager.setGraphCapabilities(this.navKey, {
-      doubleJump: this.platformProps.isDoubleJumpEnabled,
-      maxJumpHeight: this.maxJumpHeight,
-      maxJumpDistance: this.maxJumpDistance,
-    });
+    if (!build.patch) {
+      globalNavManager.setGraphCapabilities(this.navKey, {
+        doubleJump: this.platformProps.isDoubleJumpEnabled,
+        maxJumpHeight: this.maxJumpHeight,
+        maxJumpDistance: this.maxJumpDistance,
+      });
+      globalNavManager.graphBuildParams.set(this.navKey, this._physicsSignature());
+    }
     this._syncMapStateToSubscribers();
+    globalNavManager.graphVersion.set(this.navKey, (globalNavManager.graphVersion.get(this.navKey) || 0) + 1);
 
     this._graphBuild = null;
     globalNavManager.releaseBuild(this.navKey, this);
 
     const wallMs = performance.now() - build.startTime;
-    this._log(`Graph generated: ${build.workMs.toFixed(2)}ms of work over ${build.ticks} tick(s) (${wallMs.toFixed(2)}ms wall)`);
+    this._log(`${build.patch ? "Graph patched" : "Graph generated"}: ${build.workMs.toFixed(2)}ms of work over ${build.ticks} tick(s) (${wallMs.toFixed(2)}ms wall)`);
 
+    if (build.patch) {
+      // Local update: no trigger (events in On navigation graph generated
+      // typically add portals and must not run again for every local change)
+      this._repathAgentsThroughPatch(build.patch);
+      return;
+    }
     this._warnIfGraphDisconnected();
 
     // this makes sure the trigger condition is called once the graph is generated.
@@ -420,6 +465,251 @@ export default {
           inst._physicsMismatchWarned = true;
           inst._warn(`Jump physics differ ~${Math.round(Math.max(dh, dd) * 100)}% from the physics this map's graph was built with — paths may include jumps this character can't make (or miss ones it could). Give different movement classes their own Map Tag.`);
         }
+      }
+    }
+  },
+
+  // ============================================================================
+  // GRAPH BUILD - Regional patches (Regenerate region, automatic refreshes,
+  // tile edits). Instead of rebuilding every node, a patch:
+  //   1. updates node existence/flags in the changed cells plus a 1-cell ring,
+  //      keeping surviving node OBJECTS (paths, crowd claims and queued
+  //      requests that reference them stay valid),
+  //   2. clears and rebuilds the connections of every node whose connections
+  //      can depend on those cells (the region expanded by the character's
+  //      jump / fall / drift reach), through the normal phases in the normal
+  //      order, time-sliced like a full build.
+  // Every node's connections depend only on cells and nodes within that reach
+  // of itself (the slope phase computes reverse slope links from the receiving
+  // node's side for exactly this reason), so the patched graph matches a full
+  // rebuild.
+  // ============================================================================
+
+  /** Records that obstacle cells [gx1, gx2) x [gy1, gy2) changed. The graph is
+   *  patched over that area on the next tick. Pending areas are kept as a list
+   *  per map (touching areas merge, far-apart ones stay separate, so the two
+   *  edges of a sliding navigation area patch separately). Falls back to a full rebuild when no graph exists
+   *  yet, a full rebuild is already pending, or the area is most of the map. */
+  _markRegionChanged(gx1, gy1, gx2, gy2) {
+    const navKey = this._getNavKey();
+    if (navKey === null) return;
+    // A tile edit may have just created this instance's slope map: share it
+    // first, or the instance that runs the patch would not see (and its sync
+    // would overwrite) the edit.
+    this._syncMapStateToSubscribers();
+    const owner = globalNavManager.buildOwners.get(navKey);
+    const build = owner && owner._graphBuild;
+    const neverBuilt = !globalNavManager.getGraphCapabilities(navKey);
+    // While a PATCH runs every subscriber reads "not generated", which is not
+    // a pending full rebuild; only a running full build or a real dirty flag is.
+    const fullRebuildPending = build ? !build.patch : globalNavManager.needsRegeneration(navKey);
+    if (neverBuilt || fullRebuildPending) {
+      this._markMapChanged();
+      return;
+    }
+    const rect = this._clampCellRect({ x: gx1, y: gy1, w: gx2 - gx1, h: gy2 - gy1 });
+    if (!rect) return;
+    // Pending changes are a LIST of areas: overlapping ones merge, separate
+    // ones stay separate (a moving navigation area changes two opposite edges
+    // at once, and one merged rect would cover the whole map).
+    let merged = rect;
+    let list = (globalNavManager.pendingPatches.get(navKey) || []).filter(r => {
+      if (!this._cellRectsTouch(r, merged)) return true;
+      merged = this._unionCellRect(r, merged);
+      return false;
+    });
+    list.push(merged);
+    if (list.length > 16) list = [list.reduce((a, b) => this._unionCellRect(a, b))];
+    // Patches covering most of the map cost as much as a rebuild: rebuild
+    const area = list.reduce((sum, r) => sum + r.w * r.h, 0);
+    if (area > this.gridWidth * this.gridHeight * 0.5) {
+      this._markMapChanged();
+      return;
+    }
+    globalNavManager.pendingPatches.set(navKey, list);
+  },
+
+  /** Whether two cell rects overlap or touch. */
+  _cellRectsTouch(a, b) {
+    return a.x <= b.x + b.w && b.x <= a.x + a.w && a.y <= b.y + b.h && b.y <= a.y + a.h;
+  },
+
+  /** How far (in cells) a node's connections can reach: horizontally, upward
+   *  (a node this far ABOVE a cell can fall or jump down through it), and
+   *  downward (a node this far BELOW a cell can jump up through it). */
+  _patchReachCells() {
+    const cs = this.cellSize;
+    const head = Math.max(0, Math.ceil(this.characterHeight / cs) - 1);
+    const width = this._getWidthCells();
+    const jumpH = Math.ceil(Math.max(this.maxJumpHeight || 0, this.singleJumpHeight || 0) / cs);
+    const jumpD = Math.ceil(Math.max(this.maxJumpDistance || 0, (this.singleJumpDistance || 0) * 1.45) / cs);
+    const fall = Math.max(0, this.maxFallDistance || 0);
+    const g = this.platformProps.gravity || 1500;
+    const v = this.platformProps.maxSpeed || 330;
+    const drift = Math.ceil((v * Math.sqrt((2 * fall) / g)) / cs);
+    return {
+      x: Math.max(jumpD, drift, 2) + width + 3,
+      up: Math.max(Math.ceil(fall / cs), jumpH + 2) + head + 2,
+      down: jumpH + head + 3,
+    };
+  },
+
+  /** Starts the pending patch for this map, if any (and no build is running).
+   *  Returns true when a patch build was started. */
+  _startPendingPatch() {
+    const navKey = this._getNavKey();
+    const rects = navKey !== null ? globalNavManager.pendingPatches.get(navKey) : null;
+    if (!rects || rects.length === 0) return false;
+    if (this._graphBuild || globalNavManager.isBuildInProgress(navKey)) return false;
+    globalNavManager.pendingPatches.delete(navKey);
+    if (!this.obstacleMap || !globalNavManager.getGraphCapabilities(navKey)) {
+      this._markMapChanged();
+      return false;
+    }
+    // Patches run on the same physics the graph was built with; a builder
+    // without agent params (Graph Manager) waits like a full build does.
+    if (!this.platformBehavior && !this._jumpParamsOverridden && !globalNavManager.getAgentParams(navKey)) {
+      globalNavManager.pendingPatches.set(navKey, rects);
+      return false;
+    }
+    // A patch must use the physics the graph was BUILT with, or links in the
+    // patched area would follow a different character's jumps (and its reach
+    // would not cover the full build's). Hand it to a matching agent; with
+    // none left, rebuild everything with the current physics instead.
+    const built = globalNavManager.graphBuildParams.get(navKey);
+    if (built && !this._physicsMatch(built)) {
+      globalNavManager.pendingPatches.set(navKey, rects);
+      for (const other of globalNavManager.subscribers.get(navKey) || []) {
+        if (other !== this && other._physicsMatch && other._physicsMatch(built) && other._isNavActive()) {
+          return other._startPendingPatch();
+        }
+      }
+      globalNavManager.pendingPatches.delete(navKey);
+      this._markMapChanged();
+      return false;
+    }
+
+    const graph = this._getNavigationGraph();
+    const gw = this.gridWidth, gh = this.gridHeight;
+
+    // 1. Node existence + flags in each changed area and a 1-cell ring (ledge
+    //    flags read neighbours; a node's existence reads the cell below it).
+    const zones = rects.map(r => {
+      const x1 = Math.max(0, r.x - 1), y1 = Math.max(0, r.y - 1);
+      const x2 = Math.min(gw, r.x + r.w + 1), y2 = Math.min(gh, r.y + r.h + 1);
+      return { x: x1, y: y1, w: x2 - x1, h: y2 - y1 };
+    });
+    const removed = [];
+    let added = 0;
+    for (const z of zones) for (let gy = z.y; gy < z.y + z.h; gy++) {
+      for (let gx = z.x; gx < z.x + z.w; gx++) {
+        const key = this.gridKey(gx, gy);
+        const node = graph.get(key);
+        const walkable = this._isWalkable(gx, gy) || this._isSlopeWalkable(gx, gy);
+        if (walkable) {
+          const pos = this.gridToWorld(gx, gy);
+          const fresh = this._createNode(pos.x, pos.y, gx, gy);
+          if (node) {
+            node.isLeftLedge = fresh.isLeftLedge;
+            node.isRightLedge = fresh.isRightLedge;
+            node.isIsland = fresh.isIsland;
+            node.isSlope = fresh.isSlope;
+            node.slopeDirection = fresh.slopeDirection;
+            node.isOnJumpThru = fresh.isOnJumpThru;
+          } else {
+            graph.set(key, fresh);
+            added++;
+          }
+        } else if (node) {
+          graph.delete(key);
+          removed.push(node);
+        }
+      }
+    }
+    if (removed.length) {
+      const claims = globalNavManager.goalClaims.get(navKey);
+      if (claims) for (const n of removed) claims.delete(n);
+    }
+
+    // 2. Every node whose connections can depend on those cells (each zone
+    //    expanded by the jump / fall reach; a node near two zones counts once)
+    const reach = this._patchReachCells();
+    const affectedSet = new Set();
+    for (const z of zones) {
+      const ax1 = Math.max(0, z.x - reach.x), ax2 = Math.min(gw, z.x + z.w + reach.x);
+      const ay1 = Math.max(0, z.y - reach.up), ay2 = Math.min(gh, z.y + z.h + reach.down);
+      for (let gy = ay1; gy < ay2; gy++) {
+        for (let gx = ax1; gx < ax2; gx++) {
+          const node = graph.get(this.gridKey(gx, gy));
+          if (node) affectedSet.add(node);
+        }
+      }
+    }
+    const affected = Array.from(affectedSet);
+    for (const node of affected) node.connections = [];
+    this.nodeIndexArray = Array.from(graph.values());
+
+    for (const inst of globalNavManager.subscribers.get(navKey) || []) inst.graphGenerated = false;
+    this._graphBuild = {
+      patch: zones,
+      nodes: affected,
+      startTime: performance.now(),
+      workMs: 0,
+      ticks: 0,
+      phases: this._getGraphBuildPhaseList(),
+      phaseIndex: 0,
+      nodeIndex: 0,
+      phaseCount: 0,
+    };
+    globalNavManager.claimBuild(navKey, this);
+    this._log(`Graph patch: ${zones.length} area(s) (${zones.map(z => `${z.w}x${z.h} at (${z.x},${z.y})`).join(", ")}), ${added} node(s) added, ${removed.length} removed, ${affected.length} node(s) reconnected`);
+    return true;
+  },
+
+  /** The physics a graph build depends on (jumps, falls, size, coyote time). */
+  _physicsSignature() {
+    const p = this.platformProps || {};
+    return [
+      this.maxJumpHeight, this.maxJumpDistance, this.singleJumpHeight, this.singleJumpDistance,
+      this.maxFallDistance, this.characterHeight, this.characterWidth, this.coyoteTime,
+      p.isDoubleJumpEnabled ? 1 : 0, p.gravity || 0, p.maxSpeed || 0,
+    ];
+  },
+
+  _physicsMatch(sig) {
+    const mine = this._physicsSignature();
+    for (let i = 0; i < mine.length; i++) {
+      if (Math.abs((mine[i] || 0) - (sig[i] || 0)) > 0.5) return false;
+    }
+    return true;
+  },
+
+  /** After a patch: characters whose remaining path runs through the patched
+   *  cells re-path now instead of discovering the change by getting stuck. */
+  _repathAgentsThroughPatch(zones) {
+    const subs = globalNavManager.subscribers.get(this.navKey);
+    if (!subs) return;
+    const cs = this.cellSize;
+    const boxes = zones.map(z => ({
+      x1: this._cellLeft(z.x), y1: this._cellTop(z.y),
+      x2: this._cellLeft(z.x + z.w), y2: this._cellTop(z.y + z.h),
+    }));
+    for (const inst of subs) {
+      if (!inst.hasPath || inst.pathPending || inst.portalState !== "none") continue;
+      const path = inst.currentPath;
+      const halfW = (inst.characterWidth || cs) / 2;
+      const height = inst.characterHeight || cs;
+      let px = inst.instance.x, py = inst.instance.y;
+      for (let i = inst.currentWaypoint; i < path.length; i++) {
+        const wp = path[i];
+        // The segment's box, widened by the body and raised by any jump peak
+        const sx1 = Math.min(px, wp.x) - halfW, sx2 = Math.max(px, wp.x) + halfW;
+        const sy1 = Math.min(py, wp.y) - (wp.peakHeight || 0) - height, sy2 = Math.max(py, wp.y) + height / 2;
+        if (boxes.some(b => sx1 < b.x2 && sx2 > b.x1 && sy1 < b.y2 && sy2 > b.y1)) {
+          inst._rePath(true);
+          break;
+        }
+        px = wp.x; py = wp.y;
       }
     }
   },
@@ -700,87 +990,89 @@ export default {
     return 0;
   },
 
-  /** Creates walk connections along slope tiles for one slope node, linking diagonally
-   *  adjacent slope/flat nodes based on slope direction. Supports 45° (1:1) and 22.5°
-   *  (2:1) gentle slopes. Also adds reverse connections on non-slope neighbors so flat
-   *  nodes have a walk entry onto the slope. */
+  /** Slope phase for one node. Supports 45° (1:1) and 22.5° (2:1) gentle slopes.
+   *  - A SLOPE node gets its walk links along the slope (down and up the
+   *    incline, plus horizontal mid-slope links on gentle slopes).
+   *  - A NON-slope node gets its walk ENTRY onto any slope whose low or high end
+   *    it is (the "reverse" links). These used to be pushed onto the flat
+   *    neighbour by the slope node; computing them from the flat node's own
+   *    side gives exactly the same links and costs, but keeps every node's
+   *    connections a function of its own neighbourhood, which regional graph
+   *    patches rely on. */
   _connectSlopeForNode(node) {
-    if (!node.isSlope) return 0;
-
-    let count = 0;
     // Slope edge costs must be >= Euclidean distance so the A* heuristic stays consistent.
     // sqrt(2)*cellSize for 45° diagonals, sqrt(5)*cellSize for gentle diagonals.
     const slopeDiagCost = Math.SQRT2 * this.cellSize * this.SLOPE_COST;       // 45° (1:1)
     const gentleDiagCost = Math.sqrt(5) * this.cellSize * this.SLOPE_COST;    // 22.5° (2:1)
     const midSlopeCost = this.cellSize * this.SLOPE_COST;                      // horizontal mid-slope
 
+    if (!node.isSlope) {
+      // Entries onto slopes: [dx, dy, slope direction, action, cost]. Each
+      // neighbouring position holds at most one slope, so each slope adds at
+      // most one entry link here, exactly as the old reverse push did.
+      let count = 0;
+      const entry = (dx, dy, dir, action, cost) => {
+        const s = this.getNode(node.gx + dx, node.gy + dy);
+        if (s && s.isSlope && s.slopeDirection === dir) {
+          node.connections.push({ slopePhase: true, target: s, action, cost });
+          count++;
+        }
+      };
+      entry(1, -1, 1, "walk_right", slopeDiagCost);   // low end of a / slope
+      entry(-1, 1, 1, "walk_left", slopeDiagCost);    // high end of a / slope
+      entry(1, 1, 2, "walk_right", slopeDiagCost);    // high end of a \ slope
+      entry(-1, -1, 2, "walk_left", slopeDiagCost);   // low end of a \ slope
+      entry(2, -1, 3, "walk_right", gentleDiagCost);  // low end of a gentle / slope
+      entry(-2, 1, 3, "walk_left", gentleDiagCost);   // high end of a gentle / slope
+      entry(2, 1, 4, "walk_right", gentleDiagCost);   // high end of a gentle \ slope
+      entry(-2, -1, 4, "walk_left", gentleDiagCost);  // low end of a gentle \ slope
+      return count;
+    }
+
+    let count = 0;
     const dir = node.slopeDirection;
 
     if (dir === 1) {
       // 45° slope-left (/): down-left, up-right
       const down = this.getNode(node.gx - 1, node.gy + 1);
       const up = this.getNode(node.gx + 1, node.gy - 1);
-      if (down) {
-        node.connections.push({ target: down, action: "walk_left", cost: slopeDiagCost }); count++;
-        if (!down.isSlope) { down.connections.push({ target: node, action: "walk_right", cost: slopeDiagCost }); count++; }
-      }
-      if (up) {
-        node.connections.push({ target: up, action: "walk_right", cost: slopeDiagCost }); count++;
-        if (!up.isSlope) { up.connections.push({ target: node, action: "walk_left", cost: slopeDiagCost }); count++; }
-      }
+      if (down) { node.connections.push({ slopePhase: true, target: down, action: "walk_left", cost: slopeDiagCost }); count++; }
+      if (up) { node.connections.push({ slopePhase: true, target: up, action: "walk_right", cost: slopeDiagCost }); count++; }
     } else if (dir === 2) {
       // 45° slope-right (\): up-left, down-right
       const up = this.getNode(node.gx - 1, node.gy - 1);
       const down = this.getNode(node.gx + 1, node.gy + 1);
-      if (up) {
-        node.connections.push({ target: up, action: "walk_left", cost: slopeDiagCost }); count++;
-        if (!up.isSlope) { up.connections.push({ target: node, action: "walk_right", cost: slopeDiagCost }); count++; }
-      }
-      if (down) {
-        node.connections.push({ target: down, action: "walk_right", cost: slopeDiagCost }); count++;
-        if (!down.isSlope) { down.connections.push({ target: node, action: "walk_left", cost: slopeDiagCost }); count++; }
-      }
+      if (up) { node.connections.push({ slopePhase: true, target: up, action: "walk_left", cost: slopeDiagCost }); count++; }
+      if (down) { node.connections.push({ slopePhase: true, target: down, action: "walk_right", cost: slopeDiagCost }); count++; }
     } else if (dir === 3) {
       // 22.5° gentle-left (/): 2 tiles horizontal per 1 vertical
       const down = this.getNode(node.gx - 2, node.gy + 1);
       const up = this.getNode(node.gx + 2, node.gy - 1);
-      if (down) {
-        node.connections.push({ target: down, action: "walk_left", cost: gentleDiagCost }); count++;
-        if (!down.isSlope) { down.connections.push({ target: node, action: "walk_right", cost: gentleDiagCost }); count++; }
-      }
-      if (up) {
-        node.connections.push({ target: up, action: "walk_right", cost: gentleDiagCost }); count++;
-        if (!up.isSlope) { up.connections.push({ target: node, action: "walk_left", cost: gentleDiagCost }); count++; }
-      }
+      if (down) { node.connections.push({ slopePhase: true, target: down, action: "walk_left", cost: gentleDiagCost }); count++; }
+      if (up) { node.connections.push({ slopePhase: true, target: up, action: "walk_right", cost: gentleDiagCost }); count++; }
       // Horizontal mid-slope connections (skip if the walk phase already created this link)
       const midLeft = this.getNode(node.gx - 1, node.gy);
       const midRight = this.getNode(node.gx + 1, node.gy);
       if (midLeft && midLeft.isSlope && !node.connections.some(c => c.target === midLeft && c.action === "walk_left")) {
-        node.connections.push({ target: midLeft, action: "walk_left", cost: midSlopeCost }); count++;
+        node.connections.push({ slopePhase: true, target: midLeft, action: "walk_left", cost: midSlopeCost }); count++;
       }
       if (midRight && midRight.isSlope && !node.connections.some(c => c.target === midRight && c.action === "walk_right")) {
-        node.connections.push({ target: midRight, action: "walk_right", cost: midSlopeCost }); count++;
+        node.connections.push({ slopePhase: true, target: midRight, action: "walk_right", cost: midSlopeCost }); count++;
       }
     } else if (dir === 4) {
       // 22.5° gentle-right (\): 2 tiles horizontal per 1 vertical
       const up = this.getNode(node.gx - 2, node.gy - 1);
       const down = this.getNode(node.gx + 2, node.gy + 1);
-      if (up) {
-        node.connections.push({ target: up, action: "walk_left", cost: gentleDiagCost }); count++;
-        if (!up.isSlope) { up.connections.push({ target: node, action: "walk_right", cost: gentleDiagCost }); count++; }
-      }
-      if (down) {
-        node.connections.push({ target: down, action: "walk_right", cost: gentleDiagCost }); count++;
-        if (!down.isSlope) { down.connections.push({ target: node, action: "walk_left", cost: gentleDiagCost }); count++; }
-      }
+      if (up) { node.connections.push({ slopePhase: true, target: up, action: "walk_left", cost: gentleDiagCost }); count++; }
+      if (down) { node.connections.push({ slopePhase: true, target: down, action: "walk_right", cost: gentleDiagCost }); count++; }
       // Horizontal mid-slope connections (skip if the walk phase already created this link)
       const midLeft = this.getNode(node.gx - 1, node.gy);
       const midRight = this.getNode(node.gx + 1, node.gy);
       if (midLeft && midLeft.isSlope && !node.connections.some(c => c.target === midLeft && c.action === "walk_left")) {
-        node.connections.push({ target: midLeft, action: "walk_left", cost: midSlopeCost }); count++;
+        node.connections.push({ slopePhase: true, target: midLeft, action: "walk_left", cost: midSlopeCost }); count++;
       }
       if (midRight && midRight.isSlope && !node.connections.some(c => c.target === midRight && c.action === "walk_right")) {
-        node.connections.push({ target: midRight, action: "walk_right", cost: midSlopeCost }); count++;
+        node.connections.push({ slopePhase: true, target: midRight, action: "walk_right", cost: midSlopeCost }); count++;
       }
     }
 
@@ -831,7 +1123,7 @@ export default {
     const apexX = from.x;
     const apexY = from.y - this.singleJumpHeight;
     const apexGridGx = from.gx;
-    const apexGridGy = Math.round(apexY / cs);
+    const apexGridGy = Math.round((apexY - this.gridOriginY) / cs);
 
     // Horizontal clearance at apex: the character starts horizontal movement
     // from the apex position. Check the first adjacent cell in the target
@@ -985,17 +1277,18 @@ export default {
     // Surface line of a slope cell at world X (same formulas as the walk phase).
     const slopeSurfaceY = (gx, gy, px) => {
       const type = slopeAt(gx, gy);
-      const localX = px - gx * cs;
-      if (type === 1) return (gy + 1) * cs - localX;          // slope_left (/)
-      if (type === 2) return gy * cs + localX;                // slope_right (\)
+      const localX = px - this._cellLeft(gx);
+      const top = this._cellTop(gy);
+      if (type === 1) return top + cs - localX;               // slope_left (/)
+      if (type === 2) return top + localX;                    // slope_right (\)
       const leftType = slopeAt(gx - 1, gy);
       if (type === 3)                                          // gentle_left (/)
         return leftType === 3
-          ? (gy + 0.5) * cs - localX * 0.5
-          : (gy + 1) * cs - localX * 0.5;
+          ? top + 0.5 * cs - localX * 0.5
+          : top + cs - localX * 0.5;
       return leftType === 4                                    // gentle_right (\)
-        ? (gy + 0.5) * cs + localX * 0.5
-        : gy * cs + localX * 0.5;
+        ? top + 0.5 * cs + localX * 0.5
+        : top + localX * 0.5;
     };
 
     // Run-up launch: from the tile edge at ~0.78 maxSpeed (the executor's
@@ -1030,9 +1323,9 @@ export default {
       // Horizontal: leading edge against solids and slope bodies (wall hit).
       if (vx !== 0) {
         const leadX = nx + Math.sign(vx) * halfW;
-        const lgx = Math.floor(leadX / cs);
-        const topGy = Math.floor((y - halfH + 2) / cs);
-        const botGy = Math.floor((y + halfH - 2) / cs);
+        const lgx = this._toGX(leadX);
+        const topGy = this._toGY(y - halfH + 2);
+        const botGy = this._toGY(y + halfH - 2);
         for (let bgy = topGy; bgy <= botGy; bgy++) {
           const v = cellAt(lgx, bgy);
           if (v === -1 || v === 3) return 0; // off-map / avoid zone: reject
@@ -1051,9 +1344,9 @@ export default {
       if (vy < 0) {
         // Rising: head against ceilings — C3 "stop" zeroes the rise but the
         // flight continues (this is how stair hops under low ceilings work).
-        const headGy = Math.floor((ny - halfH) / cs);
-        const hgx0 = Math.floor((nx - halfW + 2) / cs);
-        const hgx1 = Math.floor((nx + halfW - 2) / cs);
+        const headGy = this._toGY(ny - halfH);
+        const hgx0 = this._toGX(nx - halfW + 2);
+        const hgx1 = this._toGX(nx + halfW - 2);
         for (let bgx = hgx0; bgx <= hgx1; bgx++) {
           const v = cellAt(bgx, headGy);
           if (v === 3) return 0;
@@ -1066,9 +1359,9 @@ export default {
       } else {
         // Falling: feet against floors — the landing decides the verdict.
         const feetY = ny + halfH;
-        const feetGy = Math.floor(feetY / cs);
-        const fgx0 = Math.floor((nx - halfW + 2) / cs);
-        const fgx1 = Math.floor((nx + halfW - 2) / cs);
+        const feetGy = this._toGY(feetY);
+        const fgx0 = this._toGX(nx - halfW + 2);
+        const fgx1 = this._toGX(nx + halfW - 2);
         for (let bgx = fgx0; bgx <= fgx1; bgx++) {
           const v = cellAt(bgx, feetGy);
           if (v === 3) return 0;
@@ -1079,12 +1372,12 @@ export default {
             if (feetY >= slopeSurfaceY(bgx, feetGy, nx)) landedGy = feetGy;
           } else if (v === 1) {
             landedGy = feetGy - 1;           // stand on top of the solid
-          } else if (v === 2 && y + halfH <= feetGy * cs + 1) {
+          } else if (v === 2 && y + halfH <= this._cellTop(feetGy) + 1) {
             landedGy = feetGy - 1;           // jump-thru: only from above
           }
           if (landedGy >= 0) {
             const nearTargetX =
-              Math.floor(nx / cs) === to.gx || Math.abs(nx - to.x) <= cs * 0.55;
+              this._toGX(nx) === to.gx || Math.abs(nx - to.x) <= cs * 0.55;
             if (this._canJumpTrace) console.log(`  [sim] t=${t.toFixed(2)} landed gy=${landedGy} at pos=(${nx.toFixed(0)},${ny.toFixed(0)}) target=(${to.gx},${to.gy}) nearX=${nearTargetX}`);
             return landedGy === to.gy && nearTargetX ? actualPeakHeight : 0;
           }
@@ -1180,13 +1473,13 @@ export default {
     // columns FASTER than the average-speed parabola (i.e. higher up), which the
     // height padding absorbs.
     for (let gy = from.gy; gy <= to.gy; gy++) {
-      const tEnter = Math.sqrt(Math.max(0, (gy * cs - halfH - from.y) / dy));
-      const tExit  = Math.sqrt(Math.max(0, ((gy + 1) * cs + halfH - from.y) / dy));
+      const tEnter = Math.sqrt(Math.max(0, (this._cellTop(gy) - halfH - from.y) / dy));
+      const tExit  = Math.sqrt(Math.max(0, (this._cellTop(gy + 1) + halfH - from.y) / dy));
       if (tEnter > 1.0) break;
       const xEnter = from.x + dx * Math.min(tEnter, 1.0);
       const xExit  = from.x + dx * Math.min(tExit,  1.0);
-      const gxMin  = Math.floor(Math.min(xEnter, xExit) / cs);
-      const gxMax  = Math.floor(Math.max(xEnter, xExit) / cs);
+      const gxMin  = this._toGX(Math.min(xEnter, xExit));
+      const gxMax  = this._toGX(Math.max(xEnter, xExit));
       for (let gx = gxMin; gx <= gxMax; gx++) {
         for (let w = -widthCells; w <= widthCells; w++) {
           const cgx = gx + w;
@@ -1208,7 +1501,7 @@ export default {
   // pathing produce paths that are easier to climb upward from.
   _fallLandingCostMultiplier(targetNode) {
     const hasWalk = targetNode.connections.some(
-      (c) => c.action === "walk_left" || c.action === "walk_right"
+      (c) => (c.action === "walk_left" || c.action === "walk_right") && !c.slopePhase
     );
     return hasWalk ? 0.7 : 1.0;
   },
@@ -1220,11 +1513,6 @@ export default {
   /** Returns the total number of navigation nodes in the graph. */
   aceGetNodeCount() {
     return this._getNavigationGraph().size;
-  },
-
-  /** Returns whether the navigation graph has been generated and is ready for pathfinding. */
-  aceIsGraphGenerated() {
-    return this.graphGenerated;
   },
 
   /** Returns whether a navigation node exists at the given grid coordinates. */

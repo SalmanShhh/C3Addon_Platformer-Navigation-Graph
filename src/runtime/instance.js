@@ -7,16 +7,66 @@ import pathfindingMethods from "./pathfinding.js";
 import movementMethods from "./movement.js";
 import portalMethods from "./portals.js";
 import hazardMethods from "./hazards.js";
+import movingPlatformMethods from "./movingPlatforms.js";
 
-// Core instance class: lifecycle (constructor/tick/release/save/load),
-// property handling, Platform behavior integration, and shared utilities.
-// Domain logic lives in the sibling modules mixed into the prototype below:
-//   obstacleMap.js — tile grid building/scanning, slopes, auto-build startup
-//   graphBuild.js  — node/connection generation, chunked build state machine
-//   pathfinding.js — A*, path assembly, FindPath ACEs, path expressions
-//   movement.js    — path following and movement execution
-//   portals.js     — portal system and traversal state machine
-//   hazards.js     — hazard zones and cost application
+// ============================================================================
+// HOW THE RUNTIME WORKS (start here when debugging or extending)
+// ============================================================================
+// Three layers:
+//   1. Obstacle map: a grid of cells (obstacleMap, one byte each: 0 clear,
+//      1 solid, 2 jump-thru, 3 avoid), plus slopeMap and hazardMap. Built by
+//      scanning Solid / Jump-thru objects (or tilemaps / tile states).
+//   2. Navigation graph: one node per standable cell, connections between
+//      nodes (walk, jump, fall, coyote jump, fall-through, slope walk, portal,
+//      ride). Built from the obstacle map.
+//   3. Paths and movement: A* over the graph per character, then the path
+//      follower presses Platform behavior controls.
+// Every character on the same layout and Map Tag shares layers 1 and 2. That
+// shared state is keyed by navKey ("layoutName|mapTag") and lives in
+// globalNavManager (navigationManager.js). Each character keeps its own path.
+//
+// This file is the core class: lifecycle (constructor / _tick / release /
+// save / load), properties, Platform behavior integration, the debugger panel,
+// and the world <-> grid conversion helpers. Domain logic lives in the sibling
+// modules mixed into the prototype below (`this` is the instance in all):
+//   navigationManager.js — globalNavManager: everything shared per map (graph,
+//                          subscribers, portals, hazards, scan jobs, pending
+//                          patches, watcher state, scan and slope recipes),
+//                          the path request queue, runtime event hooks
+//   obstacleMap.js     — the rasterizer, time-sliced scan jobs, scan recipes,
+//                        automatic map extent, growth and the navigation area,
+//                        slopes, tile states
+//   graphBuild.js      — full graph builds and regional patches (see the
+//                        "level change" overview at the top of that file),
+//                        the Find path safety valve _ensureGraphReadyNow
+//   pathfinding.js     — A*, path strategies, edge rules (_isEdgeAllowed),
+//                        the Find path actions, path expressions
+//   movement.js        — path following, jump/fall execution, patrols, idle
+//                        separation
+//   portals.js         — portals and elevator stops, object-following portals,
+//                        portal execution (instant, gradual)
+//   hazards.js         — hazard zones and baking their costs onto nodes
+//   movingPlatforms.js — the obstacle watcher, danger areas over moving
+//                        obstacles, ride links, the ride state machine
+//
+// Rules that must hold:
+//   - Every world/grid position conversion goes through worldToGrid /
+//     gridToWorld / _cellLeft / _cellTop / _toGX / _toGY. The grid can start
+//     anywhere (gridOriginX/Y), so never divide by cellSize directly.
+//   - Grid keys are row-major (gy * gridWidth + gx) and alias across rows when
+//     gx is out of range: look nodes up with getNode, or bounds-check first.
+//   - Map arrays are shared BY REFERENCE between the characters on a map. A
+//     newly created slope or hazard map must be synced
+//     (_syncMapStateToSubscribers).
+//   - Full map changes go through _markMapChanged, local ones through
+//     _markRegionChanged (graphBuild.js).
+//   - After release, ACE IDs, combo option order and property order never
+//     change. Hide an ACE with isDeprecated: true before removing it, and add
+//     new combo options and new properties only at the end (values are
+//     stored by index).
+//
+// Debugging: see the notes above _log (console log lines worth looking for).
+// ============================================================================
 export default function (parentClass) {
   const PlatformerPathfindingInstance = class PlatformerPathfindingInstance extends parentClass {
     constructor() {
@@ -66,9 +116,13 @@ export default function (parentClass) {
       this.separationGiveUpTime = 1.2;
       // Enabled: standard behavior toggle. Disabled = frozen (state kept)
       this.navEnabled = properties[20] !== false;
-      // Auto-enabled when portals/hazards are added via ACEs
+      // Multiplayer: "host_only" (default) pauses navigation on peers, where
+      // the host runs the AI; "everywhere" always runs (Set multiplayer mode).
+      this.multiplayerMode = "host_only";
+      this._peerPaused = false; // last seen peer state, to act on changes
+      // Auto-enabled when portals are added via ACEs (hazards need no switch:
+      // every character on a map avoids its hazards)
       this.enablePortals = true;
-      this.enableHazards = false;
 
       // Auto-detected from sprite bounding box on first tick
       this.characterHeight = 32;
@@ -100,6 +154,10 @@ export default function (parentClass) {
       this.obstacleMapSource = null;
       this.gridWidth = 0;
       this.gridHeight = 0;
+      // World position (pixels) of grid cell (0, 0). 0,0 unless the map covers
+      // content left of / above the layout or grew to include new content.
+      this.gridOriginX = 0;
+      this.gridOriginY = 0;
 
       this.slopeMap = null;
       this.hazardMap = null;
@@ -167,7 +225,9 @@ export default function (parentClass) {
       this.currentPortalId = 0;
 
       // Portal execution state
-      this.portalState = "none"; // "none" | "paused" | "traversing"
+      this.portalState = "none"; // "none" | "paused" | "traversing" | "riding"
+      this._ride = null; // moving-platform ride state (movingPlatforms.js)
+      this._deferredFindPath = null; // Find path held during a ride / gradual portal
       this.portalPaused = false;
       this.portalTraverseProgress = 0;
       this.portalTraverseStartX = 0;
@@ -188,6 +248,21 @@ export default function (parentClass) {
       // distance in PIXELS (turn that far short of each platform end);
       // _patrolDir: 1 = right, -1 = left, meaningful only while active.
       this._patrolActive = false;
+      this._patrolBumpCooldown = 0;   // patrol: ignore other characters briefly after a bump-turn
+      // Patrol settings (Set patrol setting / Set patrol option); persist
+      // across Start patrol calls
+      this._patrolDwellVar = 0;       // s, random +/- on each wait
+      this._patrolSpeedPct = 100;     // % of Platform max speed while patrolling
+      this._patrolSpeedBase = null;   // Platform max speed saved while scaled
+      this._patrolResumeAfter = 0;    // s idle before a cancelled patrol resumes (0 = never)
+      this._patrolMemory = null;      // the patrol a Find path cancelled
+      this._patrolResumeTimer = 0;
+      this._patrolTurnAtChars = true;
+      this._patrolTurnDanger = true;
+      this._patrolGraphVersion = 0;   // patrol: graph version its ends were measured on
+      // Route patrol (Start patrol between objects, movement.js); null = off
+      this._route = null;
+      this._routeFindingPath = false;
       this._patrolDir = 1;
       this._patrolDwell = 0;
       this._patrolDwellTimer = 0;
@@ -284,8 +359,28 @@ export default function (parentClass) {
       }
     }
 
-    /** Per-frame update: behavior acquisition, graph build slices,
-     *  coyote/jump-toward timers, path queue, and path following. */
+    /** Per-frame update. Order matters:
+     *
+     *  Nothing below runs while the behavior is disabled or this machine is a
+     *  multiplayer peer (_isPausedAsPeer: the host runs the AI).
+     *
+     *  Map-level work first. One character per map does each job per frame
+     *  (the others find it already done), and it runs even while that
+     *  character's Platform behavior is disabled:
+     *    1. Start the startup scan if no map exists yet; step the current scan
+     *       job (about 4 ms).
+     *    2. Step the current graph build or patch (about 6 ms), or start one.
+     *    3. Move tracked hazards and object-following portals.
+     *    4. Run the obstacle watcher (_updateMoversIfOwner).
+     *    5. Re-bake hazard costs if they changed.
+     *
+     *  Then per-character work. It stops if the user disabled this character's
+     *  Platform behavior (a gradual portal disables it on purpose, so that
+     *  case continues):
+     *    6. Coyote time, Jump toward position, the path request queue.
+     *    7. Exactly one of: follow the path, run the route patrol, run the
+     *       platform patrol, wait to resume a patrol, or idle separation.
+     *    8. Apply patrol walking speed. */
     _tick() {
       const dt = this.instance.dt;
       this._ensureInitialized();
@@ -301,33 +396,77 @@ export default function (parentClass) {
     }
 
 
+      // Multiplayer peer: the host runs this character's AI, so it pauses here
+      // exactly like Set enabled "Disabled" (state kept). Checked every tick
+      // (two property reads) because joining a room happens after start.
+      const peerPaused = this._isPausedAsPeer();
+      if (peerPaused !== this._peerPaused) {
+        this._peerPaused = peerPaused;
+        if (peerPaused) {
+          this._releaseNavWork();
+          this._log("Multiplayer peer: navigation paused on this machine (the host runs it)");
+        } else {
+          this._log("Multiplayer: navigation resumed on this machine");
+        }
+      }
+
       // Behavior disabled: initialization and subscriptions above stay live so
       // re-enabling resumes seamlessly, but no navigation work happens. Note a
       // frozen gradual-portal traversal stays frozen (Platform stays disabled)
       // until this behavior is re-enabled.
-      if (!this.navEnabled) return;
-
-    // If the Platform behavior is present but disabled, skip all processing
-      if (this.platformBehavior && !this.platformBehavior.isEnabled) {
-        return;
-      }
+      if (!this.navEnabled || peerPaused) return;
 
       // Graph generation is time-sliced: continue an in-progress build, or start
       // one when the graph is marked dirty. Small maps still complete in a single
       // slice; large maps spread across ticks to avoid a frame hitch.
+      // Obstacle scans are time-sliced too: the startup auto-build, Regenerate
+      // obstacle map / region, and automatic refreshes run a few ms per tick
+      // (one instance per map does the work) while the current map stays in use.
+      if (!this.obstacleMap && this.obstacleMapSource === null && this.autoBuildMode === "auto" &&
+          !globalNavManager.scanJobs.has(this.navKey)) {
+        let peer = null;
+        for (const other of globalNavManager.subscribers.get(this.navKey) || []) {
+          if (other !== this && other.obstacleMap) { peer = other; break; }
+        }
+        if (peer) {
+          // Spawned while the map is being built: share it, do not rescan
+          this._adoptMapStateFrom(peer);
+        } else if (!globalNavManager.isBuildInProgress(this.navKey) && !this._getScanRule()) {
+          this._startScanJob(null);
+          this._ensureMoversPopulated(); // catch changes made while it runs
+        }
+      }
+      this._stepScanJob();
+      const scanPending = globalNavManager.scanJobs.has(this.navKey);
       if (this._graphBuild) {
         this._stepGraphBuild(this.GRAPH_BUILD_BUDGET_MS);
-      } else if (this._needsGraphRegeneration()) {
+      } else if (!scanPending && this._needsGraphRegeneration()) {
         if (this._startGraphBuild()) {
           this._stepGraphBuild(this.GRAPH_BUILD_BUDGET_MS);
         }
+      } else if (!scanPending && this._startPendingPatch()) {
+        // Regional patch (tile edits, regions, moved obstacles)
+        this._stepGraphBuild(this.GRAPH_BUILD_BUDGET_MS);
       }
 
       // Refresh tracked (object-following) hazards, then re-bake stale hazard
       // costs. Both are once per map per tick regardless of instance count —
       // the stamps/flags are per map and the first instance does the work.
       this._updateTrackedHazardsIfOwner();
+      // Object-based portals follow their objects (once per map per tick)
+      this._updateTrackedPortalsIfOwner();
+      // Moving / spawned / destroyed solids: keep the map current and the
+      // moving-platform ride links placed (once per map per tick)
+      this._updateMoversIfOwner();
       this._applyHazardCostsIfDirty();
+
+      // Per-character work stops while the user has this character's Platform
+      // behavior disabled. The map-level work above keeps running (other agents
+      // share it), and a gradual portal disables Platform ON PURPOSE while it
+      // moves the character, so that traversal keeps advancing.
+      if (this.platformBehavior && !this.platformBehavior.isEnabled && this.portalState !== "traversing") {
+        return;
+      }
 
       if (this.platformBehavior) {
         this._updateCoyoteTime(dt);
@@ -363,20 +502,29 @@ export default function (parentClass) {
       }
 
       // Process queued path requests (time-slicing)
-      globalNavManager.processPathQueue();
+      globalNavManager.processPathQueue(this.instance.runtime);
 
       if (this.hasPath && !this.pathPending) {
         this._followPath(dt);
+      } else if (this._route) {
+        // Route patrol: walk/jump/ride from marker to marker
+        this._updatePatrolRoute(dt);
       } else if (this._patrolActive) {
         // Ledge-to-ledge patrol: drives the character between its platform's
         // ends. Mutually exclusive with idle separation (a patroller is a
         // mover, so idle neighbors step aside for it instead).
         this._updatePatrol(dt);
+      } else if (this._patrolMemory && this._tickPatrolResume(dt)) {
+        // Waiting to resume a patrol a Find path cancelled ("Resume after")
       } else {
         // Idle separation: idle agents drift apart when overlapping (no-op
         // unless Idle Separation > 0 and a same-map neighbor is too close).
         this._applyIdleSeparation(dt);
       }
+      // Patrol walking speed (Set patrol setting "Speed")
+      this._updatePatrolSpeed();
+      // "Resume after" counts idle time only: any new path restarts the count
+      if (this.hasPath || this.pathPending) this._patrolResumeTimer = 0;
 
       if (this.justUsedPortal) {
         this.justUsedPortal = false;
@@ -404,12 +552,15 @@ export default function (parentClass) {
         this.platformBehavior.isEnabled = this.platformWasEnabled;
       }
       this.portalState = "none";
+      this._ride = null;
     }
 
     /** Savegame support: serializes all runtime state. The graph itself is NOT
      *  saved — it is rebuilt from the obstacle/slope maps in _loadFromJson. */
     _saveToJson() {
       return {
+        // Save format version 1 = the 1.0.0.0 release baseline. Bump it (and
+        // keep loading every older version) whenever the format changes.
         version: 1,
         enableDebug: this.enableDebug,
         cellSize: this.cellSize,
@@ -424,10 +575,10 @@ export default function (parentClass) {
         maxFallDistance: this.maxFallDistance,
         autoControl: this.autoControl,
         navEnabled: this.navEnabled,
+        multiplayerMode: this.multiplayerMode,
         enablePortals: this.enablePortals,
         smoothPaths: this.smoothPaths,
         maxWaypointTime: this.maxWaypointTime,
-        enableHazards: this.enableHazards,
         coyoteTime: this.coyoteTime,
         strictPositioning: this.strictPositioning,
         ledgeRestriction: this.ledgeRestriction,
@@ -447,6 +598,12 @@ export default function (parentClass) {
         // instance references don't serialize, so a save mid-path loses only
         // that arrival's OnObjectSideReached trigger.
         patrol: { active: this._patrolActive, dir: this._patrolDir, dwell: this._patrolDwell, range: this._patrolRange, leftX: this._patrolLeftX, rightX: this._patrolRightX, y: this._patrolY },
+        route: this._route,
+        patrolSettings: {
+          dwellVar: this._patrolDwellVar, speedPct: this._patrolSpeedPct, speedBase: this._patrolSpeedBase,
+          resumeAfter: this._patrolResumeAfter, memory: this._patrolMemory, resumeTimer: this._patrolResumeTimer,
+          turnAtChars: this._patrolTurnAtChars, turnDanger: this._patrolTurnDanger,
+        },
         currentPath: this.currentPath.map((wp) => ({
           x: wp.x,
           y: wp.y,
@@ -479,6 +636,8 @@ export default function (parentClass) {
         obstacleMapSource: this.obstacleMapSource,
         gridWidth: this.gridWidth,
         gridHeight: this.gridHeight,
+        gridOriginX: this.gridOriginX,
+        gridOriginY: this.gridOriginY,
         slopeMap: this.slopeMap ? Array.from(this.slopeMap) : null,
         hazardMap: this.hazardMap ? Array.from(this.hazardMap) : null,
         // Every instance saves its map's FULL shared set (read without
@@ -496,11 +655,21 @@ export default function (parentClass) {
         portalTraverseTargetY: this.portalTraverseTargetY,
         portalTraverseSpeed: this.portalTraverseSpeed,
         platformWasEnabled: this.platformWasEnabled,
+        ride: this._ride,
         currentPortalId: this.currentPortalId,
         elevatorGroups: Object.fromEntries(this._peekMapStore(globalNavManager.sharedElevatorGroups) || []),
         // False before this instance has a map: its empty lists above mean
         // "not captured", and load must not let them clear the shared stores.
         hasMapStores: this.navKey !== null,
+        // A rescan or patch was pending: redo a full (time-sliced) rescan on load
+        pendingRefresh: this.navKey !== null && (globalNavManager.scanJobs.has(this.navKey) ||
+          globalNavManager.pendingPatches.has(this.navKey) ||
+          !!globalNavManager.movers.get(this.navKey)?.dirtyBox),
+        // How this map rebuilds itself from objects (scan recipe + slope
+        // registrations), by object type NAME, so automatic regeneration and
+        // Regenerate obstacle map keep working after a load, even into a
+        // different layout. Shared per map like portals/hazards.
+        navRecipes: this._serializeMapRecipes(),
         coyoteTimer: this.coyoteTimer,
         wasOnFloor: this.wasOnFloor,
         coyoteJumpPending: this.coyoteJumpPending,
@@ -535,10 +704,10 @@ export default function (parentClass) {
       this.maxFallDistance = o.maxFallDistance;
       this.autoControl = o.autoControl;
       this.navEnabled = o.navEnabled !== undefined ? o.navEnabled : true;
+      this.multiplayerMode = o.multiplayerMode === "everywhere" ? "everywhere" : "host_only";
       this.enablePortals = o.enablePortals;
       this.smoothPaths = o.smoothPaths;
       this.maxWaypointTime = o.maxWaypointTime;
-      this.enableHazards = o.enableHazards;
       this.coyoteTime = o.coyoteTime;
       this.strictPositioning = o.strictPositioning !== undefined ? o.strictPositioning : true;
       this.ledgeRestriction = o.ledgeRestriction;
@@ -562,6 +731,16 @@ export default function (parentClass) {
         this._patrolRightX = o.patrol.rightX || 0;
         this._patrolY = o.patrol.y || 0;
       }
+      this._route = o.route || null; // route patrol (plain data: marker UIDs, phase)
+      const ps = o.patrolSettings || {};
+      this._patrolDwellVar = ps.dwellVar || 0;
+      this._patrolSpeedPct = ps.speedPct || 100;
+      this._patrolSpeedBase = typeof ps.speedBase === "number" ? ps.speedBase : null;
+      this._patrolResumeAfter = ps.resumeAfter || 0;
+      this._patrolMemory = ps.memory || null;
+      this._patrolResumeTimer = ps.resumeTimer || 0;
+      this._patrolTurnAtChars = ps.turnAtChars !== false;
+      this._patrolTurnDanger = ps.turnDanger !== false;
       this.currentWaypoint = o.currentWaypoint;
       this.hasPath = o.hasPath;
       this.timeAtWaypoint = o.timeAtWaypoint;
@@ -583,6 +762,8 @@ export default function (parentClass) {
       this.obstacleMapSource = o.obstacleMapSource;
       this.gridWidth = o.gridWidth;
       this.gridHeight = o.gridHeight;
+      this.gridOriginX = o.gridOriginX || 0;
+      this.gridOriginY = o.gridOriginY || 0;
       this.slopeMap = o.slopeMap ? new Uint8Array(o.slopeMap) : null;
       this.hazardMap = o.hazardMap ? new Float32Array(o.hazardMap) : null;
       this.coyoteTimer = o.coyoteTimer;
@@ -606,6 +787,16 @@ export default function (parentClass) {
       globalNavManager.hookLayoutEnd(this.instance.runtime);
       const restoreStores = o.hasMapStores !== false;
       if (restoreStores) {
+        // How this map rebuilds itself from objects (scan + slope recipes)
+        this._restoreMapRecipes(o.navRecipes, loadNavKey);
+        // The moving-solid watcher restarts from the loaded instances: its old
+        // records point at instances the load replaced.
+        globalNavManager.movers.delete(loadNavKey);
+        // A scan job or patch queued before the load would overwrite the
+        // loaded map when it finished
+        globalNavManager.scanJobs.delete(loadNavKey);
+        globalNavManager.pendingPatches.delete(loadNavKey);
+        if (o.pendingRefresh && this.obstacleMap && this._getScanRule()) this._startScanJob(null);
         const hazardsMap = globalNavManager.getSharedHazards(loadNavKey);
         hazardsMap.clear();
         if (o.hazards) {
@@ -638,6 +829,8 @@ export default function (parentClass) {
       this.portalTraverseSpeed = o.portalTraverseSpeed || 0;
       this.platformWasEnabled = o.platformWasEnabled !== undefined ? o.platformWasEnabled : true;
       this.currentPortalId = o.currentPortalId || 0;
+      this._ride = o.ride || null;
+      if (this.portalState === "riding" && !this._ride) this.portalState = "none";
 
       // Restore elevator groups (shared per map, see above)
       if (restoreStores) {
@@ -726,6 +919,8 @@ export default function (parentClass) {
         title: prefix + " - Settings",
         properties: [
           { name: "$navEnabled", value: this.navEnabled },
+          { name: "$multiplayer", value: this.multiplayerMode === "everywhere" ? "runs everywhere"
+              : (this._peerPaused ? "paused (peer)" : "host only") },
           { name: "$cellSize", value: this.cellSize },
           { name: "$maxJumpHeight", value: Math.round(this.maxJumpHeight) },
           { name: "$maxJumpDistance", value: Math.round(this.maxJumpDistance) },
@@ -859,7 +1054,34 @@ export default function (parentClass) {
       return value || keys[0];
     }
 
-    /** Logs a debug message to the console (only when debug mode is enabled). */
+    /** Logs a debug message to the console (only when the Enable Debug
+     *  Logging property is on).
+     *
+     *  Log lines worth looking for:
+     *    "Obstacle map rebuilt (time-sliced)" / "Graph generated"
+     *        full rebuild (startup, Regenerate obstacle map)
+     *    "Obstacles moved, appeared or disappeared: regenerating ..."
+     *        the obstacle watcher saw a change
+     *    "Obstacle region rebuilt" / "Graph patch" / "Graph patched"
+     *        a local update and its timing
+     *    "Navigation map is now WxH cells from (x, y)"
+     *        the grid grew (streaming) or the navigation area moved
+     *    "Moving platform N: ride link ..." / "Ride: wait -> board after Ns" / "Ride aborted: ..."
+     *        ride links, and why a ride was abandoned
+     *    "Route patrol started" / "Route patrol stopped"
+     *    "Add hazard from object: ..." / "Hazard costs: ..."
+     *        hazards registered, and how many tiles cost more after a
+     *        re-bake (no "Hazard costs" line = the map has no hazards)
+     *    "Same floor, but a gap, wall or hazard is in the way: searching"
+     *        the direct-walk shortcut was skipped (the search may jump it)
+     *
+     *  Other tools: the Construct debugger shows this behavior's state on each
+     *  character; Log graph stats prints node / connection / slope / portal /
+     *  hazard counts; the Debug expressions inspect single nodes and links.
+     *  A character will not path somewhere: check PathFailReason, then whether
+     *  a node exists there, then that node's connections. The map looks wrong
+     *  after a change: if the watcher line is missing, the change is one the
+     *  watcher cannot see (call Regenerate region over the area). */
     _log(...args) {
       if (this.enableDebug) {
         console.log(`[${name}]`, ...args);
@@ -882,15 +1104,22 @@ export default function (parentClass) {
 
     /** Converts world pixel coordinates to grid cell coordinates. */
     worldToGrid(x, y) {
-      const gx = Math.floor(x / this.cellSize);
-      const gy = Math.floor(y / this.cellSize);
+      const gx = Math.floor((x - this.gridOriginX) / this.cellSize);
+      const gy = Math.floor((y - this.gridOriginY) / this.cellSize);
       return { gx, gy };
     }
 
+    /** World X of a grid column's left edge / world Y of a grid row's top edge. */
+    _cellLeft(gx) { return this.gridOriginX + gx * this.cellSize; }
+    _cellTop(gy) { return this.gridOriginY + gy * this.cellSize; }
+    /** Grid column / row containing a world X / Y. */
+    _toGX(x) { return Math.floor((x - this.gridOriginX) / this.cellSize); }
+    _toGY(y) { return Math.floor((y - this.gridOriginY) / this.cellSize); }
+
     /** Converts grid cell coordinates to world pixel coordinates (center of cell). */
     gridToWorld(gx, gy) {
-      const x = gx * this.cellSize + this.cellSize / 2;
-      const y = gy * this.cellSize + this.cellSize / 2;
+      const x = this.gridOriginX + gx * this.cellSize + this.cellSize / 2;
+      const y = this.gridOriginY + gy * this.cellSize + this.cellSize / 2;
       return { x, y };
     }
 
@@ -1048,7 +1277,8 @@ export default function (parentClass) {
     pathfindingMethods,
     movementMethods,
     portalMethods,
-    hazardMethods
+    hazardMethods,
+    movingPlatformMethods
   );
 
   return PlatformerPathfindingInstance;

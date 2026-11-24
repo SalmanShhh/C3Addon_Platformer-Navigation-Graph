@@ -3,6 +3,18 @@ import { globalNavManager } from "./navigationManager.js";
 // Movement execution: path following, waypoint arrival, jump/fall/walk/coyote
 // handlers, jump-toward, and movement-related settings and expressions.
 // Mixed into the instance class prototype — `this` is the behavior instance.
+//
+// Patrols (one of them runs per tick when the character has no path):
+//   - Platform patrol (_updatePatrol): walks between the platform's ends,
+//     found by following walk connections (_findPatrolBound). Turns at ledges,
+//     walls, danger ahead (_patrolDangerAhead) and other characters
+//     (_patrolBlockedByAgent). Re-measures its ends when graphVersion changes.
+//   - Route patrol (_updatePatrolRoute, state in this._route): phases go,
+//     moving, dwell, retry. Each leg is a normal Find path, so it uses every
+//     move type (jumps, falls, portals, rides).
+//   - Settings (aceSetPatrolSetting / aceSetPatrolOption): dwell variation,
+//     speed (scales the Platform max speed only while walking a patrol), and
+//     resume after (_patrolMemory, restarted by _tickPatrolResume).
 export default {
   /** Main path-following loop: checks waypoint arrival, handles stuck detection, converts actions, and dispatches movement. */
   _followPath(dt) {
@@ -47,6 +59,8 @@ export default {
       }
       if (this.portalState === "traversing") {
         this._updatePortalTraverse();
+      } else if (this.portalState === "riding") {
+        this._updateRide(dt);
       }
       return;
     }
@@ -222,6 +236,10 @@ export default {
       this._wpWasAirborne = false;
       this._arcTraceState = 0;
       this._momentumArmed = false;
+      this._moverWaitTime = 0;
+      // _crossObs (measured open windows) is kept: it belongs to the obstacle,
+      // and paths near one have a waypoint per tile, reached while waiting
+      this._crossWait = 0;
       this._trigger("OnWaypointReached");
       return;
     }
@@ -238,7 +256,7 @@ export default {
       const isGroundAction = waypoint.action.includes("walk") ||
         waypoint.action === "fall_through" || waypoint.action === "start";
       if (
-        dist > expectedMaxDist &&
+        this._driftFromPath(waypoint) > expectedMaxDist &&
         isGroundAction &&
         this.platformBehavior &&
         this.platformBehavior.isOnFloor
@@ -288,23 +306,14 @@ export default {
         const yDist = Math.abs(this.instance.y - waypoint.y);
         if (yDist < this.cellSize * 0.75) {
           const walkDir = waypoint.x < this.instance.x ? "left" : "right";
-          // Don't convert to walk if blocked by a wall or if there's a gap between here and the waypoint
-          let canWalkDirectly = true;
+          // Walk it instead only when that is a plain walk: no wall, gap or
+          // hazard between (a jump over spikes must stay a jump)
+          let canWalkDirectly = false;
           try {
-            if (this.platformBehavior.isByWall(walkDir)) {
-              canWalkDirectly = false;
-            } else {
-              // Check for continuous ground between character and waypoint
+            if (!this.platformBehavior.isByWall(walkDir)) {
               const charGrid = this.worldToGrid(this.instance.x, this.instance.y);
               const wpGrid = this.worldToGrid(waypoint.x, waypoint.y);
-              const minGx = Math.min(charGrid.gx, wpGrid.gx);
-              const maxGx = Math.max(charGrid.gx, wpGrid.gx);
-              for (let gx = minGx; gx <= maxGx; gx++) {
-                if (!this._isGroundAt(gx, charGrid.gy + 1) && !this._isSlopeWalkable(gx, charGrid.gy)) {
-                  canWalkDirectly = false;
-                  break;
-                }
-              }
+              canWalkDirectly = this._isPlainWalk(charGrid.gy, charGrid.gx, wpGrid.gx);
             }
           } catch (e) {}
           if (canWalkDirectly) {
@@ -317,8 +326,40 @@ export default {
     }
   },
 
+  /** X where the current stretch of walking ends: the last of the following
+   *  waypoints that keep walking the same way. Paths keep a waypoint per tile
+   *  near hazards and moving obstacles, so the next waypoint alone can stop
+   *  short of an obstacle the walk is about to cross. */
+  _walkRunEndX() {
+    const path = this.currentPath;
+    let i = this.currentWaypoint;
+    const action = path[i].action;
+    while (i + 1 < path.length && path[i + 1].action === action) i++;
+    return path[i].x;
+  },
+
+  /** How far the character is from the path it is following: its distance to
+   *  the segment between the previous waypoint and the current one. This is
+   *  what Re-Path Threshold measures ("tiles of drift from the path").
+   *
+   *  The distance to the next waypoint alone is not drift: smoothed walks put
+   *  waypoints 20+ tiles apart, so that read every long walk as drift and
+   *  re-pathed every half second (wasted searches), and a character waiting
+   *  at a crusher re-pathed until the loop detector dropped its path. */
+  _driftFromPath(waypoint) {
+    const px = this.instance.x, py = this.instance.y;
+    const prev = this.currentWaypoint > 0 ? this.currentPath[this.currentWaypoint - 1] : null;
+    if (!prev) return this.distance(px, py, waypoint.x, waypoint.y);
+    const ax = prev.x, ay = prev.y;
+    const dx = waypoint.x - ax, dy = waypoint.y - ay;
+    const len2 = dx * dx + dy * dy;
+    let t = len2 > 0 ? ((px - ax) * dx + (py - ay) * dy) / len2 : 0;
+    t = Math.max(0, Math.min(1, t));
+    return this.distance(px, py, ax + t * dx, ay + t * dy);
+  },
+
   /** Re-calculates the path to the current target; detects re-path loops and triggers OnWaypointStuck if stuck. */
-  _rePath() {
+  _rePath(fromMapChange = false) {
     if (this.portalState !== "none") return;
     // Remove any queued request — re-paths always run immediately (edge case #4)
     globalNavManager.removeQueuedRequest(this);
@@ -336,7 +377,9 @@ export default {
       this.rePathCount = 0;
     }
 
-    this.rePathCount++;
+    // Re-paths caused by the LEVEL changing (graph patches) are not the
+    // character failing, so they do not count toward loop detection.
+    if (!fromMapChange) this.rePathCount++;
 
     if (this.rePathCount >= 5) {
       // Re-pathed 5 times without getting closer — stuck in a loop
@@ -398,6 +441,16 @@ export default {
 
       const movingLeft = action === "walk_left";
       const wallSide = movingLeft ? "left" : "right";
+
+      // A moving obstacle (crusher, sliding block) is in the way. The route is
+      // still right, it is only blocked for now: stand still and wait for it
+      // to move, instead of pushing into it (which used to set off the
+      // stuck-walk hop below, even with Walk Only).
+      if (this._waitForMovingObstacle(wallSide)) return;
+      // About to walk into a moving obstacle's danger area: wait at its edge
+      // until it will stay out of the way long enough to get across
+      // (movingPlatforms.js, crossing timing).
+      if (this._waitForCrossingWindow(wallSide, this._walkRunEndX())) return;
 
       try {
         if (
@@ -467,6 +520,62 @@ export default {
       this._handleFallAction(targetX);
       return;
     }
+  },
+
+  /** Whether a walk is blocked by a moving obstacle, and if so, waits.
+   *
+   *  "Moving obstacle" = the character is grounded and pressed against a wall
+   *  that is NOT in the obstacle map. The watcher (movingPlatforms.js) keeps
+   *  moving Solid objects out of the map, so a wall that only Platform
+   *  physics can see is one of them (or a brand-new obstacle the watcher has
+   *  not scanned yet, which turns into a re-path a few frames later).
+   *
+   *  While waiting, the waypoint timer is held so the wait does not count as
+   *  being stuck. After 3 x Max Waypoint Time the character gives up and
+   *  re-paths, so an obstacle that stops in the way for good
+   *  cannot hold it forever. */
+  _waitForMovingObstacle(direction) {
+    const pb = this.platformBehavior;
+    let blocked = false;
+    try {
+      // Cheapest test first: a character that is still moving is not blocked,
+      // so the wall query (a collision test) only runs once it has stopped.
+      blocked = Math.abs(pb.vectorX) < 1 && pb.isOnFloor && pb.isByWall(direction) &&
+        !this._staticWallAhead(direction);
+    } catch (e) {}
+    if (!blocked) {
+      this._moverWaitTime = 0;
+      return false;
+    }
+    const dt = this.instance.dt;
+    if (!this._moverWaitTime) this._log(`Waiting for a moving obstacle to clear (${direction})`);
+    this._moverWaitTime = (this._moverWaitTime || 0) + dt;
+    if (this._moverWaitTime > this.maxWaypointTime * 3) {
+      this._moverWaitTime = 0;
+      this._log("Moving obstacle did not clear: repathing");
+      this._rePath();
+      return true;
+    }
+    this.timeAtWaypoint = Math.max(0, this.timeAtWaypoint - dt); // waiting is not stuck
+    this._walkStuckCount = 0;
+    return true;
+  },
+
+  /** Whether the obstacle map has a solid or slope cell right beside the
+   *  character's bounding box in the given direction (any row the body
+   *  covers). Outside the grid counts as a static wall. */
+  _staticWallAhead(direction) {
+    if (!this.obstacleMap) return true;
+    const bb = this.instance.getBoundingBox();
+    const gx = this._toGX(direction === "right" ? bb.right + 1 : bb.left - 1);
+    if (gx < 0 || gx >= this.gridWidth) return true;
+    const gyTop = Math.max(0, this._toGY(bb.top));
+    const gyBottom = Math.min(this.gridHeight - 1, this._toGY(bb.bottom - 1));
+    for (let gy = gyTop; gy <= gyBottom; gy++) {
+      const i = gy * this.gridWidth + gx;
+      if (this.obstacleMap[i] === 1 || (this.slopeMap && this.slopeMap[i] > 0)) return true;
+    }
+    return false;
   },
 
   /** Applies horizontal simulateControl toward a walk waypoint; handles ledge restriction and arrival centering. */
@@ -1029,7 +1138,7 @@ export default {
 
   /** Immediately jump toward a target position from the current position. No pathfinding involved. */
   aceJumpTowardPosition(targetX, targetY) {
-    if (!this.navEnabled) return;
+    if (!this._isNavActive()) return;
     this._ensureInitialized(); // acquires the Platform behavior pre-first-tick
     if (!this.platformBehavior) return;
 
@@ -1071,57 +1180,43 @@ export default {
   aceSetBehaviorEnabled(enabled) {
     if (this.navEnabled === enabled) return;
     this.navEnabled = enabled;
-    if (!enabled) {
-      this._cancelGraphBuild();
-      globalNavManager.removeQueuedRequest(this);
-      // A disabled character shouldn't hold a reserved arrival spot.
-      globalNavManager.releaseGoalClaim(this);
-    }
+    if (!enabled) this._releaseNavWork();
   },
 
-  /** Returns whether this behavior is currently enabled. */
+  /** Returns whether this behavior is currently enabled (the user's switch;
+   *  a multiplayer peer pause does not change it). */
   aceIsBehaviorEnabled() {
     return this.navEnabled;
   },
 
-  /** Enables or disables automatic platform control (simulating input to follow the path). */
-  aceSetAutoControl(enabled) {
-    this.autoControl = enabled;
+  /** Hands off shared work when navigation stops here (Set enabled "Disabled",
+   *  or paused as a multiplayer peer): cancels an owned graph build so another
+   *  instance can take over, drops the queued path request, and frees the
+   *  reserved arrival spot. Path and settings are kept for a resume. */
+  _releaseNavWork() {
+    this._cancelGraphBuild();
+    globalNavManager.removeQueuedRequest(this);
+    globalNavManager.releaseGoalClaim(this);
   },
 
-  /** Sets the coyote time duration in seconds (grace period for jumping after leaving a ledge). */
-  aceSetCoyoteTime(seconds) {
-    this.coyoteTime = seconds;
+  /** Whether navigation actually runs on this machine: the user's Enabled
+   *  switch is on and this is not a paused multiplayer peer. Use this (not
+   *  navEnabled) wherever work is gated. */
+  _isNavActive() {
+    return this.navEnabled && !this._isPausedAsPeer();
   },
 
-  /** Enables or disables strict jump positioning (careful tile alignment before jumps/falls). */
-  aceSetStrictJumpPositioning(enabled) {
-    this.strictPositioning = enabled;
+  /** Multiplayer: paused because this machine is a peer in a room (the host
+   *  runs the AI and syncs positions to peers). "Run everywhere" opts out,
+   *  e.g. for local-only characters that are never synced. */
+  _isPausedAsPeer() {
+    return this.multiplayerMode !== "everywhere" &&
+      globalNavManager.isMultiplayerPeer(this.instance.runtime);
   },
 
-  /** Enables or disables ledge restriction (prevents the character from walking off platform edges). */
-  aceSetLedgeRestriction(enabled) {
-    this.ledgeRestriction = enabled;
-  },
-
-  /** Sets the ledge leniency distance in pixels (how close to a ledge before restriction kicks in). */
-  aceSetLedgeLeniency(pixels) {
-    this.ledgeLeniency = pixels;
-  },
-
-  /** Sets the re-path threshold in tiles (minimum deviation before automatically recalculating the path). */
-  aceSetRePathThreshold(tiles) {
-    this.rePathThreshold = tiles;
-  },
-
-  /** Sets the re-path cooldown duration in seconds (minimum time between re-path attempts). */
-  aceSetRePathCooldown(seconds) {
-    this.rePathCooldownDuration = Math.max(0, seconds);
-  },
-
-  /** Enables or disables multi-agent avoidance (agents try not to overlap each other). */
-  aceSetMultiAgentAvoidance(enabled) {
-    this.multiAgentAvoidance = enabled;
+  /** Set multiplayer mode: "host_only" (automatic pause on peers) or "everywhere". */
+  aceSetMultiplayerMode(mode) {
+    this.multiplayerMode = mode === "everywhere" ? "everywhere" : "host_only";
   },
 
   /** Enables or disables crowd arrivals (goal reservation). */
@@ -1236,23 +1331,206 @@ export default {
     const toRight = Math.abs(this.instance.x - this._patrolRightX);
     this._patrolDir = toRight >= toLeft ? 1 : -1;
     this._patrolDwellTimer = 0;
+    this._patrolBumpCooldown = 0;
+    this._patrolGraphVersion = globalNavManager.graphVersion.get(this._getNavKey()) || 0;
+    this._route = null; // one patrol at a time
+    this._patrolMemory = null;
     this._patrolActive = true;
     this._log(`Patrol started: ${Math.round(this._patrolLeftX)} to ${Math.round(this._patrolRightX)}, dwell ${this._patrolDwell}s`);
   },
 
-  /** Stops the patrol (the character simply stands). */
+  /** Stops the patrol, platform or route (the character simply stands). */
   aceStopPatrol() {
     this._patrolActive = false;
+    this._patrolMemory = null;
+    if (this._route) {
+      this._route = null;
+      if (this.hasPath) this.aceClearPath(); // stop walking to the next marker
+    }
   },
 
-  /** Returns whether a patrol is active. */
+  /** Returns whether a patrol (platform or route) is active. */
   aceIsPatrolling() {
-    return !!this._patrolActive;
+    return !!this._patrolActive || !!this._route;
   },
 
-  /** Returns the patrol walk direction: -1 left, 1 right, 0 when not patrolling. */
+  /** Returns the patrol walk direction: -1 left, 1 right, 0 when not patrolling
+   *  or waiting. On a route it follows the current path step. */
   aceGetPatrolDirection() {
+    const r = this._route;
+    if (r) {
+      if (r.phase !== "moving" || !this.hasPath) return 0;
+      const wp = this.currentPath[this.currentWaypoint];
+      if (!wp) return 0;
+      const dx = wp.x - this.instance.x;
+      return Math.abs(dx) < 1 ? 0 : Math.sign(dx);
+    }
     return this._patrolActive && this._patrolDwellTimer <= 0 ? this._patrolDir : 0;
+  },
+
+  // ---------------------------------------------------------------------------
+  // Route patrol ("Start patrol between objects"): visit marker objects in
+  // order, pathing between them with every move the graph knows (walks,
+  // jumps, falls, portals, moving-platform rides), waiting at each. Reuses the
+  // patrol triggers: On patrol end reached = reached a marker; the dwell
+  // triggers bracket the wait. State lives in this._route (null = inactive).
+  // ---------------------------------------------------------------------------
+
+  /** Starts a route patrol over the picked instances of markerClass, in
+   *  instance order. order: "ping_pong" (1,2,3,2,1...) or "loop" (1,2,3,1...).
+   *  Begins at the nearest marker. Markers are followed live (they may move);
+   *  destroyed ones are dropped. Any Find path call ends it. */
+  aceStartPatrolBetweenObjects(markerClass, order, dwellSeconds) {
+    this._ensureGraphReadyNow(); // safe in On start of layout
+    if (!this.platformBehavior || !markerClass) return;
+    let insts;
+    try { insts = markerClass.getPickedInstances(); } catch (e) { return; }
+    insts = insts.filter(i => i !== this.instance);
+    if (insts.length === 0) {
+      this._warn("Start patrol between objects: no marker instances are picked");
+      return;
+    }
+    this._patrolMemory = null; // a fresh command replaces any remembered patrol
+    this._startRoute(insts.map(m => m.uid), order === "loop", dwellSeconds);
+  },
+
+  /** Starts a route over marker UIDs (shared by the action and "Resume after"),
+   *  beginning at the nearest marker that still exists. */
+  _startRoute(uids, loop, dwellSeconds) {
+    const runtime = this.instance.runtime;
+    const live = uids.filter(uid => !!runtime.getInstanceByUid(uid));
+    if (live.length === 0) return false;
+    let nearest = 0, best = Infinity;
+    live.forEach((uid, i) => {
+      const m = runtime.getInstanceByUid(uid);
+      const d = this.distance(this.instance.x, this.instance.y, m.x, m.y);
+      if (d < best) { best = d; nearest = i; }
+    });
+    this._patrolActive = false; // one patrol at a time
+    if (this.hasPath) this.aceClearPath();
+    this._route = {
+      uids: live,
+      loop,
+      dwell: Math.max(0, dwellSeconds || 0),
+      wait: 0,         // this stop's wait (dwell +/- Dwell variation)
+      index: nearest,
+      // Ping-pong heads toward the end of the list with more markers left
+      step: !loop && nearest >= live.length - 1 - nearest && nearest > 0 ? -1 : 1,
+      phase: "go",     // go -> moving -> (dwell) -> go ...; "retry" after a failed path
+      timer: 0,
+      fails: 0,
+      goalX: 0,
+      goalY: 0,
+    };
+    this._log(`Route patrol started: ${live.length} marker(s), ${loop ? "loop" : "ping-pong"}, dwell ${this._route.dwell}s`);
+    return true;
+  },
+
+  /** Moves the route to the next marker index (wrapping or bouncing). */
+  _advanceRoute(r) {
+    const n = r.uids.length;
+    if (n <= 1) return;
+    if (r.loop) {
+      r.index = (r.index + 1) % n;
+    } else {
+      if (r.index + r.step < 0 || r.index + r.step >= n) r.step = -r.step;
+      r.index += r.step;
+    }
+  },
+
+  /** Per-tick route drive (runs while the character has no active path). */
+  _updatePatrolRoute(dt) {
+    const r = this._route;
+    if (!r || this.pathPending) return;
+    const cs = this.cellSize;
+
+    if (r.phase === "moving") {
+      // The path ended: arrived, or stopped (stuck, or as close as it could get)
+      // Near the planned path end, or (when the request was queued and the
+      // end was not known yet) near the marker itself
+      const marker = this.instance.runtime.getInstanceByUid(r.uids[r.index]);
+      const nearGoal = r.goalKnown &&
+        this.distance(this.instance.x, this.instance.y, r.goalX, r.goalY) <= cs * 1.5;
+      const nearMarker = !!marker && Math.abs(marker.x - this.instance.x) <= cs * 1.5 &&
+        Math.abs(marker.y - this.instance.y) <= (this.characterHeight || cs) + cs * 2;
+      const reached = nearGoal || nearMarker;
+      if (!reached) {
+        // Try the same marker again shortly, then move on if it keeps failing
+        r.fails++;
+        r.phase = "retry";
+        r.timer = 0;
+        return;
+      }
+      r.fails = 0;
+      this._trigger("OnPatrolEndReached");
+      if (this._route !== r) return; // the trigger's events changed the patrol
+      r.wait = this._rollPatrolDwell(r.dwell);
+      if (r.wait > 0) {
+        r.phase = "dwell";
+        r.timer = 0;
+        this._trigger("OnPatrolDwellStarted");
+        return;
+      }
+      this._advanceRoute(r);
+      r.phase = "go";
+    }
+
+    if (r.phase === "dwell") {
+      r.timer += dt;
+      if (r.timer < (r.wait ?? r.dwell)) return;
+      this._advanceRoute(r);
+      r.phase = "go";
+      this._trigger("OnPatrolDwellFinished"); // PatrolPointIndex = the NEXT marker here
+      if (this._route !== r) return;
+    }
+
+    if (r.phase === "retry") {
+      r.timer += dt;
+      if (r.timer < 0.5) return;
+      if (r.fails >= 2 * Math.max(1, r.uids.length)) {
+        this._warn("Route patrol stopped: none of the markers can be reached");
+        this._route = null;
+        return;
+      }
+      if (r.fails % 2 === 0) this._advanceRoute(r); // second failure on a marker: skip it
+      r.phase = "go";
+    }
+
+    if (r.phase === "go") {
+      // Drop destroyed markers, keeping the index on the same marker
+      const runtime = this.instance.runtime;
+      const target = r.uids[r.index];
+      r.uids = r.uids.filter(uid => !!runtime.getInstanceByUid(uid));
+      if (r.uids.length === 0) {
+        this._route = null;
+        return;
+      }
+      const keep = r.uids.indexOf(target);
+      r.index = keep >= 0 ? keep : Math.min(r.index, r.uids.length - 1);
+      const marker = runtime.getInstanceByUid(r.uids[r.index]);
+
+      this._routeFindingPath = true;
+      let ok;
+      try {
+        ok = this.aceFindPath(marker.x, marker.y, true, "nearest", "default");
+      } finally {
+        this._routeFindingPath = false;
+      }
+      if (this._route !== r) return; // a failure trigger's events took over
+      if (ok) {
+        r.phase = "moving";
+        // A queued request (Max paths per tick) has no path yet: arrival is
+        // then judged against the marker itself
+        r.goalKnown = !this.pathPending;
+        const end = this.hasPath ? this.currentPath[this.currentPath.length - 1] : null;
+        r.goalX = end ? end.x : this.instance.x; // no path: already standing there
+        r.goalY = end ? end.y : this.instance.y;
+      } else {
+        r.fails++;
+        r.phase = "retry";
+        r.timer = 0;
+      }
+    }
   },
 
   /** Per-tick patrol drive: brake into each end, dwell, turn. */
@@ -1268,6 +1546,16 @@ export default {
           return;
         }
       }
+
+      // The level changed (blocks placed or removed, a drawbridge, a platform
+      // resized): re-measure the platform's ends. Keeps the old ends when the
+      // spot has no node right now.
+      const graphVersion = globalNavManager.graphVersion.get(this.navKey) || 0;
+      if (graphVersion !== this._patrolGraphVersion) {
+        this._patrolGraphVersion = graphVersion;
+        this._discoverPatrolBounds();
+      }
+      if (this._patrolBumpCooldown > 0) this._patrolBumpCooldown -= dt;
 
       // Degenerate bounds (island, or edge margins that crossed on a short
       // platform): walk to the single stand point, then hold there. This is
@@ -1305,7 +1593,15 @@ export default {
       let walled = false;
       try { walled = this.platformBehavior.isByWall(dirName); } catch (e) {}
 
-      if (dist <= this.cellSize * 0.2 || walled) {
+      // Danger ahead (the next step is more hazardous than this one) or another
+      // character in the way counts as the end of the patrol. Danger on BOTH
+      // sides: stand still rather than pace in place.
+      const danger = this._patrolTurnDanger && this._patrolDangerAhead(this._patrolDir);
+      if (danger && this._patrolDangerAhead(-this._patrolDir)) return;
+      const bumped = !danger && this._patrolTurnAtChars && this._patrolBlockedByAgent(this._patrolDir);
+      if (bumped) this._patrolBumpCooldown = 0.75;
+
+      if (dist <= this.cellSize * 0.2 || walled || danger || bumped) {
         // End reached: dwell (or turn immediately with no dwell). The dwell
         // start/finished pair fires only for real waits (dwell > 0); with
         // dwell 0 the turn is instantaneous and end reached IS that moment.
@@ -1313,8 +1609,9 @@ export default {
         // The trigger's user events run synchronously and may end the patrol
         // (Stop patrol, or any Find path): no dwell for a dead patrol.
         if (!this._patrolActive) return;
-        if (this._patrolDwell > 0) {
-          this._patrolDwellTimer = this._patrolDwell;
+        const wait = this._rollPatrolDwell(this._patrolDwell);
+        if (wait > 0) {
+          this._patrolDwellTimer = wait;
           this._trigger("OnPatrolDwellStarted");
         } else {
           this._patrolDir *= -1;
@@ -1331,6 +1628,146 @@ export default {
         this.platformBehavior.simulateControl(dirName);
       }
     } catch (e) {}
+  },
+
+  // ---------------------------------------------------------------------------
+  // Patrol settings (Set patrol setting / Set patrol option). Settings belong
+  // to the character and persist across Start patrol calls.
+  // ---------------------------------------------------------------------------
+
+  /** Set patrol setting: "dwell" (s), "edge_distance" (px), "dwell_variation"
+   *  (s), "speed" (% of max speed), "resume_after" (s, 0 = never). */
+  aceSetPatrolSetting(setting, value) {
+    const v = Number(value) || 0;
+    switch (setting) {
+      case "dwell":
+        this._patrolDwell = Math.max(0, v);
+        if (this._route) this._route.dwell = this._patrolDwell;
+        break;
+      case "edge_distance":
+        this._patrolRange = Math.max(0, v);
+        if (this._patrolActive) this._discoverPatrolBounds(); // re-measure now
+        break;
+      case "dwell_variation":
+        this._patrolDwellVar = Math.max(0, v);
+        break;
+      case "speed":
+        this._patrolSpeedPct = Math.max(1, v);
+        break;
+      case "resume_after":
+        this._patrolResumeAfter = Math.max(0, v);
+        if (this._patrolResumeAfter === 0) this._patrolMemory = null;
+        break;
+    }
+  },
+
+  /** Set patrol option: "turn_at_characters" / "turn_before_danger". */
+  aceSetPatrolOption(option, enabled) {
+    if (option === "turn_at_characters") this._patrolTurnAtChars = !!enabled;
+    else if (option === "turn_before_danger") this._patrolTurnDanger = !!enabled;
+  },
+
+  /** A stop's wait: the dwell time +/- a random amount up to Dwell variation. */
+  _rollPatrolDwell(base) {
+    const v = this._patrolDwellVar || 0;
+    if (v <= 0) return base;
+    return Math.max(0, base + (Math.random() * 2 - 1) * v);
+  },
+
+  /** Remembers a patrol that a Find path is about to cancel, for "Resume after". */
+  _rememberPatrolForResume() {
+    if (!(this._patrolResumeAfter > 0)) return;
+    if (this._route) {
+      this._patrolMemory = { kind: "route", uids: this._route.uids.slice(), loop: this._route.loop, dwell: this._route.dwell };
+    } else if (this._patrolActive) {
+      this._patrolMemory = { kind: "platform", dwell: this._patrolDwell, range: this._patrolRange };
+    }
+    this._patrolResumeTimer = 0;
+  },
+
+  /** "Resume after": once the path that cancelled a patrol has ended and the
+   *  character has stood idle for the set time, the patrol restarts (a platform
+   *  patrol on the platform it is on now, a route from the nearest marker).
+   *  Returns true while a resume is pending (the character counts as busy). */
+  _tickPatrolResume(dt) {
+    const mem = this._patrolMemory;
+    if (!mem || !(this._patrolResumeAfter > 0)) { this._patrolMemory = null; return false; }
+    if (this.portalState !== "none") return true;
+    this._patrolResumeTimer += dt;
+    if (this._patrolResumeTimer < this._patrolResumeAfter) return true;
+    this._patrolMemory = null;
+    if (mem.kind === "route") {
+      this._startRoute(mem.uids, mem.loop, mem.dwell);
+    } else {
+      this.aceStartPatrol(mem.dwell, mem.range);
+    }
+    return false;
+  },
+
+  /** Patrol speed: while patrolling (and, on a route, while WALKING), the
+   *  Platform behavior's max speed is scaled to the Speed setting; it is put
+   *  back for chases, jumps and when the patrol ends. Jumps keep full speed
+   *  because their arcs were planned with it. */
+  _updatePatrolSpeed() {
+    const pb = this.platformBehavior;
+    if (!pb) return;
+    let want = false;
+    if (this._patrolSpeedPct !== 100) {
+      if (this._patrolActive && !this.hasPath) {
+        want = true;
+      } else if (this._route && this._route.phase === "moving" && this.hasPath && this.portalState === "none") {
+        const wp = this.currentPath[this.currentWaypoint];
+        want = !!wp && (wp.action === "walk_left" || wp.action === "walk_right" || wp.action === "start");
+      }
+    }
+    if (want) {
+      if (this._patrolSpeedBase === null) this._patrolSpeedBase = pb.maxSpeed;
+      const target = this._patrolSpeedBase * this._patrolSpeedPct / 100;
+      if (pb.maxSpeed !== target) pb.maxSpeed = target;
+    } else if (this._patrolSpeedBase !== null) {
+      pb.maxSpeed = this._patrolSpeedBase;
+      this._patrolSpeedBase = null;
+    }
+  },
+
+  /** Patrol: true when the next step in direction dir is more dangerous than
+   *  the current spot (hazard tiles, area and tracked hazards, including their
+   *  falloff radius). A guard already standing in danger may walk out of it. */
+  _patrolDangerAhead(dir) {
+    const cs = this.cellSize;
+    const gy = this._toGY(this._patrolY);
+    const halfW = (this.characterWidth || cs) / 2;
+    const ahead = this.getNode(this._toGX(this.instance.x + dir * (halfW + cs * 0.5)), gy);
+    if (!ahead) return false; // no ground there: the ledge and wall checks handle it
+    const here = this.getNode(this._toGX(this.instance.x), gy);
+    const hereCost = here ? here.hazardMultiplier : 1;
+    return ahead.hazardMultiplier > Math.max(1, hereCost) + 0.01;
+  },
+
+  /** Patrol: true when another character on the same map stands in the way,
+   *  just ahead at the same height. Both of two patrollers meeting head-on
+   *  turn around. A short cooldown stops repeated turns while they separate. */
+  _patrolBlockedByAgent(dir) {
+    if (this._patrolBumpCooldown > 0) return false;
+    const subs = globalNavManager.subscribers.get(this.navKey);
+    if (!subs || subs.size < 2) return false;
+    const cs = this.cellSize;
+    const me = this.instance;
+    let mb = null;
+    for (const other of subs) {
+      if (other === this || !other.instance || !other._isNavActive()) continue;
+      const o = other.instance;
+      const dx = o.x - me.x;
+      // Cheap reject before touching bounding boxes
+      if (dx * dir <= 0 || Math.abs(dx) > cs * 4 || Math.abs(o.y - me.y) > cs * 4) continue;
+      let ob;
+      try { ob = o.getBoundingBox(); } catch (e) { continue; }
+      if (!mb) mb = me.getBoundingBox();
+      if (ob.bottom <= mb.top || ob.top >= mb.bottom) continue; // different height
+      const gap = dir > 0 ? ob.left - mb.right : mb.left - ob.right;
+      if (gap <= cs * 0.25) return true;
+    }
+    return false;
   },
 
   /** Sets how long a character keeps trying to separate before giving up. */

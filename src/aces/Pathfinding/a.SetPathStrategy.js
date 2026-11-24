@@ -6,7 +6,7 @@ export const config = {
     {
       id: "strategy",
       name: "Strategy",
-      desc: "The path selection strategy preset",
+      desc: "Balanced: weighs distance and difficulty. Shortest Distance: the shortest route. Safest Route: short hops over long leaps. Ground-Hugging: walks whenever it can. No Falling: never drops down. Walk Only: never leaves its platform.",
       type: "combo",
       initialValue: "balanced",
       items: [

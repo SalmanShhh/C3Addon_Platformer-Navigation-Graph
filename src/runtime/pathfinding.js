@@ -69,31 +69,17 @@ export default {
       }
     }
 
-    // Early exit: same ground level, continuous walkable ground, no gaps/walls
-    const sameLevel = Math.abs(startGrid.gy - goalGrid.gy) <= 1;
-    if (sameLevel && startNode && goalNode) {
-      const walkDir = goalGrid.gx > startGrid.gx ? 1 : -1;
-      let canDirectWalk = true;
-      const checkGy = startGrid.gy;
-      for (let gx = startGrid.gx; gx !== goalGrid.gx + walkDir; gx += walkDir) {
-        if (!this._isGroundAt(gx, checkGy + 1) && !this._isSlopeWalkable(gx, checkGy)) {
-          canDirectWalk = false;
-          break;
-        }
-        const cellVal = this.obstacleMap[checkGy * this.gridWidth + gx];
-        if (cellVal === 1 || cellVal === 3) {
-          canDirectWalk = false;
-          break;
-        }
-      }
-      if (canDirectWalk) {
-        const action = walkDir > 0 ? "walk_right" : "walk_left";
+    // Early exit: same floor and a plain walk between (no gap, wall or hazard)
+    if (Math.abs(startGrid.gy - goalGrid.gy) <= 1) {
+      if (this._isPlainWalk(startGrid.gy, startGrid.gx, goalGrid.gx)) {
+        const action = goalGrid.gx > startGrid.gx ? "walk_right" : "walk_left";
         this._log(`Early exit: direct walk ${action}`);
         return [
           { x: startNode.x, y: startNode.y, node: startNode, action: "start", requiresDoubleJump: false, requiresMomentum: false, peakHeight: 0 },
           { x: goalNode.x, y: goalNode.y, node: goalNode, action, requiresDoubleJump: false, requiresMomentum: false, peakHeight: 0 }
         ];
       }
+      this._log("Same floor, but a gap, wall or hazard is in the way: searching");
     }
 
     // Log start/goal node connection summary
@@ -207,7 +193,7 @@ export default {
     let nodesExplored = 0;
 
     const agentHash = this.multiAgentAvoidance
-      ? globalNavManager.getAgentSpatialHash(this.navKey, this.cellSize) : null;
+      ? globalNavManager.getAgentSpatialHash(this.navKey, this.cellSize, this.instance.runtime) : null;
 
     while (openSet.size > 0) {
       if (nodesExplored >= this.maxSearchNodes) {
@@ -237,11 +223,7 @@ export default {
         // Only): shared with the Nearest fallback and reversed-path mapping.
         if (!this._isEdgeAllowed(conn, current, neighbor, isReverse)) continue;
 
-        const hazardMultiplier = conn.ignoreHazards
-          ? 1.0
-          : this.enableHazards
-          ? neighbor.hazardMultiplier || 1.0
-          : 1.0;
+        const hazardMultiplier = conn.ignoreHazards ? 1.0 : neighbor.hazardMultiplier || 1.0;
 
         let agentAvoidanceCost = 1.0;
         if (agentHash) {
@@ -334,15 +316,44 @@ export default {
       if (!conn) {
         return null;
       }
-      reversed[i + 1].action = conn.action;
-      reversed[i + 1].portalId = conn.portalId || null;
-      reversed[i + 1].speed = conn.speed || 0;
-      reversed[i + 1].peakHeight = conn.peakHeight || 0;
-      reversed[i + 1].requiresDoubleJump = conn.requiresDoubleJump || false;
-      reversed[i + 1].requiresMomentum = conn.requiresMomentum || false;
+      reversed[i + 1] = this._withConnection(reversed[i + 1], conn);
     }
     reversed[0].action = "start";
     return reversed;
+  },
+
+  /** Whether a character can simply walk along row gy between two columns:
+   *  ground (or a walkable slope) under every cell, nothing blocking, and no
+   *  hazard cost. Shared by findPath's same-floor shortcut and the executor's
+   *  jump-to-walk shortcut, so neither can turn a jump the search chose to
+   *  clear a hazard into a walk through it. */
+  _isPlainWalk(gy, gxA, gxB) {
+    const lo = Math.min(gxA, gxB), hi = Math.max(gxA, gxB);
+    if (lo < 0 || hi >= this.gridWidth || gy < 0 || gy >= this.gridHeight) return false;
+    for (let gx = lo; gx <= hi; gx++) {
+      if (!this._isGroundAt(gx, gy + 1) && !this._isSlopeWalkable(gx, gy)) return false;
+      const cell = this.obstacleMap[gy * this.gridWidth + gx];
+      if (cell === 1 || cell === 3) return false;
+      const node = this.getNode(gx, gy);
+      if (node && node.hazardMultiplier > 1) return false;
+    }
+    return true;
+  },
+
+  /** A copy of a waypoint relabelled with the connection that actually
+   *  reaches it. A copy, never an edit: candidate paths share waypoint
+   *  objects, and relabelling one in place silently changed the others (a
+   *  jump over spikes became a walk in the forward path). */
+  _withConnection(wp, conn) {
+    return {
+      ...wp,
+      action: conn.action,
+      portalId: conn.portalId || null,
+      speed: conn.speed || 0,
+      peakHeight: conn.peakHeight || 0,
+      requiresDoubleJump: conn.requiresDoubleJump || false,
+      requiresMomentum: conn.requiresMomentum || false,
+    };
   },
 
   /** Validate that every consecutive waypoint pair has a valid graph connection.
@@ -362,14 +373,7 @@ export default {
       }
       // Fix action only if the path's action doesn't exist for this edge
       // (can happen when _combinePaths merges at a common node)
-      if (path[i + 1].action !== conn.action) {
-        path[i + 1].action = conn.action;
-        path[i + 1].portalId = conn.portalId || null;
-        path[i + 1].speed = conn.speed || 0;
-        path[i + 1].peakHeight = conn.peakHeight || 0;
-        path[i + 1].requiresDoubleJump = conn.requiresDoubleJump || false;
-        path[i + 1].requiresMomentum = conn.requiresMomentum || false;
-      }
+      if (path[i + 1].action !== conn.action) path[i + 1] = this._withConnection(path[i + 1], conn);
     }
     return path;
   },
@@ -403,11 +407,18 @@ export default {
     // non-double-jump instances sharing the graph.
     if (conn.requiresDoubleJump && !this.platformProps.isDoubleJumpEnabled) return false;
 
+    // No character stands where its body would touch a standing hazard
+    // (isHazard, see _markHazardFootprint): it jumps over the hazard, or
+    // stops in front of it. One already touching one may walk out. Moving
+    // hazards are not marked: characters time their crossing instead.
+    if (to.isHazard && !from.isHazard) return false;
+
     // Walk edges (slopes included) and portals are grounded: always legal
     // under the rules below, so restricted characters use ramps and lifts.
     const isGroundedEdge =
       conn.action === "walk_left" || conn.action === "walk_right" ||
-      conn.action === "portal_instant" || conn.action === "portal_gradual";
+      conn.action === "portal_instant" || conn.action === "portal_gradual" ||
+      conn.action === "portal_ride";
     if (isGroundedEdge) return true;
 
     // Walk Only: no jumps and no falls in ANY direction.
@@ -426,29 +437,16 @@ export default {
     return !(dropLimit >= 0 && forwardDrop > dropLimit);
   },
 
-  /** True when a per-character rule removes edges from the search (Walk Only,
-   *  No Falling, or a drop limit), so off-limits targets are routine. */
+  /** True when rules remove edges from the search (Walk Only, No Falling, a
+   *  drop limit, or standing hazards on the map), so off-limits targets are
+   *  routine. */
   _isTraversalRestricted() {
     return this.pathStrategy === "walk_only" || this.pathStrategy === "no_drop" ||
-      this.maxTraversalDrop >= 0;
+      this.maxTraversalDrop >= 0 || globalNavManager.hazardBlockedMaps.has(this.navKey);
   },
 
-  /** Sums up the Euclidean distance cost of all segments in a path. */
-  _pathCost(path) {
-    let cost = 0;
-    for (let i = 1; i < path.length; i++) {
-      cost += this.distance(path[i - 1].x, path[i - 1].y, path[i].x, path[i].y);
-    }
-    return cost;
-  },
-
-  /** Safest strategy: extra multiplier (>= 1.0) applied to a fall connection's
-   *  cost based on how FAR DOWN it goes. Per-pixel pricing alone makes one
-   *  6-tile drop cost the same as three 2-tile drops, so Safest had no reason
-   *  to step down via intermediate ledges. Used identically by the A* search
-   *  (_strategyEdgeFactor) and candidate selection (_strategyCost).
-   *  dropPx: vertical drop of the connection in pixels (<= 0 means not a drop). */
-  /** Flat per-connection cost added during the A* search, by strategy.
+  /** Flat per-connection cost, by strategy, added by the A* search and by
+   *  candidate selection (_strategyCost).
    *  Shortest: a stop penalty on each jump — every landing costs real time
    *  (brake, re-center, re-launch), so one long jump beats a chain of short
    *  hops covering the same pixels. This is what makes "Shortest Distance"
@@ -482,6 +480,12 @@ export default {
     return Math.min(6, 1 + ref * ref);
   },
 
+  /** Safest strategy: extra multiplier (>= 1.0) applied to a fall connection's
+   *  cost based on how FAR DOWN it goes. Per-pixel pricing alone makes one
+   *  6-tile drop cost the same as three 2-tile drops, so Safest had no reason
+   *  to step down via intermediate ledges. Used identically by the A* search
+   *  (_strategyEdgeFactor) and candidate selection (_strategyCost).
+   *  dropPx: vertical drop of the connection in pixels (<= 0 means not a drop). */
   _safestFallRiskMultiplier(dropPx) {
     if (dropPx <= 0) return 1.0;
     // Linear risk growth with a 3-tile reference drop: a 3-tile fall costs
@@ -543,69 +547,53 @@ export default {
     }
   },
 
-  /** Evaluates a path's cost using the active strategy (balanced, shortest, safest, or simplest). */
+  /** Evaluates a path's cost using the active strategy, weighted like the
+   *  search: each step times the hazard cost where it lands, plus the
+   *  strategy's flat per-action fee. Used to choose between the forward,
+   *  reverse and hybrid candidates, so it must count hazards too: otherwise
+   *  a candidate that walks through spikes wins on distance alone. */
   _strategyCost(path) {
-    switch (this.pathStrategy) {
-      case "shortest": {
-        // Match the search: raw distance plus the per-jump stop penalty.
-        let cost = 0;
-        for (let i = 1; i < path.length; i++) {
-          cost += this.distance(path[i - 1].x, path[i - 1].y, path[i].x, path[i].y);
-          if (path[i].action === "jump" || path[i].action === "coyote_jump")
-            cost += this.cellSize * 2;
-        }
-        return cost;
-      }
-
-      case "safest": {
-        let cost = 0;
-        for (let i = 1; i < path.length; i++) {
-          const dist = this.distance(path[i - 1].x, path[i - 1].y, path[i].x, path[i].y);
-          const action = path[i].action;
-          if (action === "jump" || action === "coyote_jump")
-            cost += dist * 2.5 * this._safestJumpRiskMultiplier(dist);
-          else if (action.includes("fall"))
-            cost += dist * 1.5 *
-              this._safestFallRiskMultiplier(path[i].y - path[i - 1].y);
-          else
-            cost += dist * 1.0;
-        }
-        return cost;
-      }
-
-      case "simplest": {
-        // Ground-Hugging: match the search weights (walk 1x; jump 4x + 10
-        // tiles flat; fall 2x + 4 tiles flat).
-        let cost = 0;
-        for (let i = 1; i < path.length; i++) {
-          const dist = this.distance(path[i - 1].x, path[i - 1].y, path[i].x, path[i].y);
-          const action = path[i].action;
-          if (action === "jump" || action === "coyote_jump")
-            cost += dist * 4 + this.cellSize * 10;
-          else if (action.includes("fall"))
-            cost += dist * 2 + this.cellSize * 4;
-          else
-            cost += dist;
-        }
-        return cost;
-      }
-
-      case "balanced":
-      default: {
-        let cost = 0;
-        for (let i = 1; i < path.length; i++) {
-          const dist = this.distance(path[i - 1].x, path[i - 1].y, path[i].x, path[i].y);
-          const action = path[i].action;
-          if (action === "jump" || action === "coyote_jump")
-            cost += dist * 1.5;
-          else if (action.includes("fall"))
-            cost += dist * 1.2;
-          else
-            cost += dist * 1.0;
-        }
-        return cost;
-      }
+    let cost = 0;
+    for (let i = 1; i < path.length; i++) {
+      const from = path[i - 1], to = path[i];
+      cost += this._strategyStepCost(from, to) * this._waypointHazardCost(to) +
+              this._strategyEdgePenalty(to.action);
     }
+    return cost;
+  },
+
+  /** One path step's cost under the active strategy, before hazards and fees. */
+  _strategyStepCost(from, to) {
+    const dist = this.distance(from.x, from.y, to.x, to.y);
+    const jump = to.action === "jump" || to.action === "coyote_jump";
+    const fall = to.action.includes("fall");
+    switch (this.pathStrategy) {
+      case "shortest":
+        return dist; // raw distance (the per-jump stop fee is the flat penalty)
+      case "safest":
+        if (jump) return dist * 2.5 * this._safestJumpRiskMultiplier(dist);
+        if (fall) return dist * 1.5 * this._safestFallRiskMultiplier(to.y - from.y);
+        return dist;
+      case "simplest":
+        // Ground-Hugging: walk 1x, jump 4x, fall 2x (plus flat fees)
+        if (jump) return dist * 4;
+        if (fall) return dist * 2;
+        return dist;
+      default:
+        // balanced, and the edge-filter strategies (No Falling, Walk Only)
+        return dist * (jump ? 1.5 : fall ? 1.2 : 1.0);
+    }
+  },
+
+  /** The hazard cost multiplier the search applied to reaching a waypoint
+   *  (1 when its portal ignores hazards). */
+  _waypointHazardCost(wp) {
+    if (!wp.node) return 1;
+    if (wp.portalId) {
+      const portal = this._getPortalsMap().get(wp.portalId);
+      if (portal && portal.ignoreHazards) return 1;
+    }
+    return wp.node.hazardMultiplier || 1;
   },
 
   /** Selects the best path from forward, reversed, and hybrid combinations through common intermediate nodes. */
@@ -647,15 +635,8 @@ export default {
       // from the reversed path's predecessor, not the forward path's. Look up the
       // actual connection between the last first-half node and the merge point.
       if (fwdIdx > 0 && hybrid1.length > fwdIdx) {
-        const conn = this._findConnectionBetween(hybrid1[fwdIdx - 1].node, hybrid1[fwdIdx].node);
-        if (conn) {
-          hybrid1[fwdIdx].action = conn.action;
-          hybrid1[fwdIdx].portalId = conn.portalId || null;
-          hybrid1[fwdIdx].speed = conn.speed || 0;
-          hybrid1[fwdIdx].peakHeight = conn.peakHeight || 0;
-          hybrid1[fwdIdx].requiresDoubleJump = conn.requiresDoubleJump || false;
-          hybrid1[fwdIdx].requiresMomentum = conn.requiresMomentum || false;
-        }
+        const conn = this._findConnectionBetween(hybrid1[fwdIdx - 1].node, hybrid1[fwdIdx].node, null, true);
+        if (conn) hybrid1[fwdIdx] = this._withConnection(hybrid1[fwdIdx], conn);
       }
       const cost1 = this._strategyCost(hybrid1);
       if (cost1 < bestCost) {
@@ -670,15 +651,8 @@ export default {
       ];
       // Fix merge point action (same issue — forward path's action is for a different predecessor)
       if (revIdx > 0 && hybrid2.length > revIdx) {
-        const conn = this._findConnectionBetween(hybrid2[revIdx - 1].node, hybrid2[revIdx].node);
-        if (conn) {
-          hybrid2[revIdx].action = conn.action;
-          hybrid2[revIdx].portalId = conn.portalId || null;
-          hybrid2[revIdx].speed = conn.speed || 0;
-          hybrid2[revIdx].peakHeight = conn.peakHeight || 0;
-          hybrid2[revIdx].requiresDoubleJump = conn.requiresDoubleJump || false;
-          hybrid2[revIdx].requiresMomentum = conn.requiresMomentum || false;
-        }
+        const conn = this._findConnectionBetween(hybrid2[revIdx - 1].node, hybrid2[revIdx].node, null, true);
+        if (conn) hybrid2[revIdx] = this._withConnection(hybrid2[revIdx], conn);
       }
       const cost2 = this._strategyCost(hybrid2);
       if (cost2 < bestCost) {
@@ -743,7 +717,10 @@ export default {
     return path;
   },
 
-  /** Removes redundant walk waypoints by skipping intermediate nodes that can be walked directly (line-of-sight). */
+  /** Merges runs of walk waypoints into one (fewer stops along a straight
+   *  walk). Only consecutive same-direction walks merge (_continuesWalk):
+   *  merging across a jump once dropped the jump over spikes, or produced a
+   *  walk_right whose target lay to the left (the character walked away). */
   _smoothPath(path) {
     if (path.length <= 2) return path;
 
@@ -752,15 +729,10 @@ export default {
 
     while (i < path.length - 1) {
       let farthest = i + 1;
-
-      for (let j = i + 2; j < path.length; j++) {
-        if (this._canSkipTo(path[i], path[j])) {
-          farthest = j;
-        } else {
-          break;
-        }
+      while (farthest + 1 < path.length &&
+             this._continuesWalk(path[i], path[farthest], path[farthest + 1])) {
+        farthest++;
       }
-
       smoothed.push(path[farthest]);
       i = farthest;
     }
@@ -768,26 +740,22 @@ export default {
     return smoothed;
   },
 
-  /** Returns true if a character can walk directly from waypointA to waypointB without obstacles or gaps. */
-  _canSkipTo(waypointA, waypointB) {
-    if (
-      !waypointA.action.includes("walk") ||
-      !waypointB.action.includes("walk")
-    )
-      return false;
-    if (waypointA.node.gy !== waypointB.node.gy) return false;
+  /** Whether waypoint `next` can be merged into the straight walk from
+   *  `from` that currently ends at `last`: `last` and `next` are walks in
+   *  the same direction (so a jump, fall or portal between is never skipped,
+   *  and a walk never turns back), on from's row, with a plain walk all the
+   *  way (no gap, wall or hazard) and head room for the body. */
+  _continuesWalk(from, last, next) {
+    if (!from.action.includes("walk") || !last.action.includes("walk")) return false;
+    if (next.action !== last.action) return false;
+    if (!from.node || !next.node || from.node.gy !== next.node.gy) return false;
 
-    const startGx = Math.min(waypointA.node.gx, waypointB.node.gx);
-    const endGx = Math.max(waypointA.node.gx, waypointB.node.gx);
-    const gy = waypointA.node.gy;
-
+    const startGx = Math.min(from.node.gx, next.node.gx);
+    const endGx = Math.max(from.node.gx, next.node.gx);
+    const gy = from.node.gy;
+    if (!this._isPlainWalk(gy, startGx, endGx)) return false;
     for (let gx = startGx; gx <= endGx; gx++) {
       if (this.isCellBlocked(gx, gy)) return false;
-      if (
-        !this._isGroundAt(gx, gy + 1) &&
-        !this._isSlopeWalkable(gx, gy)
-      )
-        return false;
     }
 
     const headCells = Math.max(0, Math.ceil(this.characterHeight / this.cellSize) - 1);
@@ -1170,9 +1138,39 @@ export default {
 
   /** Calculates a path from the character's current position to the target coordinates. Supports ground correction and jump-toward mode. */
   aceFindPath(targetX, targetY, correctToGround, mode, strict, isRePath) {
-    if (!this.navEnabled) {
-      this._log("FindPath ignored: behavior is disabled");
+    if (!this._isNavActive()) {
+      this._log(this.navEnabled
+        ? "FindPath ignored: multiplayer peer (the host runs navigation)"
+        : "FindPath ignored: behavior is disabled");
       return false;
+    }
+    // A Find path from events ends a route patrol (like the platform patrol);
+    // the route's own legs, re-paths and queued replays do not.
+    if (this._route && !isRePath && !this._routeFindingPath) {
+      this._rememberPatrolForResume(); // "Resume after" brings it back later
+      this._route = null;
+    }
+    // On a moving platform (boarding, riding, stepping off) or mid gradual
+    // portal, a path planned from the current spot would start from the wrong
+    // place (the platform is not part of the map). Hold the request and run it
+    // the moment the character is back on solid ground: "Every 0.5 seconds:
+    // Find path to player" chase loops keep working through rides.
+    if (this.portalState === "traversing" ||
+        (this.portalState === "riding" && this._ride && this._ride.phase !== "wait")) {
+      this._deferredFindPath = [targetX, targetY, correctToGround, mode, strict];
+      return true;
+    }
+    if (this.portalState === "riding" || this.portalState === "paused") {
+      // Still waiting (on the ledge for a moving platform, or held by Pause at
+      // portal, e.g. waiting for a lift car): the new path simply replaces the
+      // wait. If it uses the same portal, the character is standing at its
+      // entry, so On portal entry fires again right away and the wait restarts
+      // seamlessly. Without this a held character kept the old portal: it
+      // stayed frozen, and Resume portal ran the OLD trip.
+      this._ride = null;
+      this.portalState = "none";
+      this.portalPaused = false;
+      this.portalCurrentWaypoint = null;
     }
     // A fresh path supersedes any pending side-of-object goal. Re-paths and
     // queued replays (isRePath) continue the same journey, so they keep it;
@@ -1185,17 +1183,9 @@ export default {
     this._applyHazardCostsIfDirty();
 
     // Time-slicing: queue if budget exhausted (unless this is a re-path, which always runs immediately)
-    if (globalNavManager.maxPathsPerTick > 0 && !isRePath) {
-      const now = performance.now();
-      if (now - globalNavManager._lastResetTime > 1) {
-        globalNavManager._pathsThisTick = 0;
-        globalNavManager._lastResetTime = now;
-      }
-      if (globalNavManager._pathsThisTick >= globalNavManager.maxPathsPerTick) {
-        globalNavManager.queuePathRequest(this, { targetX, targetY, correctToGround, mode, strict });
-        return true; // request accepted (runs via the queue), not a failure
-      }
-      globalNavManager._pathsThisTick++;
+    if (!isRePath && !globalNavManager.takePathBudget(this.instance.runtime)) {
+      globalNavManager.queuePathRequest(this, { targetX, targetY, correctToGround, mode, strict });
+      return true; // request accepted (runs via the queue), not a failure
     }
 
     this._log(`FindPath to (${Math.round(targetX)},${Math.round(targetY)}) mode=${mode || "reach"} groundCorrect=${correctToGround} strict=${strict || "default"}`);
@@ -1246,8 +1236,10 @@ export default {
 
     if (path) {
       this.currentPath = path;
-      // Skip waypoint 0 (the start node) — the character is already there
-      this.currentWaypoint = path.length > 1 ? 1 : 0;
+      // Skip waypoint 0 (the start node): the character is already there. A
+      // one-waypoint path (already at the closest spot) therefore completes
+      // at once; following its "start" step only ended at the stuck timer.
+      this.currentWaypoint = 1;
       this.hasPath = true;
       this.timeAtWaypoint = 0;
       this.doubleJumpPhase = 0;
@@ -1279,7 +1271,9 @@ export default {
       }
 
       // A successful path takes over movement: an active patrol ends (restart
-      // it from 'On arrived' for the classic chase-and-return guard loop).
+      // it from 'On arrived' for the classic chase-and-return guard loop, or
+      // let Set patrol setting "Resume after" do it).
+      if (this._patrolActive && !this._routeFindingPath) this._rememberPatrolForResume();
       this._patrolActive = false;
 
       // Crowd arrivals: claim the path's actual final node (swaps out any
@@ -1322,6 +1316,8 @@ export default {
     this.portalState = "none";
     this.portalPaused = false;
     this.portalCurrentWaypoint = null;
+    this._ride = null;
+    this._deferredFindPath = null;
   },
 
   /** Stops movement along the current path without clearing the path data. */
@@ -1335,17 +1331,6 @@ export default {
     globalNavManager.removeQueuedRequest(this);
     this.aceClearPath();
     this.aceStopMovement();
-  },
-
-  /** Marks the navigation graph as needing regeneration on the next tick. */
-  aceRegenerateGraph() {
-    this._cancelGraphBuild();
-    this.graphGenerated = false;
-  },
-
-  /** Sets the path selection strategy: "balanced", "shortest", "safest", or "simplest". */
-  aceSetPathStrategy(strategy) {
-    this.pathStrategy = strategy;
   },
 
   /** Returns the active path selection strategy name. */
@@ -1366,11 +1351,6 @@ export default {
   /** Returns the number of path requests waiting in the queue. */
   aceGetPathQueueSize() {
     return globalNavManager.pathQueue.length;
-  },
-
-  /** Returns whether the character currently has an active path to follow. */
-  aceHasPath() {
-    return this.hasPath;
   },
 
   // ============================================================================

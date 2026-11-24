@@ -1,18 +1,18 @@
 export const config = {
   listName: "Clear hazards",
   displayText: "{my}: Clear {0} hazards",
-  description: "Clear hazards by kind: Shapes (circles and rects, tracked included), Tiles, Tracked only, or Everything.",
+  description: "Remove hazards by kind.",
   params: [
     {
       id: "which",
       name: "Which",
-      desc: "Shapes: circles and rects, tracked included. Tiles: tile severities only. Tracked only: object-following hazards. Everything: all of them.",
+      desc: "Areas: every hazard added with an action, including those from objects. Tiles: tile severities only. From objects: only hazards that follow objects. Everything: all of them.",
       type: "combo",
       initialValue: "everything",
       items: [
-        { shapes: "Shapes (circles and rects)" },
+        { shapes: "Areas" },
         { tiles: "Tiles" },
-        { tracked: "Tracked only" },
+        { tracked: "From objects" },
         { everything: "Everything" }
       ]
     }

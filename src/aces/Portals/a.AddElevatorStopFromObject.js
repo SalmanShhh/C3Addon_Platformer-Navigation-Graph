@@ -1,7 +1,7 @@
 export const config = {
   listName: "Add elevator stop from object",
   displayText: "{my}: Add elevator stop to group {0} at {1} [Speed: {2}] [Tag: {3}]",
-  description: "Add an elevator stop using an object's position. Same as 'Add elevator stop' but uses the object's current X/Y. The object serves as a floor marker.",
+  description: "Add an elevator stop using an object as the floor marker. Same as 'Add elevator stop', but the stop follows the object if it moves.",
   params: [
     { id: "groupId", name: "Group", desc: "The elevator group name.", type: "string", initialValue: '"elevator_A"' },
     { id: "object", name: "Object", desc: "The object to use as the elevator stop position", type: "object" },

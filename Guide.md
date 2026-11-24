@@ -69,7 +69,7 @@ Platformer Navigation Graph automates all of it. It scans your level geometry in
 | **Navigation graph** | Every walkable tile position (a **node**) plus every possible movement between nodes (a **connection**). Built from the obstacle map. |
 | **Waypoint** | One step in a calculated path. Each waypoint has a world position and an action such as `walk_left`, `jump`, `fall_right`, or `portal_instant`. |
 | **Portal** | A shortcut connection the graph cannot express with jump or fall arcs. Instant portals teleport; gradual portals move the character at a set speed (elevators, ziplines). |
-| **Hazard** | A marked danger area (circle, rectangle, or tile) that raises pathfinding cost nearby, so the AI prefers safer routes without being hard-blocked. |
+| **Hazard** | A marked danger area (an object, a circle or rectangle, or a tile) that characters never touch: they jump over it, route around it, or stop in front of it. Tiles near it cost more, so routes keep their distance. |
 | **Shared map** | Instances with the same Map Tag on a layout read one obstacle map and graph, so building it once serves every agent. The empty default tag means everyone shares. |
 
 ---
@@ -106,7 +106,7 @@ Event: On start of layout
   Action: Enemy -> PlatformerNavGraph -> BuildObstacleMapFromLayout  Layout.Width, Layout.Height
   Action: Enemy -> PlatformerNavGraph -> ScanSolidObjectsIntoObstacleMap  TilemapWalls
   Action: Enemy -> PlatformerNavGraph -> ScanJumpThruObjectsIntoObstacleMap  TilemapPlatforms
-  Action: Enemy -> PlatformerNavGraph -> RegenerateGraph
+  // The graph rebuilds by itself after the scans; no Regenerate action needed
 
 Event: Enemy -> PlatformerNavGraph -> On navigation graph generated
   Action: Enemy -> PlatformerNavGraph -> FindPath  Player.X, Player.Y, "Yes", "Reach", "Default"
@@ -116,9 +116,11 @@ Event: Enemy -> PlatformerNavGraph -> On navigation graph generated
 
 With **Auto-Control Movement** enabled (the default), the character starts moving the moment `On path found` fires.
 
-### Large levels
+### Large levels and mobile
 
-Graph generation is time-sliced. On big maps the build spreads across several ticks instead of stalling a single frame, and `On navigation graph generated` fires when it completes. Any Find path call made while the build is in progress finishes the build synchronously first, so the same-tick patterns above always work.
+Both expensive steps are time-sliced: the obstacle scan and the graph build each run a few milliseconds per frame instead of stalling one frame, so even big levels start and update without a hitch on phones. While a rescan or rebuild runs, characters keep using the current map and graph. `On navigation graph generated` fires when a full build is ready (startup, Regenerate obstacle map), not for the small local updates below, so events that add portals in that trigger never run twice. A Find path that needs the result right away (the very first one, or one in the same event as Regenerate obstacle map / region) finishes the work synchronously first, so the same-tick patterns above always work.
+
+Changes stay local. Tile edits, Regenerate region, and the automatic refresh when obstacles move all rescan only the cells that changed and update only the part of the graph within jump and fall reach of them, instead of rebuilding the whole level. Characters elsewhere keep their paths and queued requests, and characters whose path runs through the changed area re-path straight away. This is what keeps 100+ characters smooth while the level changes around them.
 
 ### Pathing from On start of layout
 
@@ -136,13 +138,13 @@ Event: On start of layout
 
 | Property | Type | Default | Description |
 |---|---|---|---|
-| **Enable Debug Logging** | Boolean | On | Logs graph stats, path results, and movement decisions to the browser console (F12). Turn off in release builds for performance. |
+| **Enable Debug Logging** | Boolean | Off | Logs graph stats, path results, and movement decisions to the browser console (F12). Turn it on while developing or troubleshooting, and off again for release builds. |
 | **Tile Size** | Integer (0 to 128) | 32 | Grid resolution in pixels. Must match your tilemap's tile size exactly. Set to 0 to auto-detect it from the solid tilemap. |
 | **Max Search Nodes** | Integer (100 to 10000) | 2000 | How many graph nodes A* may visit before giving up. Raise for very large open levels; lower to cap worst-case path cost. |
 | **Max Fall Distance** | Integer | 0 | Maximum safe fall in pixels. 0 auto-detects from Platform physics. -1 means unlimited. A positive value is an explicit override. |
 | **Auto-Control Movement** | Boolean | On | When on, the behavior drives the Platform behavior automatically. When off, path data is exposed through expressions for manual movement. |
 | **Path Strategy** | Combo | Balanced | How the AI picks between valid routes: Balanced, Shortest Distance, Safest Route, Ground-Hugging, No Falling, or Walk Only. See [Movement Control](#7-movement-control). |
-| **Smooth Paths** | Boolean | On | Removes redundant waypoints so characters take direct walks instead of zigzagging between tile centers. |
+| **Smooth Paths** | Boolean | On | Merges straight runs of walking into one waypoint, so characters walk smoothly instead of stopping at every tile center. Jumps, falls and portals are never merged away. |
 | **Max Waypoint Time** | Float (1 to 30) | 5.0 | Seconds before the behavior gives up on a waypoint and fires `On waypoint stuck`. |
 | **Coyote Time** | Float (0 to 1) | 0 | Seconds after walking off a ledge in which the AI may still jump. Only useful with Ledge Restriction off. 0 disables it. |
 | **Strict Jump Positioning** | Boolean | On | The character slows down and centers on the departure tile before each jump or fall. Prevents missed jumps over pits. |
@@ -152,7 +154,7 @@ Event: On start of layout
 | **Hazard Radius** | Integer (0 to 10) | 2 | Tile radius of cost falloff around each hazard. Tiles inside the radius get a partial penalty even without touching the hazard. |
 | **Auto-Build Graph** | Combo | Auto | Zero-event startup. Auto: scan all Solid/Jump-thru objects at startup; explicit setup actions always take precedence. Off: set the map up with actions only. |
 | **Map Tag** | Text | (empty) | Instances with the same tag on a layout share one navigation map. Empty = share with everyone. Give special characters (wall-phasing ghosts, flyers) their own tag. Each tag builds its own map, so use few tags. |
-| **Detect Slopes** | Boolean | On | During solid scanning (including Auto-Build), probe partially-solid tiles' collision shapes and register 45 and 22.5 degree surfaces as slopes automatically. Requires sloped collision polygons on the tiles. Unsupported angles stay solid. |
+| **Detect Slopes** | Boolean | On | During Solid and Jump-thru scanning (including Auto-Build), probe partially-covered tiles' collision shapes and register 45 and 22.5 degree surfaces as slopes automatically. Requires sloped collision polygons on the tiles. Unsupported angles stay solid. |
 | **Crowd Arrivals** | Boolean | Off | When several characters path to the same position, each claims a landing spot so the others target neighboring spots instead of stacking. Per map tag. |
 | **Idle Separation** | Float (0 to 256) | 0 | Personal space in pixels for characters with no active path: idle characters closer than this gently push apart. 0 = off. Ledge-safe. A good starting value is the character's width. |
 | **Separation Cooldown** | Float (0 to 60) | 5.0 | Rest time in seconds after giving up on idle separation (crowd too dense for the spacing) before trying again. 0 = never rest, keep trying continuously. |
@@ -186,10 +188,63 @@ Event: On start of layout
   Action: Enemy -> PlatformerNavGraph -> BuildObstacleMapFromLayout  Layout.Width, Layout.Height
   Action: Enemy -> PlatformerNavGraph -> ScanSolidObjectsIntoObstacleMap  TilemapWalls
   Action: Enemy -> PlatformerNavGraph -> ScanJumpThruObjectsIntoObstacleMap  TilemapPlatforms
-  Action: Enemy -> PlatformerNavGraph -> RegenerateGraph
 ```
 
-Scanning is collision-polygon accurate. Sprites mark only the cells their collision polygon actually covers, so rotated or irregular solids do not over-fill their bounding box. Tilemap tiles are refined against their per-tile collision polygons: tiles with collisions disabled scan as clear, and partial polygons (half-height fences, thin floors) only mark the cells they cover. Objects must have the Solid or Jump-thru behavior enabled, and instances with collisions disabled are skipped, so temporarily disabled platforms are correctly ignored. Polygon features smaller than about a third of a cell are treated as not blocking.
+Build obstacle map from layout always starts from a clean grid (old tiles and slopes are discarded), and the navigation graph rebuilds by itself after the scans. Slope tiles you registered with Map slope tiles from tilemap are remembered and re-applied after every scan, so the order of the actions does not matter.
+
+Scanning is collision-polygon accurate. Sprites mark only the cells their collision polygon actually covers, so rotated or irregular solids do not over-fill their bounding box. Tilemap tiles are refined against their per-tile collision polygons: tiles with collisions disabled scan as clear, and partial polygons (half-height fences, thin floors) only mark the cells they cover. Tilemaps can sit at any position and use any tile size: tiles are read in world space, so a moved tilemap scans exactly where it is. Tiles that do not line up with the grid (an offset of part of a tile, or a tile size different from Tile Size) are rasterized like sprites, cell by cell. Objects must have the Solid or Jump-thru behavior enabled, and instances with collisions disabled are skipped, so temporarily disabled platforms are correctly ignored. Polygon features smaller than about a third of a cell are treated as not blocking.
+
+### Updating the map when obstacles move
+
+When solid objects or tilemaps move, appear, or disappear during play, one action brings everything up to date, just like the built-in Pathfinding behavior:
+
+```
+Event: On drawbridge lowered
+  Action: Enemy -> PlatformerNavGraph -> Regenerate obstacle map
+  // Rescans every Solid and Jump-thru object where it is now, refreshes slopes,
+  // and rebuilds the navigation graph (time-sliced, no frame hitch)
+```
+
+It works from any frame, needs no other actions, and every character sharing the map picks up the new graph. Characters keep their current path until they re-path; a Find path issued in the same event uses the new graph, because a Find path made during a rebuild finishes the rebuild first. Maps made with Create custom obstacle map or Load obstacle map from JSON have no objects to rescan, so for those the action only rebuilds the graph.
+
+When you know where the change happened, **Regenerate region** (a rectangle) or **Regenerate region by object** (the area under the picked instances) does the same for just that area, which is much cheaper on big levels. Both match the built-in Pathfinding actions of the same names:
+
+```
+Event: Bomb -> On destroyed
+  Action: Tilemap -> Erase tile range  ...
+  Action: Enemy -> PlatformerNavGraph -> Regenerate region  Bomb.X - 64, Bomb.Y - 64, Bomb.X + 64, Bomb.Y + 64
+  // Only the cells around the blast are rescanned and re-linked, this tick
+```
+
+Almost every change is picked up automatically (see the next section), including tilemap tile edits, so region regeneration is optional. Use it when the update must land in the SAME tick, for example right before a Find path in the same event: automatic detection notices tile edits within a fraction of a second, which is fine for everything else.
+
+Hazards and portals survive the rebuild. Area hazards are re-applied to the new graph, and hazards from objects keep following them. Portals and elevator stops added from objects follow those objects, so they reconnect wherever the objects are now; portals added with co-ordinates reconnect at those co-ordinates.
+
+### Moving platforms (automatic)
+
+Moving platforms need no events. Give the platform the Solid or Jump-thru behavior and move it any way you like: Sine, Tween, Move To, Bullet, Timeline, or events. The behavior keeps an eye on every Solid and Jump-thru object on the map:
+
+- **Objects that keep moving** are left out of the obstacle map, so characters never plan to walk on the spot a platform happened to be in when the map was built.
+- **Objects that move once and stop** (a drawbridge lowering, a sliding door, a block pushed into place) are added back where they settled.
+- **Objects created or destroyed during play** (placed blocks, crumbling floors) are added or removed.
+- **Objects that change without moving** are rescanned: a resize, an animation frame with a different collision polygon (a door opening, a floor crumbling), or Solid, Jump-thru or collisions switched on or off. Frames that keep the same polygon cost nothing, and an object that changes shape constantly is left out of the map like a moving platform until it holds still.
+- **Moving obstacles you cannot ride** (crushers, swinging blocks, patrolling spike blocks, rotating saws) get an automatic danger area over the space they sweep through. Characters prefer other routes (they still cross when there is no other way), and patrolling guards turn before it. A character that has to walk through stops at the edge and waits until the obstacle will stay out of its way long enough to get across, like a player timing a crusher. Platforms with a ride link get no danger area.
+- **Tilemap tile edits** (Set tile, Erase tile, Erase tile range) on Solid and Jump-thru tilemaps are found by comparing a few rows per frame against a saved copy of the tiles (about 2,000 tiles per frame in total, shared by all tilemaps), and only the changed cells are rescanned. A 500 by 100 tilemap is fully re-checked in under half a second; the copy costs 4 bytes per tile.
+
+Each of these refreshes only the cells that changed and the nearby part of the navigation graph, by itself, a few times per second at most, spread across frames. This works for maps built by Auto-Build, by Regenerate obstacle map, or by Build obstacle map from layout plus the Scan actions (rebuilt with the same object types you scanned). Custom and JSON-loaded maps are left alone.
+
+**Riding.** A platform that travels back and forth between two ledges gets a **ride link** automatically: right away if it moves with the Sine behavior (its range is read from Sine), otherwise once it has made one full trip. Characters path across it like any other route: they walk to the ledge, time their step so they reach the edge as the platform arrives (stopping at the edge if it is not there yet), let the Platform behavior carry them, and step off at the far ledge. The platform's surface is read from its collision shape, so a sprite with empty space above its deck is boarded at the deck, not the image's top edge. A character that can jump does not always wait: when a platform level with the ledge is within jump reach (still coming, already leaving, or paused at its far end) and a jump would land on its deck, it leaps on (Walk Only and Ground-Hugging always wait and walk on). The timing comes from the platform's observed movement, so Sine, Tween, Move To, Timeline and event-driven platforms all work; a platform that snaps between positions (square or sawtooth waves) is boarded only while it holds still. Lifts work the same way when the platform stops level with a ledge at each end. The link appears in the pathfinding cost as the ride time plus the average wait, so a character still walks around when that is quicker.
+
+Ride links are portals tagged `moving_platform`, so the portal events work with them:
+
+```
+Event: Enemy -> PlatformerNavGraph -> On portal entry
+  Condition: System -> Compare two values  Enemy.PlatformerNavGraph.PortalType(Enemy.PlatformerNavGraph.CurrentPortalID) = "ride"
+  Action: Enemy -> PlayAnimation  "LookUp"
+  // The character is about to wait for a moving platform
+```
+
+Ride links are managed for you: they move when the platform's route changes, and are removed when the platform is destroyed or stops moving. Some limits apply: the platform's ends must line up with a ledge (level with it, within half a tile, and within two tiles beside it), platforms that only rotate or resize cannot be ridden, and a character who falls off re-paths from where it lands.
 
 ### Setting individual tiles
 
@@ -198,8 +253,7 @@ For procedural levels or runtime changes:
 ```
 Event: On player places wall block
   Action: Enemy -> PlatformerNavGraph -> SetTileStateWorld  Block.X, Block.Y, "Solid"
-  Action: Enemy -> PlatformerNavGraph -> RegenerateGraph
-  // Tile changes do not rebuild the graph by themselves (slope states are the exception)
+  // The graph rebuilds by itself on the next tick (many tile edits in one event = one rebuild)
 
 Event: On lava tile created
   Action: Enemy -> PlatformerNavGraph -> SetTileStateWorld  Lava.X, Lava.Y, "Avoid"
@@ -221,8 +275,7 @@ Event: (generation complete)
   Action: Enemy -> PlatformerNavGraph -> SetTileState  gx, gy, "Solid"
   Action: Enemy -> PlatformerNavGraph -> SetTileState  gx, gy, "Jump-thru"
   Action: Enemy -> PlatformerNavGraph -> SetTileState  gx, gy, "Slope left /"
-  // After the loop:
-  Action: Enemy -> PlatformerNavGraph -> RegenerateGraph
+  // No extra action after the loop: the graph rebuilds once, on the next tick
 
 Event: Enemy -> PlatformerNavGraph -> On navigation graph generated
   // Spawn or activate enemies here
@@ -236,7 +289,6 @@ Alternatively, if your generator paints a tilemap, scan it after painting:
 Event: (generation complete)
   Action: Enemy -> PlatformerNavGraph -> BuildObstacleMapFromLayout  Layout.Width, Layout.Height
   Action: Enemy -> PlatformerNavGraph -> ScanSolidObjectsIntoObstacleMap  TilemapWalls
-  Action: Enemy -> PlatformerNavGraph -> RegenerateGraph
 ```
 
 **Rule 3: clean up between regenerations.** Portals and hazards persist across graph rebuilds by design. When regenerating a level in the same layout, clear them first or stale portals will reconnect at their old coordinates:
@@ -264,9 +316,20 @@ Event: Enemy -> PlatformerNavGraph -> On failed to find path
 
 **Rule 6: cache repeatable seeds.** For daily seeds or revisitable floors, save the finished map once and reload it instantly on revisit (see the next section). The JSON carries slopes and tile hazards, so nothing needs re-registration.
 
-**Rule 7: generate inside the map's area.** The navigation grid starts at layout co-ordinate (0, 0) and covers the layout's size (or the width and height you pass to Build obstacle map from layout or Create custom obstacle map). Anything generated at negative co-ordinates or beyond that size has no navigation: characters there cannot find paths, targets within about 10 tiles of the edge snap to the nearest ground inside the map, and targets farther out fail with `no_goal_node`. Make the layout as large as the biggest level your generator can produce, or pass larger dimensions when building the map, and keep generated content at positive co-ordinates. Endlessly streaming worlds are not supported yet.
+**Rule 7: content outside the layout works with Auto-Build.** A map built by Auto-Build or Regenerate obstacle map covers the layout plus every Solid and Jump-thru object outside it, including negative co-ordinates, and it **grows automatically** when obstacles are created beyond its edge, so chunk-streamed and endless worlds need no setup. Growth keeps everything already built and only scans the new cells. Maps with an explicit size (Build obstacle map from layout, Create custom obstacle map) keep that size, starting at (0, 0); anything outside it has no navigation. Very large spreads are capped at 4 million cells to protect memory.
 
-For runtime digging and building after the level is live, update tiles with `SetTileState` plus `RegenerateGraph`; rebuilds are time-sliced, so tile-by-tile terrain changes do not hitch the frame.
+**Keeping memory flat in endless worlds.** Automatic growth never forgets content, so a map in an endless runner keeps growing. **Set navigation area** pins the map to a window instead, typically around the player. Calling it again moves the window: only the newly covered cells are scanned, cells left behind are dropped, and the graph is updated only along the edges that moved:
+
+```
+Event: Every 1 second
+  Action: Enemy -> PlatformerNavGraph -> Set navigation area  Player.X - 2000, 0, Player.X + 2000, 1080
+```
+
+Characters outside the area cannot find paths, so make the window cover everyone who needs to move. Use the same value for both corners to go back to automatic coverage.
+
+When the map does not start at (0, 0), grid co-ordinates count from its top-left corner: **GridOriginX** / **GridOriginY** give that corner in world pixels, and WorldToGridX / WorldToGridY convert for you. Prefer the world-position actions (Set tile state at world position, Tile has state at world position) in streamed worlds.
+
+For runtime digging and building after the level is live, update tiles with `SetTileState`; the graph updates itself around each edited tile, time-sliced, so tile-by-tile terrain changes do not hitch the frame.
 
 ### Saving and loading obstacle maps
 
@@ -279,7 +342,6 @@ Event: On "Export map" pressed
 Event: On start of layout
   Condition: Browser -> LocalStorage.HasItem("navmap")
   Action: Enemy -> PlatformerNavGraph -> LoadObstacleMapFromJSON  LocalStorage.GetItem("navmap")
-  Action: Enemy -> PlatformerNavGraph -> RegenerateGraph
 ```
 
 The JSON includes the obstacle grid, slope map, hazard tile map, and tile size, so a loaded map needs no re-registration.
@@ -419,7 +481,7 @@ Event: Boss enters phase 2
 ```
 Event: On start of layout
   Action: Guard -> PlatformerNavGraph -> SetLedgeRestriction  "Enabled"
-  Action: Guard -> PlatformerNavGraph -> SetLedgeLeniency  8
+  Action: Guard -> PlatformerNavGraph -> Set movement setting  "Ledge leniency", 8
   // Guard may overhang the edge by 8 px for natural-looking movement
 ```
 
@@ -443,7 +505,7 @@ Coyote time lets the AI jump during a short window after walking off a ledge, wh
 
 ```
 Event: On start of layout
-  Action: Enemy -> PlatformerNavGraph -> SetCoyoteTime  0.15
+  Action: Enemy -> PlatformerNavGraph -> Set movement setting  "Coyote time", 0.15
   // 150 ms window after leaving a ledge in which the jump still fires
 ```
 
@@ -491,13 +553,11 @@ Action: Enemy -> PlatformerNavGraph -> MarkSlopeRegion  2, 8, 6, 4, "Slope right
 
 ### Automatic slope detection
 
-There are two hands-off options, both built on the documented collision API (they probe the shapes characters actually collide with, so they cannot disagree with the physics):
+Slope detection is built on the documented collision API: it probes the shapes characters actually collide with, so it cannot disagree with the physics.
 
-**The Detect Slopes property** (on by default): slope detection happens during every solid scan, including Auto-Build. Partially-solid tiles are probed at three columns; a straight surface dropping one tile across the cell registers as a 45 degree slope, half a tile as a gentle slope, and anything else (half-blocks, decorations, unsupported angles) stays solid. Combined with Auto-Build Graph, a slope-heavy level needs zero setup events. This also classifies the diagonal edge cells of rotated solid sprites, so a 45 degree sprite ramp becomes walkable automatically.
+**The Detect Slopes property** (on by default): slope detection happens during every Solid and Jump-thru scan, including Auto-Build and Regenerate obstacle map. Sloped Jump-thru tiles become walkable slopes that characters can still jump up through from below. Partially-solid tiles are probed at three columns; a straight surface dropping one tile across the cell registers as a 45 degree slope, half a tile as a gentle slope, and anything else (half-blocks, decorations, unsupported angles) stays solid. Combined with Auto-Build Graph, a slope-heavy level needs zero setup events. This also classifies the diagonal edge cells of rotated solid sprites, so a 45 degree sprite ramp becomes walkable automatically.
 
-**The AutoDetectSlopeTiles action**: the same probe classification run on demand against one tilemap, for projects that keep manual control of the scan sequence. Results are cached per tile shape, and flipped tile placements classify correctly on their own.
-
-Both require slope tiles to have actual sloped collision polygons set in the C3 editor. A slope drawn in the art but carrying a square collision polygon probes as flat and stays solid, which matches how the character would actually collide with it. `MapSlopeTilesFromTilemap` with explicit tile IDs remains available as the manual override.
+Results are cached per tile shape, and flipped tile placements classify correctly on their own. Detection requires slope tiles to have actual sloped collision polygons set in the C3 editor. A slope drawn in the art but carrying a square collision polygon probes as flat and stays solid, which matches how the character would actually collide with it. `MapSlopeTilesFromTilemap` with explicit tile IDs remains available as the manual override.
 
 ### Unregistered slope tiles
 
@@ -512,6 +572,8 @@ A **portal** is a shortcut connection the graph cannot express with normal movem
 - **Instant portals** teleport the character from entry to exit. Doors, warp pads, teleporters.
 - **Gradual portals** move the character linearly from entry to exit at a set speed, with the Platform behavior disabled during traversal. Elevators, lifts, ropes, ziplines.
 
+Either way the character's **feet arrive exactly at the exit point** (the exit object's origin, or the exit co-ordinate), whatever the character's own origin, then it carries on along its path. Put the origin of door, warp and elevator-stop sprites at their bottom, standing on the floor. A point inside a floor is lifted onto it.
+
 ### Adding portals
 
 Add portals whenever it suits you, including in `On start of layout`. A portal added before the graph exists is stored and connected automatically when the graph finishes building, and every later rebuild reconnects all registered portals too.
@@ -520,15 +582,17 @@ Portals belong to the **map**, not to the character whose action added them: eve
 
 ```
 Event: On start of layout
-  Action: Enemy -> PlatformerNavGraph -> AddInstantPortalFromObjects
+  Action: Enemy -> PlatformerNavGraph -> Add portal from objects
     Direction: One-way
+    Type: Instant
     Entry object: DoorEntry
     Exit object: DoorExit
     Cost: 1
     Tag: "door"
 
-  Action: Enemy -> PlatformerNavGraph -> AddGradualPortalFromObjects
+  Action: Enemy -> PlatformerNavGraph -> Add portal from objects
     Direction: Two-way
+    Type: Gradual
     Entry object: ElevatorBottom
     Exit object: ElevatorTop
     Cost: 1
@@ -536,6 +600,8 @@ Event: On start of layout
     Tag: "elevator"
   // Save Enemy.PlatformerNavGraph.LastPortalID if you need to modify it later
 ```
+
+**Portals added from objects follow those objects.** When an entry or exit object moves, the portal moves with it and keeps its ID, cost, speed, and tags, with no events needed. If either object is destroyed, the portal is removed. Portals added with co-ordinates (Add portal) stay exactly where you put them.
 
 ### Elevator groups
 
@@ -549,7 +615,7 @@ Event: On start of layout
   // Creates portals Floor1-Floor2, Floor1-Floor3, Floor2-Floor3
 ```
 
-Elevator groups are shared by the whole map, so a stop added through any character links to the floors other characters added. Adding a stop at a position the group already has is ignored. To take a lift out of service and bring it back later, remove its portals by tag and add the stops again; the removed floors are forgotten, so the lift rebuilds cleanly:
+Elevator groups are shared by the whole map, so a stop added through any character links to the floors other characters added. Adding a stop the group already has (the same object, or the same position for co-ordinate stops) is ignored. Stops added from objects follow their objects, like portals. To take a lift out of service and bring it back later, remove its portals by tag and add the stops again; the removed floors are forgotten, so the lift rebuilds cleanly:
 
 ```
 Event: Power -> On switched off
@@ -562,7 +628,7 @@ Event: Power -> On switched on
 
 ### Pausing at portals for custom transitions
 
-`PauseAtPortal` holds the character at the entry point before the portal executes. It only works inside `On portal entry`.
+`PauseAtPortal` holds the character at the entry point before the portal executes. It only works inside `On portal entry`. A new Find path while held replaces the wait; if the new path uses the same portal, `On portal entry` fires again right away, so chase loops keep working.
 
 ```
 Event: Enemy -> PlatformerNavGraph -> On portal entry
@@ -603,15 +669,17 @@ Event: Enemy -> PlatformerNavGraph -> On portal complete
 
 ### Moving portals
 
-`SetPortalPositionFromObjects` moves an existing portal in place, keeping its ID, type, cost, speed, and tags, and re-wires its graph connections immediately (the re-wire is microseconds, so a timer-driven mover is fine):
+A portal added from objects follows them automatically: its graph connections re-wire on any frame the objects have moved, so a teleporter drone that drifts around the level needs no events at all.
 
 ```
-Event: Every 0.25 seconds
-  Action: Enemy -> PlatformerNavGraph -> SetPortalPositionFromObjects  dronePortalId, DroneEntry, DroneExit
-  // A teleporter drone that drifts around the level; routes adapt on each re-path
+Event: On start of layout
+  Action: Enemy -> PlatformerNavGraph -> Add portal from objects  "One-way", "Instant", DroneEntry, DroneExit, 1, 0, "drone"
+  // The portal tracks DroneEntry and DroneExit from now on; routes adapt on each re-path
 ```
 
-A character already traversing the portal keeps its original destination; moving a portal never teleports anyone.
+`SetPortalPositionFromObjects` re-attaches an existing portal to different objects (it then follows those), keeping its ID, type, cost, speed, and tags. `SetPortalPosition` pins a portal to fixed co-ordinates instead, and it stops following any objects.
+
+A character already traversing the portal keeps its original destination, and characters already on a path keep it until they re-path; moving a portal never teleports anyone.
 
 ### Modifying and removing portals
 
@@ -649,27 +717,44 @@ Action: Enemy -> PlatformerNavGraph -> RemovePortalsByTag  "door"
 
 ## 10. Hazards: Danger Zone Avoidance
 
-**Hazards** raise the pathfinding cost of nearby tiles so the AI prefers safer routes. They bias the path; they do not hard-block it. If the only route runs through the hazard, the AI still takes it. Hazard avoidance switches on automatically when the first hazard is added, and the **Hazard Radius** property controls how far the penalty spreads. Like portals, hazards belong to the map: every character on it avoids them, they can be added in `On start of layout`, and they last until the layout ends even if the character that added them is destroyed.
+**Hazards** are places characters must not touch. A character never stands where its body would touch a hazard: it jumps over the hazard when it can, takes another route, or stops in front of it, clear of it (moving hazards are crossed with timing instead, see Moving hazards). The tiles around a hazard also cost more, so routes keep their distance. Hazard avoidance switches on automatically when the first hazard is added, and the **Hazard Radius** property controls how far the penalty spreads. Like portals, hazards belong to the map: every character on it avoids them, they can be added in `On start of layout`, and they last until the layout ends even if the character that added them is destroyed.
 
-### Shape hazards
+### Hazard objects (the simple way)
+
+Turn objects into hazards with one action. Every instance becomes a hazard matching its collision shape (a triangle spike only marks the tiles it really covers), follows it as it moves, and disappears when it is destroyed:
 
 ```
-Event: On spike trap activated
-  Action: Enemy -> PlatformerNavGraph -> AddRectHazard
-    X: SpikeTrap.X,  Y: SpikeTrap.Y
-    Width: SpikeTrap.Width,  Height: SpikeTrap.Height
-    Severity: 20
+Event: System -> On start of layout
+  Action: Enemy -> PlatformerNavGraph -> Add hazard from object  Spikes, 20
+  Action: Enemy -> PlatformerNavGraph -> Add hazard from object  Lava, 30
 
+Event: Saw -> On created
+  Action: Enemy -> PlatformerNavGraph -> Add hazard from object  Saw, 30
+```
+
+No For each, no co-ordinates, no clean-up events. Characters jump over a hazard in their way when they can, even on a flat floor. One that cannot clear it (Walk Only, or a hazard too wide to jump) stops in front of it, clear of it, whatever the path strategy. Calling it again for the same objects only updates their severity, so it is safe to run more than once. To switch an object's hazard off without destroying it (spikes that retract), use **Remove hazard from object**; Add hazard from object brings it back:
+
+```
+Event: Spikes -> On animation "Retract" finished
+  Action: Enemy -> PlatformerNavGraph -> Remove hazard from object  Spikes
+
+Event: Spikes -> On animation "Extend" finished
+  Action: Enemy -> PlatformerNavGraph -> Add hazard from object  Spikes, 20
+```
+
+### Area hazards
+
+For danger that is not an object (a blast, an area you calculate), **Add hazard** marks an area centred on a position. Rectangle fills Width x Height; Circle fits inside it (its diameter is the smaller side):
+
+```
 Event: On explosion created
-  Action: Enemy -> PlatformerNavGraph -> AddCircleHazard  Explosion.X, Explosion.Y, 96, 30
+  Action: Enemy -> PlatformerNavGraph -> Add hazard  Circle, Explosion.X, Explosion.Y, 192, 192, 30
+  Set blastId = Enemy.PlatformerNavGraph.LastHazardID
   // Higher severity means stronger avoidance
 
 Event: On explosion faded
-  Action: Enemy -> PlatformerNavGraph -> Clear hazards  "Shapes"
-  // Or RemoveHazard with a saved ID for surgical removal
+  Action: Enemy -> PlatformerNavGraph -> Remove hazard  blastId
 ```
-
-Rect hazards use X, Y as the top-left corner. Circle hazards use X, Y as the center.
 
 ### Tile hazards
 
@@ -680,7 +765,7 @@ Action: Enemy -> PlatformerNavGraph -> SetTileHazard  5, 12, 15
 // Tile (5,12) gets severity 15
 
 Action: Enemy -> PlatformerNavGraph -> Clear hazards  "Tiles"
-Action: Enemy -> PlatformerNavGraph -> Clear hazards  "Shapes"
+Action: Enemy -> PlatformerNavGraph -> Clear hazards  "Areas"
 ```
 
 ### Querying hazard state
@@ -697,16 +782,16 @@ Hazard changes take effect automatically: any add, remove, or change re-bakes no
 
 ### Moving hazards
 
-For hazards that move, use a **tracked hazard**: one action, and it follows the object automatically every tick with no per-frame events. Path costs update only when the object actually moves, and the hazard removes itself when its object is destroyed:
+Hazards from **Add hazard from object** handle movement by themselves, the same way moving obstacles do (see Moving platforms):
 
-```
-Event: Saw -> On created
-  Action: Enemy -> PlatformerNavGraph -> AddTrackedHazard  Saw, 64, 30
-  Set sawHazardId = Enemy.PlatformerNavGraph.LastHazardID
-  // That's all. The hazard follows the saw and cleans itself up on destroy.
-```
+- **Back and forth** (a patrolling saw, a spike block on Sine): the hazard learns the whole range the object travels and covers all of it, so routes avoid that space instead of chasing the object.
+- **Rotating** (a spinning saw, a swinging blade): the hazard covers every angle the object turns through.
+- **Up and down across a walkway** (blades rising out of the floor): a character that has to walk through waits at the edge until the blade is out of the way long enough to cross, then goes. If the hazard never leaves the way, the character walks through without waiting, since the route was already its last resort.
+- **Stopped**: the hazard shrinks back to the object's exact shape after about a second.
 
-Tracking is single-flight per map (one update pass per tick regardless of instance count) and each hazard only touches its own area during re-bakes, so hundreds of tracked hazards stay cheap even when they move every frame. The real limit is **path staleness**, not cost: a path computed now is followed for seconds, so avoidance through the cost system suits hazards that move slower than characters re-path (patrolling saws, spreading fire, drifting gas). For fast movers like projectiles, cost-based avoidance is the wrong tool: react in events instead (a dodge with `JumpTowardPosition`, or `Stop` plus manual evasion) and re-path afterward.
+Each hazard removes itself when its object is destroyed. For danger that reaches past the object (a fire's heat), raise **Hazard Radius**, which spreads a fading cost around every hazard tile.
+
+Following is single-flight per map (one update pass per tick regardless of instance count), and path costs re-bake only when a hazard's covered area changes by a quarter tile. A travelling object's area stops changing once its range is known, so hundreds of hazard objects stay cheap. Objects that move one way without returning (projectiles) are followed tile by tile instead, and for those cost-based avoidance is the wrong tool: react in events (a dodge with `JumpTowardPosition`, or `Stop` plus manual evasion) and re-path afterward.
 
 ---
 
@@ -733,7 +818,6 @@ Event: On start of layout
   // Build the ghost map by hand on a ghost instance: only boundary walls are solid.
   Action: Ghost -> PlatformerNavGraph -> BuildObstacleMapFromLayout  Layout.Width, Layout.Height
   Action: Ghost -> PlatformerNavGraph -> ScanSolidObjectsIntoObstacleMap  TilemapBoundary
-  Action: Ghost -> PlatformerNavGraph -> RegenerateGraph
 ```
 
 Rules of thumb:
@@ -763,7 +847,7 @@ With avoidance enabled, agents share positions through a spatial hash and A* pen
 
 ```
 Event: On start of layout
-  Action: AnyEnemy -> PlatformerNavGraph -> SetMultiAgentAvoidance  "Enabled"
+  Action: AnyEnemy -> PlatformerNavGraph -> Set crowd feature  "Multi-agent avoidance", "Enabled"
 
 Expression: AnyEnemy.PlatformerNavGraph.NearbyAgentCount
 // Agents within three tiles of this character
@@ -773,16 +857,32 @@ Expression: AnyEnemy.PlatformerNavGraph.NearbyAgentCount
 
 Avoidance spreads the routes, but every route still ends at the same goal position, so a chasing pack piles onto one pixel. Two independent tools fix the destination side:
 
-- **Crowd Arrivals** (property or the Set crowd arrivals action): goal reservation. When a character paths somewhere, it claims the landing spot (goal node). Another character pathing to the same position automatically targets the nearest unclaimed spot instead, so a pack tiles the platform around the target in a natural ring. The claim is kept while the character stands there and is released when it paths elsewhere, stops, is disabled, or is destroyed. `TargetX/Y` still report the requested position; `PathEndX/Y` show the reserved spot.
+- **Crowd Arrivals** (property, or Set crowd feature with "Crowd arrivals"): goal reservation. When a character paths somewhere, it claims the landing spot (goal node). Another character pathing to the same position automatically targets the nearest unclaimed spot instead, so a pack tiles the platform around the target in a natural ring. The claim is kept while the character stands there and is released when it paths elsewhere, stops, is disabled, or is destroyed. `TargetX/Y` still report the requested position; `PathEndX/Y` show the reserved spot.
 - **Idle Separation** (property, or Set separation setting with "Distance"): personal space in pixels for characters with no active path. Idle characters closer than this to a same-map neighbor gently push apart. The nudge never pushes into a wall or off a ledge (on a one-tile island it simply does nothing) and never interferes with path following. 0 turns it off; the character's width is a good starting value. Works with or without Crowd Arrivals, and also cleans up knockback and spawn overlap on its own. When the crowd is too dense for the spacing to ever be satisfied (four characters on a three-tile platform), characters give up after the give-up time (1.2 seconds by default, tunable via Set separation setting) and rest for **Separation Cooldown** seconds instead of shuffling forever (0 = never rest). Being teleported, taking a portal, being repositioned by events, or arriving from a path resets that give-up state, so a freshly placed character always gets a fresh separation attempt.
 
 Both are per map tag, cost almost nothing when no conflict exists, and are inert with a single character. For full crowd behavior combine all three: avoidance en route, reservation at the destination, separation while standing around.
 
 ```
 Event: On start of layout
-  Action: AnyEnemy -> PlatformerNavGraph -> Set crowd arrivals  "Enabled"
+  Action: AnyEnemy -> PlatformerNavGraph -> Set crowd feature  "Crowd arrivals", "Enabled"
   Action: AnyEnemy -> PlatformerNavGraph -> Set separation setting  "Distance", 32
 ```
+
+### Multiplayer (host only, automatic)
+
+Construct's Multiplayer object is host-authoritative: the host runs the game and peers receive synced positions. This behavior follows that model with no setup events. On a peer (in a room and not the host) every character pauses itself, exactly like Set enabled "Disabled": no paths, no map scans, no graph builds, and nothing pressing the Platform controls, so synced enemies do not jitter or snap back. The host and offline games run as usual.
+
+```
+// Host: give orders as in single player
+Event: Multiplayer -> Is host
+       Every 0.5 seconds
+  Action: Enemy -> PlatformerNavGraph -> Find path to object  Player
+```
+
+- **Triggers fire on the host only** (On arrived, portal and patrol triggers). Sync anything peers must see, such as the animation to play, through synced instance variables or messages.
+- **Disable the Platform behavior on peer copies** of synced characters, as for any synced platformer object.
+- **Local-only characters** that are never synced (a pet only one player sees) can opt out: **Set multiplayer mode** "Run everywhere".
+- The Construct debugger shows the state in this behavior's `multiplayer` field.
 
 ### Tuning checklist
 
@@ -814,8 +914,7 @@ Categories mirror the built-in Pathfinding behavior's groups: Pathfinding (findi
 | **SetRePathThreshold** Tiles | Tiles of drift that trigger automatic re-pathing. |
 | **SetRePathCooldown** Seconds | Minimum time between automatic re-path attempts. |
 | **SetMaxPathsPerTick** Count | Limit A* calculations per tick; extra requests queue. 0 means unlimited. |
-| **SetMultiAgentAvoidance** Enabled | Toggle multi-agent path avoidance (agents on the same map fan out instead of stacking). |
-| **SetCrowdArrivals** Enabled | Toggle crowd arrivals: goal reservation, so arrivals tile onto neighboring spots instead of stacking. |
+| **Set crowd feature** Feature, State | Enable or disable Crowd arrivals (goal reservation, so arrivals tile onto neighboring spots instead of stacking) or Multi-agent avoidance (agents on the same map fan out instead of stacking). |
 | **Set separation setting** Setting, Value | Change one idle separation setting: Distance (px, 0 = off), Cooldown (s, 0 = never rest), or Give-up time (s, default 1.2). |
 
 ### Movement
@@ -823,31 +922,35 @@ Categories mirror the built-in Pathfinding behavior's groups: Pathfinding (findi
 | Action | Description |
 |---|---|
 | **SetEnabled** State | Enable or disable the whole behavior. Disabled freezes navigation with all state kept; Find path is ignored while disabled, map setup actions still work. |
+| **Set multiplayer mode** Mode | Host only (automatic, the default): navigation runs on the host and pauses itself on peers. Run everywhere: always runs on this machine, for local-only characters that are never synced. |
 | **SetAutoControl** Enabled | Toggle whether the behavior drives the Platform behavior automatically. |
 | **Start patrol** Dwell, EdgeDistance | Patrol the current platform: walk to one end, wait the dwell time, turn, repeat. Ends are found automatically from the graph's ledges and walls; Edge distance makes the character turn that many pixels short of each edge (0 = edge to edge; too big for the platform = stand at its middle, never off a ledge). Any Find path call ends the patrol. |
-| **Stop patrol** | End the current patrol; the character stands where it is. |
+| **Start patrol between objects** Markers, Order, Dwell | Visit the picked marker instances in instance order (Ping-pong or Loop), pathing between them with every move type, and wait the dwell time at each. Starts at the nearest marker; any Find path call ends it. |
+| **Stop patrol** | End the current patrol (platform or route); the character stands where it is, and Resume after will not bring it back. |
+| **Set patrol setting** Setting, Value | Dwell time (s), Edge distance (px), Dwell variation (s, random +/- on each wait), Speed (% of max speed while patrolling), or Resume after (s idle before a patrol cancelled by Find path restarts; 0 = never). |
+| **Set patrol option** Option, State | Enable or disable Turn at characters (turn when another character is in the way) or Turn before danger (turn before stepping somewhere more hazardous). Both start enabled. |
 | **JumpTowardPosition** X, Y | Launch the character directly at the target with a full jump. Not pathfinding; used for lunges and attacks. Works mid-air with double jump. |
-| **SetCoyoteTime** Seconds | Set the jump window after walking off a ledge. 0 disables coyote jumps. |
 | **SetStrictJumpPositioning** Enabled | Toggle careful pre-jump centering for this character. |
 | **SetLedgeRestriction** Enabled | Toggle whether the character stops at platform edges. |
-| **SetLedgeLeniency** Pixels | How far past a ledge edge the character may walk (needs Ledge Restriction on). |
-| **Set movement limit** Limit, Value | Override the auto-detected Jump height, Jump distance, or Fall distance used for graph connections, in pixels. Locks the value in; regenerate the graph afterwards. |
+| **Set movement setting** Setting, Value | Jump height, Jump distance, Fall distance (pixels; overrides the values read from the Platform behavior and locks them in), Coyote time (seconds after leaving a ledge in which a jump still fires, 0 = off), or Ledge leniency (pixels past an edge, with Ledge Restriction on). The graph rebuilds automatically. |
 
 ### Obstacles
 
 | Action | Description |
 |---|---|
-| **BuildObstacleMapFromLayout** Width, Height | Create an empty grid from layout pixel dimensions. Call before the scan actions. |
-| **ScanSolidObjectsIntoObstacleMap** Objects | Mark objects with an enabled Solid behavior into the map. Tilemaps scan cell by cell; sprites by bounding box. |
-| **ScanJumpThruObjectsIntoObstacleMap** Objects | Mark one-way platforms (enabled Jump-thru behavior) into the map. |
+| **Regenerate obstacle map** | Rescan every Solid and Jump-thru object where it is now (slopes included) and rebuild the graph, in one action, spread across frames. Use after moving, adding or removing obstacles. |
+| **Regenerate region** X1, Y1, X2, Y2 | Rescan only the obstacles inside a rectangle and update only the nearby part of the graph. Much cheaper for local changes. |
+| **Set navigation area** X1, Y1, X2, Y2 | Pin the map to a window (endless and streamed worlds). Calling it again moves the window: new cells are scanned, cells left behind are dropped. Same value for both corners = automatic coverage again. |
+| **Regenerate region by object** Object | Same as Regenerate region over the area under the picked instances, for example after switching a door's Solid behavior off. |
+| **BuildObstacleMapFromLayout** Width, Height | Create a fresh, empty grid from layout pixel dimensions (previous tiles and slopes are discarded). Call before the scan actions. The graph rebuilds automatically. |
+| **ScanSolidObjectsIntoObstacleMap** Objects | Add objects with an enabled Solid behavior to the map at their current positions, by collision polygon. Scans only add cells. The graph rebuilds automatically. |
+| **ScanJumpThruObjectsIntoObstacleMap** Objects | Add one-way platforms (enabled Jump-thru behavior) to the map. The graph rebuilds automatically. |
 | **CreateCustomObstacleMap** Width, Height | Create an empty map with explicit tile dimensions, for fully manual tile setup. |
-| **RegenerateGraph** | Build or rebuild the navigation graph from the current obstacle map: after manual tile setup, and after level changes. Fires On navigation graph generated when done. |
 | **SetTileState** GridX, GridY, State | Set one tile: Solid, Clear, Jump-thru, Avoid, or a slope type. |
 | **SetTileStateWorld** X, Y, State | Same as SetTileState using world pixel coordinates. |
 | **MarkSlopeRegion** StartX, StartY, EndX, EndY, Direction | Mark a diagonal run of tiles as a slope type. |
-| **MapSlopeTilesFromTilemap** Tilemap, LeftIDs, RightIDs, GentleLeftIDs, GentleRightIDs | Scan a tilemap and mark the given tile IDs as slopes. Comma-separated ID strings; flipped placements auto-mirror. |
-| **AutoDetectSlopeTiles** Tilemap | Register slope tiles by probing their collision shapes with the documented collision API (45 and 22.5 degree surfaces). Needs sloped collision polygons; unsupported shapes stay solid. |
-| **ClearAllSlopes** | Remove every slope marking and mark the graph for rebuild. |
+| **MapSlopeTilesFromTilemap** Tilemap, LeftIDs, RightIDs, GentleLeftIDs, GentleRightIDs | Scan a tilemap and mark the given tile IDs as slopes. Comma-separated ID strings; flipped placements auto-mirror. Remembered and re-applied on every map rebuild. |
+| **ClearAllSlopes** | Remove every slope marking (and forget remembered slope registrations), then rebuild the graph. |
 | **LoadObstacleMapFromJSON** JSON | Restore a map (obstacles, slopes, tile hazards, tile size) saved with the ObstacleMapJSON expression. |
 | **ClearObstacleMap** | Remove the obstacle map and all associated data. |
 
@@ -855,17 +958,15 @@ Categories mirror the built-in Pathfinding behavior's groups: Pathfinding (findi
 
 | Action | Description |
 |---|---|
-| **AddInstantPortal** Direction, EntryX, EntryY, ExitX, ExitY, Cost, Tag | Add a teleport portal at world coordinates. |
-| **AddInstantPortalFromObjects** Direction, EntryObj, ExitObj, Cost, Tag | Add a teleport portal between two objects' positions. |
-| **AddGradualPortal** Direction, EntryX, EntryY, ExitX, ExitY, Cost, Speed, Tag | Add a linear-movement portal (elevator, zipline) at world coordinates. |
-| **AddGradualPortalFromObjects** Direction, EntryObj, ExitObj, Cost, Speed, Tag | Add a linear-movement portal between two objects' positions. |
+| **Add portal** Direction, Type, EntryX, EntryY, ExitX, ExitY, Cost, Speed, Tag | Add a portal at world co-ordinates. Type Instant teleports (doors, warp pads); Gradual moves the character in a straight line at Speed (elevators, ziplines). |
+| **Add portal from objects** Direction, Type, EntryObj, ExitObj, Cost, Speed, Tag | Same as Add portal between two objects. It follows the objects as they move and is removed if either is destroyed. |
 | **AddElevatorStop** GroupID, X, Y, Speed, Tag | Add a stop to an elevator group; auto-creates two-way gradual portals to every existing stop in the group. Groups are shared per map; a stop at an existing stop's position is ignored. |
-| **AddElevatorStopFromObject** GroupID, Object, Speed, Tag | Same as AddElevatorStop using an object's position. |
+| **AddElevatorStopFromObject** GroupID, Object, Speed, Tag | Same as AddElevatorStop using an object, which the stop then follows. |
 | **RemovePortal** ID | Remove one portal by ID, including its graph connections. |
 | **RemovePortalAtObject** Object | Remove the one portal whose entry or exit is closest to the object, even with several instances picked. |
 | **RemovePortalsByTag** Tag | Remove every portal whose tag string contains the tag token. An empty tag removes ALL portals and elevator groups. |
 | **SetPortalPosition** ID, EntryX, EntryY, ExitX, ExitY | Move a portal in place, preserving ID, type, cost, speed, and tags. Connections re-wire immediately. |
-| **SetPortalPositionFromObjects** ID, EntryObj, ExitObj | Move a portal to two objects' positions. Combine with a timer for moving teleporters. |
+| **SetPortalPositionFromObjects** ID, EntryObj, ExitObj | Re-attach a portal to two objects; it then follows them. |
 | **SetPortalCost** ID, Cost | Change a portal's pathfinding cost. Higher cost means less preferred; very high effectively locks it. |
 | **SetPortalSpeed** ID, Speed | Change a gradual portal's traversal speed in pixels per second. |
 | **SetPortalIgnoreHazards** ID, Ignore | Whether the portal's connection ignores hazard cost multipliers. |
@@ -879,13 +980,13 @@ Categories mirror the built-in Pathfinding behavior's groups: Pathfinding (findi
 
 | Action | Description |
 |---|---|
-| **AddRectHazard** X, Y, Width, Height, Severity | Mark a rectangle (top-left at X, Y) as dangerous. |
-| **AddCircleHazard** X, Y, Radius, Severity | Mark a circle (center at X, Y) as dangerous. Good for explosions and AOE. |
-| **AddTrackedHazard** Object, Radius, Severity | Add a circular hazard that follows an object automatically every tick. Removes itself when the object is destroyed. |
-| **Clear hazards** Which | Clear hazards by kind: Shapes (circles and rects, tracked included), Tiles, Tracked only, or Everything. |
-| **RemoveHazard** ID | Remove one shape hazard by ID. |
+| **Add hazard from object** Object, Severity | Turn objects into hazards: every picked instance gets a hazard matching its collision shape, which follows it (covering the whole space it moves or turns through) and is removed when it is destroyed. The simplest way to add hazards. |
+| **Add hazard** Shape, X, Y, Width, Height, Severity | Mark an area centred on X, Y as dangerous. Rectangle fills Width x Height; Circle fits inside it. Good for explosions and calculated areas. |
+| **Remove hazard from object** Object | Remove the picked objects' hazards without destroying them (spikes that retract). |
+| **Clear hazards** Which | Clear hazards by kind: Areas (every hazard added with an action, object hazards included), Tiles, From objects, or Everything. |
+| **RemoveHazard** ID | Remove one hazard by ID (from LastHazardID). |
 | **SetTileHazard** GridX, GridY, Severity | Set the danger level of one tile. 0 removes the hazard. |
-| **SetHazardRadius** Tiles | Cost falloff radius around each hazard. |
+| **SetHazardRadius** Tiles | How far hazard costs spread around each hazard, in tiles. 0 = hazard tiles only. |
 
 ### Debug
 
@@ -901,7 +1002,7 @@ Categories mirror the built-in Pathfinding behavior's groups: Pathfinding (findi
 |---|---|
 | **Is enabled** | True while this behavior is enabled (property or Set enabled action). |
 | **Is moving along path** | True while the character is following a path. |
-| **Is patrolling** | True while a ledge-to-ledge patrol is active. |
+| **Is patrolling** | True while a patrol is active (Start patrol or Start patrol between objects). |
 | **Is platform enabled** | True if the attached Platform behavior is currently enabled. |
 | **Is at ledge** | True when the character stands on a ledge node (platform edge). |
 | **Is at island** | True when the character stands on a single-tile isolated platform. |
@@ -914,7 +1015,7 @@ Categories mirror the built-in Pathfinding behavior's groups: Pathfinding (findi
 | **Tile has state** GridX, GridY, State | True if the tile has the given state (including "Slope (any)" and "Gentle slope"). |
 | **Tile has state at world position** X, Y, State | Same as Tile has state using world coordinates. |
 | **Is position hazardous** X, Y | True if any hazard (circle, rect, or tile) affects the position. |
-| **Is multi-agent avoidance enabled** | True if avoidance is active. |
+| **Is crowd feature enabled** Feature | True if Crowd arrivals or Multi-agent avoidance is enabled. |
 | **Is crowd arrivals enabled** | True if crowd arrivals (goal reservation and idle separation) is active. |
 | **Is calculating path** | True while this agent's path request is queued behind the per-tick budget. |
 
@@ -965,6 +1066,7 @@ Categories mirror the built-in Pathfinding behavior's groups: Pathfinding (findi
 | **EstimatedVelocityX** | Number | Estimated horizontal velocity from position deltas. |
 | **StoppingDistance** | Number | Braking distance at current Platform speed. |
 | **PatrolDirection** | Number | Patrol walk direction: -1 left, 1 right, 0 when dwelling or not patrolling. Handy for mirroring the sprite. |
+| **PatrolPointIndex** | Number | During Start patrol between objects: the marker the character is at or heading to, counting from 0. -1 when no route patrol is active. |
 
 ### Obstacles
 
@@ -974,6 +1076,7 @@ Categories mirror the built-in Pathfinding behavior's groups: Pathfinding (findi
 | **ObstacleMapSource** | String | `collision`, `custom`, or `none`. |
 | **GridWidth / GridHeight** | Number | Map dimensions in tiles. |
 | **GridTileSize** | Number | Tile size in pixels (the resolved value when Tile Size is auto). |
+| **GridOriginX / GridOriginY** | Number | World position of grid tile (0, 0), in pixels. 0 unless the map covers content left of or above the layout. |
 | **TileState(gx, gy)** | String | `solid`, `clear`, `jump_thru`, `avoid`, or a slope type name. |
 | **SlopeDirection(gx, gy)** | String | `left`, `right`, `gentle_left`, `gentle_right`, or `none`. |
 | **WorldToGridX(x) / WorldToGridY(y)** | Number | Convert world pixels to grid coordinates. |
@@ -999,9 +1102,9 @@ Categories mirror the built-in Pathfinding behavior's groups: Pathfinding (findi
 
 | Expression | Returns | Description |
 |---|---|---|
-| **LastHazardID** | Number | ID of the most recently added shape hazard. Read right after adding, store to remove or track later. 0 if none. |
-| **HazardCount** | Number | Active shape hazards (circles and rects), including tracked ones. |
-| **TrackedHazardCount** | Number | Active tracked (object-following) hazards. |
+| **LastHazardID** | Number | ID of the most recently added hazard. Read right after adding, store to remove it later. 0 if none. |
+| **HazardCount** | Number | Hazards added with actions (areas and objects). Tile hazards and the automatic danger areas over moving obstacles are not counted. |
+| **TrackedHazardCount** | Number | Hazards from Add hazard from object. |
 | **PositionIsHazardous(x, y)** | Number | 1 if hazardous, 0 if safe. |
 | **HazardSeverity(x, y)** | Number | Highest severity affecting the position. |
 | **TileHazardSeverity(gx, gy)** | Number | Tile-only severity at grid coordinates. |
@@ -1041,7 +1144,7 @@ Categories mirror the built-in Pathfinding behavior's groups: Pathfinding (findi
 | **On path found** | A path was calculated. With auto-control on, the character is already moving. |
 | **On failed to find path** | No path could be found. Check PathFailReason. |
 | **On arrived** | The character reached the final destination. |
-| **On navigation graph generated** | The graph build finished. Safe to path and add portals. |
+| **On navigation graph generated** | A full graph build finished (startup and full rebuilds; local updates do not fire it). Portals and hazards are kept across rebuilds, so add them once in On start of layout, not here. |
 | **On waypoint reached** | The character arrived at one waypoint. |
 | **On jump toward launched** | JumpTowardPosition fired its jump. |
 | **On re-path triggered** | Automatic re-pathing fired due to drift. |
@@ -1081,7 +1184,6 @@ Scenario: a destructible wall was just destroyed and routes should open up.
 ```
 Event: Wall -> On destroyed
   Action: Enemy -> PlatformerNavGraph -> SetTileStateWorld  Wall.X, Wall.Y, "Clear"
-  Action: Enemy -> PlatformerNavGraph -> RegenerateGraph
 
 Event: Enemy -> PlatformerNavGraph -> On navigation graph generated
   Action: Enemy -> PlatformerNavGraph -> Find path  Player.X, Player.Y
@@ -1159,8 +1261,8 @@ The system for connections that normal movement cannot express.
 Scenario: a door portal exists but should be unusable until the key is found.
 
 ```
-Event: Enemy -> PlatformerNavGraph -> On navigation graph generated
-  Action: Enemy -> PlatformerNavGraph -> AddInstantPortalFromObjects  "Two-way", DoorL, DoorR, 1, "door"
+Event: System -> On start of layout
+  Action: Enemy -> PlatformerNavGraph -> Add portal from objects  "Two-way", "Instant", DoorL, DoorR, 1, 0, "door"
   Set doorId = Enemy.PlatformerNavGraph.LastPortalID
   Action: Enemy -> PlatformerNavGraph -> SetPortalCost  doorId, 9999
   // Cost 9999 means A* will always prefer any other route
@@ -1201,17 +1303,28 @@ Scenario: a bomb explodes and enemies should route around the blast for two seco
 
 ```
 Event: Bomb -> On explosion
-  Action: Enemy -> PlatformerNavGraph -> AddCircleHazard  Bomb.X, Bomb.Y, 128, 40
-  Set blastId = Enemy.PlatformerNavGraph.HazardCount
+  Action: Enemy -> PlatformerNavGraph -> Add hazard  Circle, Bomb.X, Bomb.Y, 256, 256, 40
+  Set blastId = Enemy.PlatformerNavGraph.LastHazardID
   Action: Enemy -> PlatformerNavGraph -> Find path  Player.X, Player.Y
   Action: Wait 2.0
-  Action: Enemy -> PlatformerNavGraph -> Clear hazards  "Shapes"
+  Action: Enemy -> PlatformerNavGraph -> Remove hazard  blastId
+  // Removes only the blast; spikes and other hazards stay
 ```
 
 Note: re-path after adding or clearing hazards so agents pick up the new costs.
 
+**Rising floor blades.**
+Scenario: saw blades rise out of the floor and sink back (Sine, vertical), and enemies should pass between them.
+
+```
+Event: On start of layout
+  Action: Enemy -> PlatformerNavGraph -> Add hazard from object  Blade, 30
+  // Routes avoid the space the blades sweep. An enemy that has to walk
+  // through waits at the edge while a blade is up, and goes when it sinks.
+```
+
 **Permanent lava rows.**
-Scenario: the bottom row of the level is lava the AI should cross only as a last resort.
+Scenario: the bottom row of the level is lava the AI must never step into: it jumps over stretches it can clear and stops at the edge of wider ones.
 
 ```
 Event: On start of layout
@@ -1240,7 +1353,7 @@ Scenario: agents pile up on the single best route and look robotic.
 
 ```
 Event: On start of layout
-  Action: AnyGoblin -> PlatformerNavGraph -> SetMultiAgentAvoidance  "Enabled"
+  Action: AnyGoblin -> PlatformerNavGraph -> Set crowd feature  "Multi-agent avoidance", "Enabled"
   // A* now penalizes routes that pass close to other agents
 ```
 
@@ -1249,7 +1362,7 @@ Scenario: routes fan out nicely, but every agent still lands on the same pixel a
 
 ```
 Event: On start of layout
-  Action: AnyGoblin -> PlatformerNavGraph -> Set crowd arrivals  "Enabled"
+  Action: AnyGoblin -> PlatformerNavGraph -> Set crowd feature  "Crowd arrivals", "Enabled"
   // Each agent claims its landing node; the rest target neighboring nodes.
   // No event changes needed: the same Find path calls now tile the arrivals.
 
@@ -1310,6 +1423,40 @@ Event: Guard -> PlatformerNavGraph -> On arrived
 
 Any Find path call cancels the patrol, so alert logic needs no bookkeeping; restarting from On arrived makes the guard patrol wherever the chase left it.
 
+Patrols also look after themselves, with no events (Set patrol option switches each of these on or off per character):
+
+- **Danger:** a guard turns before stepping somewhere more hazardous than where it stands (hazard tiles, area hazards, hazards from objects such as a passing fireball, including their falloff radius), and stands still if both directions are dangerous. Avoid tiles already end the platform.
+- **Other characters:** a guard turns when another character stands in its way, so two patrollers meeting head-on both turn around.
+- **Level changes:** when blocks are placed or removed, a drawbridge lowers, or a platform is resized, the guard re-measures its platform's ends and patrols the new shape.
+
+**Tuning a patrol.** Set patrol setting changes one value at a time, for both kinds of patrol: Dwell time and Edge distance without restarting, Dwell variation (a random amount added to or taken from each wait, so guards drift out of step), Speed (walking speed while patrolling as a percentage of max speed; chases and jumps stay at full speed), and Resume after (seconds of standing idle after a Find path before the patrol it cancelled starts again; 0 = never). With Resume after set, chase-and-return needs no On arrived events at all:
+
+```
+Event: On start of layout
+  Action: Guard -> PlatformerNavGraph -> Start patrol  Dwell: 1.5, Edge distance: 0
+  Action: Guard -> PlatformerNavGraph -> Set patrol setting  "Resume after", 3
+
+Event: Guard -> LineOfSight -> Has LOS to Player
+  Action: Guard -> PlatformerNavGraph -> Find path to object  Player
+```
+
+Stop patrol forgets the cancelled patrol, so a guard you stop on purpose stays stopped.
+
+**Routes across several platforms.** To patrol between posts on different platforms, drop marker sprites where the guard should stop and use **Start patrol between objects**. The guard visits the markers in their instance order (the order you created them), pathing between them with jumps, falls, portals and moving platforms, and waits at each:
+
+```
+Event: On start of layout
+  Action: Guard -> PlatformerNavGraph -> Start patrol between objects  GuardPost, "Ping-pong", 2
+  // Ping-pong: 1, 2, 3, 2, 1 ... Loop: 1, 2, 3, 1, 2, 3 ...
+
+Event: Guard -> PlatformerNavGraph -> On patrol dwell started
+  Condition: System -> Compare two values  Guard.PlatformerNavGraph.PatrolPointIndex = 2
+  Action: Guard -> Set animation  "Smoke"
+  // A different idle at the third post
+```
+
+It starts at the nearest marker. Markers can move (the guard heads to where they are now), destroyed markers are skipped, and a marker that cannot be reached is retried once and then skipped. The same triggers, Stop patrol, Is patrolling and PatrolDirection work for both kinds of patrol. To give several guards their own routes, use a separate marker object per guard, or pick the guard's markers with a condition before the action (only picked instances are used).
+
 ### 3. Escort NPC on the safest route
 
 **Scenario:** A companion follows the player through a dungeon, avoiding jumps when a walk exists.
@@ -1330,8 +1477,8 @@ Safest Route makes the NPC walk to stairs and ramps rather than leaping gaps, wh
 **Scenario:** Two rooms connected by a door; AI waits for the door to open before passing through.
 
 ```
-Event: Enemy -> PlatformerNavGraph -> On navigation graph generated
-  Action: Enemy -> PlatformerNavGraph -> AddInstantPortalFromObjects  "Two-way", DoorL, DoorR, 1, "door"
+Event: System -> On start of layout
+  Action: Enemy -> PlatformerNavGraph -> Add portal from objects  "Two-way", "Instant", DoorL, DoorR, 1, 0, "door"
   Set doorPortalId = Enemy.PlatformerNavGraph.LastPortalID
 
 Event: Enemy -> PlatformerNavGraph -> On portal entry
@@ -1349,33 +1496,32 @@ Event: DoorSprite -> On animation "Open" finished
 **Scenario:** A three-floor building served by one elevator shaft.
 
 ```
-Event: Enemy -> PlatformerNavGraph -> On navigation graph generated
+Event: System -> On start of layout
   Action: Enemy -> PlatformerNavGraph -> AddElevatorStopFromObject  "lift", Floor1Marker, 80
   Action: Enemy -> PlatformerNavGraph -> AddElevatorStopFromObject  "lift", Floor2Marker, 80
   Action: Enemy -> PlatformerNavGraph -> AddElevatorStopFromObject  "lift", Floor3Marker, 80
 
 Event: Every tick
   Condition: Enemy -> PlatformerNavGraph -> Is traversing portal
-  Action: ElevatorCar -> Set Y  Enemy.Y
+  Action: ElevatorCar -> Set Y  Enemy.BBoxBottom
 
 Event: Enemy -> PlatformerNavGraph -> On portal complete
+  Action: ElevatorCar -> Set Y  Enemy.BBoxBottom
   Action: ElevatorCar -> PlayAnimation  "Arrive"
 ```
 
-The elevator car sprite simply follows the character during traversal; PortalProgress (0 to 1) can drive cable animations.
+The character's feet arrive exactly at each floor marker's origin, so give the markers their origin at the bottom, standing on the floor. The elevator car sprite (origin at its top, no Solid or Jump-thru behavior) simply follows the character's feet during traversal and snaps into place on arrival; PortalProgress (0 to 1) can drive cable animations.
 
 ### 6. Spike pits and explosion avoidance
 
 **Scenario:** Enemies route around spike pits, and temporarily around explosions.
 
 ```
-Event: Enemy -> PlatformerNavGraph -> On navigation graph generated
-  For each SpikeObject:
-    Action: Enemy -> PlatformerNavGraph -> AddRectHazard
-      SpikeObject.BBoxLeft, SpikeObject.BBoxTop, SpikeObject.Width, SpikeObject.Height, 25
+Event: System -> On start of layout
+  Action: Enemy -> PlatformerNavGraph -> Add hazard from object  SpikeObject, 25
 
 Event: Explosion -> On created
-  Action: Enemy -> PlatformerNavGraph -> AddCircleHazard  Explosion.X, Explosion.Y, 128, 50
+  Action: Enemy -> PlatformerNavGraph -> Add hazard  Circle, Explosion.X, Explosion.Y, 256, 256, 50
   Action: Enemy -> PlatformerNavGraph -> Find path  Player.X, Player.Y
   // Re-path so the new hazard affects the current route
 ```
@@ -1405,11 +1551,9 @@ Event: Boss -> Platform -> On landed
 ```
 Event: On player places block
   Action: Enemy -> PlatformerNavGraph -> SetTileStateWorld  Block.X, Block.Y, "Solid"
-  Action: Enemy -> PlatformerNavGraph -> RegenerateGraph
 
 Event: On player removes block
   Action: Enemy -> PlatformerNavGraph -> SetTileStateWorld  Block.X, Block.Y, "Clear"
-  Action: Enemy -> PlatformerNavGraph -> RegenerateGraph
 
 Event: Enemy -> PlatformerNavGraph -> On navigation graph generated
   Action: Enemy -> PlatformerNavGraph -> Find path  Goal.X, Goal.Y
@@ -1424,7 +1568,7 @@ Builds are time-sliced, so even frequent rebuilds do not hitch; the enemy re-pat
 ```
 Event: On start of layout
   Action: AnyGoblin -> PlatformerNavGraph -> SetMaxPathsPerTick  4
-  Action: AnyGoblin -> PlatformerNavGraph -> SetMultiAgentAvoidance  "Enabled"
+  Action: AnyGoblin -> PlatformerNavGraph -> Set crowd feature  "Multi-agent avoidance", "Enabled"
 
 Event: AnyGoblin -> PlatformerNavGraph -> On arrived
   Action: AnyGoblin -> PlatformerNavGraph -> Find path to object  Player
@@ -1447,7 +1591,6 @@ Event: On "Export nav map" pressed
 // In the game layout:
 Event: On start of layout
   Action: Enemy -> PlatformerNavGraph -> LoadObstacleMapFromJSON  LocalStorage.GetItem("level1")
-  Action: Enemy -> PlatformerNavGraph -> RegenerateGraph
 ```
 
 The JSON carries slopes and tile hazards too, so nothing needs re-registration after loading.
@@ -1488,9 +1631,10 @@ Event: Enemy -> PlatformerNavGraph -> On failed to find path
 **Scenario:** A one-way zipline lets enemies descend from the left tower to the right courtyard.
 
 ```
-Event: Enemy -> PlatformerNavGraph -> On navigation graph generated
-  Action: Enemy -> PlatformerNavGraph -> AddGradualPortalFromObjects
+Event: System -> On start of layout
+  Action: Enemy -> PlatformerNavGraph -> Add portal from objects
     Direction: One-way
+    Type: Gradual
     Entry object: ZipTop
     Exit object: ZipBottom
     Cost: 1
@@ -1509,10 +1653,10 @@ One-way direction matters: A* will use the zipline going down but never try to r
 **Scenario:** Warp pads scattered across the level; NPCs use the nearest pad to reach distant goals.
 
 ```
-Event: Enemy -> PlatformerNavGraph -> On navigation graph generated
+Event: System -> On start of layout
   For each WarpPad:
-    Action: Enemy -> PlatformerNavGraph -> AddInstantPortal
-      "Two-way", WarpPad.X, WarpPad.Y, WarpHub.X, WarpHub.Y, 2, "warp"
+    Action: Enemy -> PlatformerNavGraph -> Add portal
+      "Two-way", "Instant", WarpPad.X, WarpPad.Y, WarpHub.X, WarpHub.Y, 2, 0, "warp"
   // Every pad connects to a central hub, forming a star network
 
 Event: On debug key W pressed
@@ -1529,11 +1673,11 @@ A* decides on its own whether warping beats walking; you never script the decisi
 Event: On start of layout
   Action: Guard -> PlatformerNavGraph -> SetPathStrategy  "Safest Route"
   For each Lamp:
-    Action: Guard -> PlatformerNavGraph -> AddCircleHazard  Lamp.X, Lamp.Y, Lamp.Radius, 12
+    Action: Guard -> PlatformerNavGraph -> Add hazard  Circle, Lamp.X, Lamp.Y, Lamp.Radius * 2, Lamp.Radius * 2, 12
 
 Event: On alarm triggered
   Action: Guard -> PlatformerNavGraph -> SetPathStrategy  "Shortest Distance"
-  Action: Guard -> PlatformerNavGraph -> Clear hazards  "Shapes"
+  Action: Guard -> PlatformerNavGraph -> Clear hazards  "Areas"
   Action: Guard -> PlatformerNavGraph -> Find path to object  Player
   // Alarmed guards ignore the light and take the fastest route
 ```
@@ -1560,8 +1704,8 @@ Automatic re-pathing notices the drift once the enemy lands more than three tile
 **Scenario:** Door portals exist from the start but open only as the player finds keys.
 
 ```
-Event: Enemy -> PlatformerNavGraph -> On navigation graph generated
-  Action: Enemy -> PlatformerNavGraph -> AddInstantPortalFromObjects  "Two-way", RedDoorL, RedDoorR, 1, "red_door"
+Event: System -> On start of layout
+  Action: Enemy -> PlatformerNavGraph -> Add portal from objects  "Two-way", "Instant", RedDoorL, RedDoorR, 1, 0, "red_door"
   Set redDoorId = Enemy.PlatformerNavGraph.LastPortalID
   Action: Enemy -> PlatformerNavGraph -> SetPortalCost  redDoorId, 9999
 
@@ -1655,8 +1799,8 @@ For smarter fleeing that bends around the player rather than just running opposi
 
 ```
 Event: Before each flee re-path
-  Action: Enemy -> PlatformerNavGraph -> Clear hazards  "Shapes"
-  Action: Enemy -> PlatformerNavGraph -> AddCircleHazard  Player.X, Player.Y, 160, 40
+  Action: Enemy -> PlatformerNavGraph -> Clear hazards  "Areas"
+  Action: Enemy -> PlatformerNavGraph -> Add hazard  Circle, Player.X, Player.Y, 320, 320, 40
   // A* now penalizes routes that pass near the player, so the escape path
   // naturally curves around them, including on platforms above or below
 ```
@@ -1701,8 +1845,8 @@ Ground correction snaps each marker to the nearest walkable node, so markers can
 
 ```
 Event: On start of layout
-  Action: AnyZombie -> PlatformerNavGraph -> SetMultiAgentAvoidance  "Enabled"
-  Action: AnyZombie -> PlatformerNavGraph -> Set crowd arrivals  "Enabled"
+  Action: AnyZombie -> PlatformerNavGraph -> Set crowd feature  "Multi-agent avoidance", "Enabled"
+  Action: AnyZombie -> PlatformerNavGraph -> Set crowd feature  "Crowd arrivals", "Enabled"
   Action: AnyZombie -> PlatformerNavGraph -> Set separation setting  "Distance", 28
   Action: AnyZombie -> PlatformerNavGraph -> SetMaxPathsPerTick  4
 
@@ -1723,7 +1867,7 @@ Each system covers one phase: avoidance fans the horde across parallel routes on
 
 ```
 Event: Player plants Flag
-  Action: AnySoldier -> PlatformerNavGraph -> Set crowd arrivals  "Enabled"
+  Action: AnySoldier -> PlatformerNavGraph -> Set crowd feature  "Crowd arrivals", "Enabled"
   Action: AnySoldier -> PlatformerNavGraph -> Find path  Flag.X, Flag.Y
 
 Event: AnySoldier -> PlatformerNavGraph -> On path found
@@ -2023,6 +2167,163 @@ Event: Cat -> PlatformerNavGraph -> On failed to find path
 
 Set max traversal drop works with any strategy, not only No Falling. Here Shortest Distance still picks aggressive routes, momentum jumps included, but every jump or fall that would land more than 96 pixels lower is removed from the cat's options, so it takes the stairs down a tall building and hops the short ledges. Climbing is never limited: the check is on the downward drop only. If the only way down is a tall drop, Reach mode fails the path and the cat meows from the rooftop instead of attempting it; with the simple Find path actions (Nearest mode) it would walk to the edge and wait there instead.
 
+### 39. Crossing a pit on a moving platform
+
+**Scenario:** A Sine-driven platform shuttles over a spike pit between two ledges, and the enemy chasing the player rides it across.
+
+```
+// Platform: Sprite with Solid + Sine (Horizontal). No navigation events for it at all.
+
+Event: Every 0.5 seconds
+  Action: Enemy -> PlatformerNavGraph -> Find path to object  Player
+```
+
+The platform is left out of the obstacle map automatically and gets a ride link as soon as it moves (Sine), or after one full trip for other movements. The enemy walks to the ledge, times its step so it meets the platform at the edge, rides, and steps off. The chase loop keeps calling Find path the whole time: requests made while the enemy is on the platform are held and run the moment it steps off, so it never plans a route from mid-air.
+
+### 40. Tower lift on a Tween
+
+**Scenario:** A lift platform tweens between the ground floor and a balcony, pausing at each end.
+
+```
+// Lift: Sprite with Solid + Tween, moved up and down by your own events.
+
+Event: Archer -> PlatformerNavGraph -> On portal entry
+  Condition: System -> Compare two values  Archer.PlatformerNavGraph.PortalType(Archer.PlatformerNavGraph.CurrentPortalID) = "ride"
+  Action: Archer -> Set animation  "Wait"
+```
+
+A vertical mover works exactly like a horizontal one, as long as the lift stops level with a ledge at each end. The ride link's cost includes the average wait, so the archer takes the stairs instead when that is quicker. `PortalType = "ride"` lets you play a waiting animation while it stands at the lift.
+
+### 41. Drawbridge that lowers
+
+**Scenario:** A lever lowers a drawbridge over the moat, and guards on the far side start using it as soon as it lands.
+
+```
+Event: Lever -> On pulled
+  Action: Bridge -> Tween angle  0, 1.5 seconds
+```
+
+No navigation events. While the bridge rotates it is left out of the map; once it has been still for a moment it is added back where it landed, and only the area around it is updated. Guards patrolling the castle wall re-measure their platform's ends and walk out across the bridge on their next lap.
+
+### 42. Crumbling floor
+
+**Scenario:** Floor tiles crumble a second after the player steps on them, and enemies stop trying to cross.
+
+```
+Event: Player -> On landed
+  Condition: Player -> Is overlapping CrumbleTile (offset 0, 4)
+  Action: CrumbleTile -> Set animation  "Crumble"
+
+Event: CrumbleTile -> On animation "Crumble" finished
+  Action: CrumbleTile -> Destroy
+```
+
+Each crumble frame has a smaller collision polygon. The behavior compares each frame's collision footprint and updates the map as the floor breaks apart, then removes it when the tile is destroyed. Frames that keep the same polygon (a looping idle sparkle) cost nothing.
+
+### 43. Portcullis that opens and closes
+
+**Scenario:** A portcullis blocks a corridor until a switch raises it.
+
+```
+Event: Switch -> On activated
+  Action: Portcullis -> Set animation  "Open"
+  Action: Portcullis -> Solid -> Set enabled  "Disabled"
+```
+
+Switching Solid off (or collisions off) is detected by itself: the corridor opens in the navigation graph, and characters whose path ran into the gate re-path through it right away.
+
+### 44. Bomb crater in a tilemap
+
+**Scenario:** A bomb blows a hole in a solid tilemap floor, and an enemy should path around (or through) the crater in the same frame.
+
+```
+Event: Bomb -> On destroyed
+  Action: Ground -> Erase tile range  Ground.PositionToTileX(Bomb.X) - 2, Ground.PositionToTileY(Bomb.Y) - 2, 5, 5
+  Action: Enemy -> PlatformerNavGraph -> Regenerate region  Bomb.X - 64, Bomb.Y - 64, Bomb.X + 64, Bomb.Y + 64
+  Action: Enemy -> PlatformerNavGraph -> Find path to object  Player
+```
+
+Tile edits are detected automatically within a fraction of a second. Regenerate region is only here because the Find path right after it must see the crater in the same frame.
+
+### 45. Endless runner chaser
+
+**Scenario:** Level chunks spawn ahead of the player and are destroyed behind them, far past the layout's edge, while a monster chases.
+
+```
+Event: Player.X > NextChunkX - 1200
+  Action: System -> Create object  ChunkFloor at (NextChunkX, 600)
+  Action: System -> Add 640 to NextChunkX
+
+Event: ChunkFloor.X < Player.X - 2000
+  Action: ChunkFloor -> Destroy
+
+Event: Every 0.5 seconds
+  Action: Monster -> PlatformerNavGraph -> Find path to object  Player
+
+Event: Every 1 second
+  Action: Monster -> PlatformerNavGraph -> Set navigation area  Player.X - 2400, 0, Player.X + 2400, 1080
+```
+
+With Auto-Build, the navigation map grows by itself when obstacles appear beyond its edge, keeping everything already built and only scanning the new cells. Destroyed chunks are cleared from the map the same way, and content at negative co-ordinates works too. The navigation area keeps memory and update cost flat however long the run lasts: the map slides along with the player, scanning the chunks ahead and dropping the ones behind.
+
+### 46. Castle patrol route across three floors
+
+**Scenario:** A night watchman walks a fixed round: gatehouse, then up the lift to the battlements, then the tower, and back.
+
+```
+Event: On start of layout
+  Action: Watchman -> PlatformerNavGraph -> Start patrol between objects  WatchPost, "Ping-pong", 2
+
+Event: Watchman -> PlatformerNavGraph -> On patrol dwell started
+  Condition: System -> Compare two values  Watchman.PlatformerNavGraph.PatrolPointIndex = 1
+  Action: Watchman -> Set animation  "LookOut"
+```
+
+Place the WatchPost markers in the order of the round (the instance order). The watchman paths between them with every move he knows, riding the lift on the way, and PatrolPointIndex lets each post play its own idle.
+
+### 47. Guards that feel alive
+
+**Scenario:** A row of guards paces a courtyard without moving in lockstep, walks slowly while on duty, chases at full speed, and goes back to pacing on its own.
+
+```
+Event: On start of layout
+  Action: Guard -> PlatformerNavGraph -> Start patrol  Dwell: 2, Edge distance: 32
+  Action: Guard -> PlatformerNavGraph -> Set patrol setting  "Dwell variation", 1
+  Action: Guard -> PlatformerNavGraph -> Set patrol setting  "Speed", 45
+  Action: Guard -> PlatformerNavGraph -> Set patrol setting  "Resume after", 3
+
+Event: Guard -> LineOfSight -> Has LOS to Player
+  Action: Guard -> PlatformerNavGraph -> Find path to object  Player
+```
+
+Each wait lasts 1 to 3 seconds, so the guards drift out of step. The chase runs at full speed, and 3 seconds after a guard stops chasing it patrols whatever platform it ended up on. No On arrived bookkeeping.
+
+### 48. Fire imp that strolls through lava
+
+**Scenario:** Ordinary guards turn back before a lava pool; a fire imp walks straight through it.
+
+```
+Event: On start of layout
+  Action: AnyGuard -> PlatformerNavGraph -> Add hazard from object  LavaPool, 10
+  Action: AnyGuard -> PlatformerNavGraph -> Start patrol  Dwell: 1, Edge distance: 0
+  Action: FireImp -> PlatformerNavGraph -> Set patrol option  "Turn before danger", "Disabled"
+```
+
+Patrollers turn before stepping somewhere more dangerous than where they stand, including hazards from objects such as a passing fireball. Set patrol option switches that off per character. The other option, Turn at characters, makes two patrollers meeting head-on both turn around; switch it off where guards should brush past each other.
+
+### 49. Crusher corridor
+
+**Scenario:** Stone crushers slam up and down along a corridor; enemies should prefer the upper walkway, and guards should turn back before a crusher instead of walking under it.
+
+```
+// Crusher: Sprite with Solid + Sine (Vertical). No navigation events.
+
+Event: Every 0.5 seconds
+  Action: Enemy -> PlatformerNavGraph -> Find path to object  Player
+```
+
+A moving Solid object that cannot be ridden gets an automatic danger area over the space it sweeps through. Routes through the corridor become expensive, so enemies take the walkway when there is one and only run the gauntlet when there is no other way. When they do, they wait beside each crusher and dash under it once it has risen far enough to let them through. Patrolling guards in the corridor turn before stepping under a crusher.
+
 ### Other game use cases
 
 **Action platformer.** Enemies chase across interconnected platforms and switch stances mid-fight: Balanced pathing to close distance, then JumpTowardPosition for the strike. Player explosions become temporary circle hazards that reroute the rest of the mob.
@@ -2075,7 +2376,7 @@ Set max traversal drop works with any strategy, not only No Falling. Here Shorte
 
 **Sandbox physics game.** Player contraptions add and remove solid tiles constantly; time-sliced rebuilds absorb the churn, and creatures re-path from OnGraphGenerated so they always respect the latest contraption.
 
-**Mining and digging game.** Every dug tile is a SetTileState "Clear" plus a periodic RegenerateGraph, letting cave creatures flow into freshly opened tunnels toward the player.
+**Mining and digging game.** Every dug tile is a SetTileState "Clear", and the graph rebuilds itself, letting cave creatures flow into freshly opened tunnels toward the player.
 
 **Metroid-style boss minions.** A boss spawns minions that use the boss's own graph instantly (shared mode), each with a different strategy preset so the pack approaches from multiple angles at once.
 
@@ -2113,6 +2414,20 @@ Set max traversal drop works with any strategy, not only No Falling. Here Shorte
 
 **Children in a playground.** Toddlers use Walk Only so they wander their own platform and stop at the edge nearest a called parent, older kids use Set max traversal drop 64 to hop down the low steps but take the slide from the high tower, and teenagers use Shortest Distance to leap off everything.
 
+**Endless runner.** A pursuer chases the player through procedurally spawned chunks far beyond the layout; the navigation map grows as chunks appear and forgets the ones destroyed behind, with no setup events.
+
+**Destructible sandbox.** Bombs erase tilemap tiles, walls crumble frame by frame, and doors switch their Solid behavior off. Every change updates only the nearby part of the graph, so a hundred enemies keep their paths while the level falls apart around them.
+
+**Tower climb with lifts.** Sine and Tween platforms ferry characters between floors; enemies time their step onto the platform like a player would, and chase loops keep working through every ride.
+
+**Night watch stealth.** Watchmen walk fixed rounds between posts on several floors with Start patrol between objects, pace slowly with random pauses, sprint when they spot the player, and return to their rounds on their own with Resume after.
+
+**Castle siege.** Battering rams knock down wall segments and drawbridges lower mid-battle; attackers re-route the moment a breach opens and patrolling defenders re-measure the shrinking battlements.
+
+**Industrial gauntlet.** Pistons, crushers and spinning saws move on Sine and Timeline behaviors; enemies route around their swept areas automatically, and when no other path exists they wait for an opening and time their crossing.
+
+**Volcano level.** Lava pools are tile hazards that patrolling guards turn back from, while fire imps (Turn before danger disabled) wander straight through them.
+
 ---
 ## 18. C3 Debugger
 
@@ -2124,8 +2439,9 @@ Run a debug preview (the bug icon, or F5 with debugging) and select your charact
 |---|---|
 | `generated` | True once the graph is built. False means Find path will fail. |
 | `nodes` | Walkable node count. A very low count usually means a misconfigured obstacle map. |
-| `gridSize` | Grid dimensions in tiles, e.g. `40x24`. Should match layout size divided by tile size. |
+| `gridSize` | Grid dimensions in tiles, e.g. `40x24`. Usually the layout size divided by the tile size; larger when obstacles sit outside the layout, and the window size when Set navigation area is used. |
 | `obstacleSource` | Where the map came from: `collision`, `custom`, or `none`. |
+| `mapTag` | The Map Tag this character shares its map with, or `(default)`. Characters only share a map (and avoid each other) when this matches. |
 
 **Pathfinding**
 
@@ -2160,6 +2476,8 @@ Run a debug preview (the bug icon, or F5 with debugging) and select your charact
 
 | Field | What it means |
 |---|---|
+| `navEnabled` | The Enabled property / Set enabled switch. False means navigation is frozen. |
+| `multiplayer` | `host only` (default), `paused (peer)` while this machine is a multiplayer peer, or `runs everywhere` after Set multiplayer mode. |
 | `cellSize` | The tile size the graph was built with (the resolved value when Tile Size is auto). |
 | `maxJumpHeight` / `maxJumpDistance` / `maxFallDistance` | The physics limits the graph was built with, in pixels. |
 | `debug` | Whether console logging is on. |
@@ -2189,11 +2507,11 @@ nav.FindPathTo(player.x, player.y);          // simple: ground correction + near
 nav.FindPathToObject(runtime.objects.Player); // takes an object class
 nav.FindPath(x, y, 1, 1, 0);                  // advanced: see the combo table below
 
-nav.SetCoyoteTime(0.15);
-nav.SetLedgeLeniency(8);
+nav.SetMovementLimit("coyote_time", 0.15);   // "Set movement setting" (keeps its original ID)
+nav.SetMovementLimit("ledge_leniency", 8);
 nav.SetMaxPathsPerTick(4);
 nav.JumpTowardPosition(player.x, player.y);
-nav.RegenerateGraph();
+nav.RegenerateObstacleMap();
 nav.StopPathfinding();
 ```
 
@@ -2207,7 +2525,9 @@ nav.StopPathfinding();
 | `SetAutoControl(enabled)` | `enabled` | 0 = Enabled, 1 = Disabled |
 | `SetStrictJumpPositioning(enabled)` | `enabled` | 0 = Enabled, 1 = Disabled |
 | `SetLedgeRestriction(enabled)` | `enabled` | 0 = Enabled, 1 = Disabled |
-| `SetMultiAgentAvoidance(enabled)` | `enabled` | 0 = Enabled, 1 = Disabled |
+| `SetCrowdFeature(feature, state)` | `feature` | 0 = Crowd arrivals, 1 = Multi-agent avoidance |
+| | `state` | 0 = Enabled, 1 = Disabled |
+| `SetMovementLimit(setting, value)` | `setting` | 0 = Jump height, 1 = Jump distance, 2 = Fall distance, 3 = Coyote time, 4 = Ledge leniency |
 | `SetPathStrategy(strategy)` | `strategy` | 0 = balanced, 1 = shortest, 2 = safest, 3 = simplest (Ground-Hugging) |
 
 String keys: `nav.SetPathStrategy("safest")`, `nav.FindPath(x, y, "yes", "nearest", "default")`.
@@ -2302,7 +2622,7 @@ const chase = () => nav.FindPathToObject(runtime.objects.Player);
 nav.on("OnGraphGenerated", () => {
   const entry = runtime.objects.DoorEntry.getFirstInstance();
   const exit  = runtime.objects.DoorExit.getFirstInstance();
-  if (entry && exit) nav.AddInstantPortal(1, entry.x, entry.y, exit.x, exit.y, 1, "door");
+  if (entry && exit) nav.AddPortal(1, 0, entry.x, entry.y, exit.x, exit.y, 1, 0, "door"); // two-way, instant
   chase();
 });
 
@@ -2343,7 +2663,7 @@ With Auto-Build Graph set in the editor, no map setup call is needed here; use `
 
 - **Slope tiles must be registered.** Unregistered slopes read as solid to walking and as air to the jump arc check, so jumps clip through them. With Debug Logging on, unregistered tile IDs are listed in the console during slope mapping. Registration order does not matter; the graph rebuilds itself when slopes arrive late.
 
-- **Regenerate after tile changes.** `SetTileState` and `SetTileStateWorld` update the map but not the graph (slope states are the one exception). Follow map edits with `RegenerateGraph`.
+- **Tile changes rebuild the graph automatically.** `SetTileState` and `SetTileStateWorld` mark the graph for a rebuild on the next tick, so many edits in one event cost a single, time-sliced rebuild.
 
 - **Graph builds are asynchronous by design.** Large maps build across several ticks. Wait for `On navigation graph generated`, or simply call a Find path action, which finishes any in-progress build synchronously before searching.
 
@@ -2353,6 +2673,6 @@ With Auto-Build Graph set in the editor, no map setup call is needed here; use `
 
 - **Removing all portals (RemovePortalsByTag with an empty tag) also wipes elevator groups.** For selective cleanup prefer `RemovePortal` by ID or a specific tag, and give portals tags when you add them.
 
-- **Turn off Enable Debug Logging for release builds.** Console output is expensive, particularly on mobile, and the property defaults to on for development convenience.
+- **Keep Enable Debug Logging off in release builds.** Console output is expensive, particularly on mobile. The property defaults to off; turn it on while developing or troubleshooting.
 
 - **Auto-Build Graph defaults to Auto so the addon works the moment it is added.** Explicit setup actions in On start of layout always take precedence, so event-driven projects keep working unchanged. Set it to Off if your project builds its map later than layout start (for example after multi-frame procedural generation).

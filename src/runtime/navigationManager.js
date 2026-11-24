@@ -112,12 +112,12 @@ class NavigationManager {
     this.pathQueue = [];
     this.maxPathsPerTick = 0; // 0 = unlimited (backward-compatible)
     this._pathsThisTick = 0;
-    this._lastResetTime = 0;
+    this._budgetTick = -1; // runtime.tickCount the counter belongs to
 
     // Spatial hashes for multi-agent avoidance, per nav key. Multiple maps can
     // be active on the same tick (different tags), so a single cached hash
     // would leak agents between maps.
-    this._agentSpatialHashes = new Map(); // navKey → { hash, time }
+    this._agentSpatialHashes = new Map(); // navKey → { hash, tick }
 
     // Graph Manager: shared agent params
     this.sharedAgentParams = new Map();   // navKey → { maxJumpHeight, ... }
@@ -125,10 +125,49 @@ class NavigationManager {
     // Incremental (chunked) graph builds: navKey → owning instance
     this.buildOwners = new Map();
 
+    // navKey -> remembered slope registrations ({kind:"ids"|"auto", cls, sets?})
+    // re-applied whenever the obstacle map is rebuilt from objects. Survives
+    // unsubscribe like portals/hazards; dropped at layout end.
+    this.slopeRules = new Map();
+
+    // navKey -> how the obstacle map was built from objects, so it can be
+    // rebuilt the same way: { allSolids, width, height, scans: [{cls, value}] }.
+    // Absent for custom / JSON maps. Dropped at layout end.
+    this.scanRules = new Map();
+
+    // navKey -> moving-solid watcher state (movingPlatforms.js). Dropped at layout end.
+    this.movers = new Map();
+
+    // navKey -> count of completed graph builds (lets watchers re-place ride
+    // links after every rebuild)
+    this.graphVersion = new Map();
+
+    // navKey -> time-sliced scan job (obstacleMap.js _startScanJob)
+    this.scanJobs = new Map();
+    // navKey -> pending regional graph patch: a LIST of cell rects {x, y, w, h}
+    // (separate areas stay separate; overlapping ones merge)
+    this.pendingPatches = new Map();
+    // navKey -> physics signature the current graph was fully built with
+    // (graphBuild.js _physicsSignature); regional patches must match it
+    this.graphBuildParams = new Map();
+
+    // objectType -> whether instances of it can be Solid / Jump-thru obstacles
+    // (cached so the instancecreate hook costs one Map lookup per creation)
+    this._obstacleTypeVerdict = new Map();
+    this._instanceHooked = false;
+
+    // The project's Multiplayer object (IMultiplayerObjectType), looked up once:
+    // undefined = not looked up yet, null = the project has none.
+    this._multiplayerObject = undefined;
+
     // Maps whose baked node hazard costs are stale (hazards added/removed/
     // changed since the last _updateHazardCosts). Applied lazily before the
     // next tick's path following or the next A* search.
     this.hazardCostsDirty = new Set(); // of navKey
+    // Maps where some nodes touch a standing hazard (node.isHazard), which no
+    // character may enter: searches there treat targets past a hazard as
+    // routinely unreachable (Nearest uses the legal-moves flood).
+    this.hazardBlockedMaps = new Set(); // of navKey
 
     // Global hazard ID counter. Hazard maps are shared per nav key, so a
     // per-instance counter would let two instances allocate the same ID and
@@ -155,6 +194,8 @@ class NavigationManager {
     // Single-flight stamp for the per-tick tracked-hazard update: navKey →
     // gameTime of the last update, so only one instance per map does the work.
     this.trackedUpdateStamp = new Map();
+    // navKey -> gameTime of the last object-following portal update (single-flight)
+    this.portalUpdateStamp = new Map();
 
     // Same-tick dedupe of map-setup actions. Event-sheet actions run once per
     // picked instance, so N picked instances would redo the same setup N times;
@@ -215,12 +256,98 @@ class NavigationManager {
       const layout = runtime.layout;
       if (layout) this.dropMapStoresForLayout(layout.name);
     });
+    this.hookInstanceEvents(runtime);
+  }
+
+  /** Whether THIS machine is a peer (in a multiplayer room, not the host).
+   *
+   *  Construct multiplayer is host-authoritative: the host runs the AI and
+   *  peers receive synced positions. Navigating on a peer would fight those
+   *  synced positions (jitter, snapping back) and waste CPU on graph builds,
+   *  so characters pause themselves on peers (see _isPausedAsPeer).
+   *
+   *  Uses only the documented Multiplayer script interface: the object is
+   *  found by its plugin id (whatever the user named it), then isHost and
+   *  currentRoom are read. Offline (no room) and projects without a
+   *  Multiplayer object count as "not a peer". Construct has no host
+   *  migration (peers are kicked when the host leaves), so a peer never
+   *  becomes the host. */
+  isMultiplayerPeer(runtime) {
+    if (this._multiplayerObject === undefined) {
+      this._multiplayerObject = null;
+      try {
+        const objects = runtime.objects;
+        for (const key in objects) {
+          if (objects[key]?.plugin?.id === "Multiplayer") {
+            this._multiplayerObject = objects[key];
+            break;
+          }
+        }
+      } catch (e) {}
+    }
+    const mp = this._multiplayerObject;
+    if (!mp) return false;
+    try {
+      return !!mp.currentRoom && !mp.isHost;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /** Feeds instance creation/destruction of Solid / Jump-thru objects to the
+   *  moving-solid watchers (documented runtime events). Non-obstacle types are
+   *  rejected with one cached Map lookup, so bullets and particles cost nothing. */
+  hookInstanceEvents(runtime) {
+    if (this._instanceHooked || !runtime) return;
+    this._instanceHooked = true;
+    runtime.addEventListener("instancecreate", (e) => {
+      if (this.movers.size === 0) return;
+      const inst = e.instance;
+      if (!inst || !this._isObstacleType(inst)) return;
+      for (const st of this.movers.values()) {
+        if (st.populated) st.created.push(inst);
+      }
+    });
+    runtime.addEventListener("instancedestroy", (e) => {
+      if (this.movers.size === 0) return;
+      const inst = e.instance;
+      if (!inst) return;
+      const uid = inst.uid;
+      for (const st of this.movers.values()) {
+        if (st.recs.has(uid)) st.destroyed.push(uid);
+      }
+    });
+  }
+
+  /** Whether instances of this object type carry a Solid or Jump-thru
+   *  behavior (enabled or not). Cached per object type. */
+  _isObstacleType(inst) {
+    const type = inst.objectType;
+    if (!type) return false;
+    let verdict = this._obstacleTypeVerdict.get(type);
+    if (verdict === undefined) {
+      verdict = false;
+      const behaviors = inst.behaviors;
+      if (behaviors) {
+        for (const key in behaviors) {
+          const typeName = behaviors[key]?.behaviorType?.name || key;
+          if (typeName === "Solid" || typeName === "Jumpthru" || key === "Solid" || key === "Jumpthru") {
+            verdict = true;
+            break;
+          }
+        }
+      }
+      this._obstacleTypeVerdict.set(type, verdict);
+    }
+    return verdict;
   }
 
   /** Drops every map store (all map tags) belonging to one layout. */
   dropMapStoresForLayout(layoutName) {
     const prefix = layoutName + "|";
-    for (const stores of [this.sharedPortals, this.sharedHazards, this.sharedElevatorGroups]) {
+    for (const stores of [this.sharedPortals, this.sharedHazards, this.sharedElevatorGroups, this.slopeRules,
+                          this.scanRules, this.movers, this.graphVersion,
+                          this.scanJobs, this.pendingPatches, this.hazardBlockedMaps]) {
       for (const key of stores.keys()) {
         if (key.startsWith(prefix)) stores.delete(key);
       }
@@ -302,8 +429,13 @@ class NavigationManager {
         this.buildOwners.delete(navKey);
         this._agentSpatialHashes.delete(navKey);
         this.hazardCostsDirty.delete(navKey);
+        this.hazardBlockedMaps.delete(navKey);
         this.trackedUpdateStamp.delete(navKey);
+        this.portalUpdateStamp.delete(navKey);
         this.goalClaims.delete(navKey);
+        this.scanJobs.delete(navKey);
+        this.pendingPatches.delete(navKey);
+        this.graphBuildParams.delete(navKey);
         // Portal/hazard/elevator stores deliberately survive: see hookLayoutEnd.
         for (const key of this.setupStamps.keys()) {
           if (key.startsWith(navKey + "#")) this.setupStamps.delete(key);
@@ -399,14 +531,32 @@ class NavigationManager {
     instance.pathPending = true;
   }
 
-  /** Processes queued path requests up to the per-tick budget. */
-  processPathQueue() {
-    if (this.pathQueue.length === 0) return;
-    const now = performance.now();
-    if (now - this._lastResetTime > 1) {
+  /** Starts a fresh path budget on each new tick. Keyed by the documented
+   *  runtime.tickCount: an exact frame counter that also advances while the
+   *  game is paused (time scale 0), unlike gameTime. A wall-clock window
+   *  would reset mid-frame whenever the searches themselves took long. */
+  _syncPathBudget(runtime) {
+    const tick = runtime.tickCount;
+    if (tick !== this._budgetTick) {
+      this._budgetTick = tick;
       this._pathsThisTick = 0;
-      this._lastResetTime = now;
     }
+  }
+
+  /** Whether a fresh (non-queued) Find path may search now. Counts it when
+   *  allowed; when the tick's budget is spent the caller queues instead. */
+  takePathBudget(runtime) {
+    if (this.maxPathsPerTick === 0) return true;
+    this._syncPathBudget(runtime);
+    if (this._pathsThisTick >= this.maxPathsPerTick) return false;
+    this._pathsThisTick++;
+    return true;
+  }
+
+  /** Processes queued path requests up to the per-tick budget. */
+  processPathQueue(runtime) {
+    if (this.pathQueue.length === 0) return;
+    this._syncPathBudget(runtime);
     while (this.pathQueue.length > 0 && (this.maxPathsPerTick === 0 || this._pathsThisTick < this.maxPathsPerTick)) {
       const req = this.pathQueue.shift();
       // Skip destroyed instances (edge case #2)
@@ -440,12 +590,13 @@ class NavigationManager {
     this.pathQueue = [];
   }
 
-  /** Builds a spatial hash of agent positions once per frame per nav key
-   *  (lazy, on first A* query). Only agents on the same map avoid each other. */
-  getAgentSpatialHash(navKey, cellSize) {
-    const now = performance.now();
+  /** Builds a spatial hash of agent positions once per tick per nav key
+   *  (lazy, on first A* query; runtime.tickCount, see _syncPathBudget). Only
+   *  agents on the same map avoid each other. */
+  getAgentSpatialHash(navKey, cellSize, runtime) {
+    const tick = runtime.tickCount;
     const cached = this._agentSpatialHashes.get(navKey);
-    if (cached && now - cached.time <= 1) {
+    if (cached && cached.tick === tick) {
       return cached.hash;
     }
     const hash = new SpatialHash(cellSize * 2);
@@ -455,7 +606,7 @@ class NavigationManager {
         if (inst.hasPath) hash.insert(inst.instance.x, inst.instance.y);
       }
     }
-    this._agentSpatialHashes.set(navKey, { hash, time: now });
+    this._agentSpatialHashes.set(navKey, { hash, tick });
     return hash;
   }
 

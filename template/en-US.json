@@ -6,7 +6,7 @@
       "salmanshh_platformer_navigationgraph": {
         "name": "Platformer Navigation Graph",
         "description": "Smart pathfinding for platformer games: characters jump gaps, drop between platforms, climb slopes, and take momentum leaps to reach their target. Add it next to the built-in Platform behavior and it works with zero setup events. Includes portals (doors, elevators, ziplines), hazard avoidance, path strategy presets, and crowd handling so groups surround a target instead of stacking.",
-        "help-url": "https://www.construct.net",
+        "help-url": "https://github.com/SalmanShhh/Platformer-Navigation-Graph-V2/blob/main/Guide.md",
         "aceCategories": {
           "Debug": "Debug",
           "Hazards": "Hazards",
@@ -18,27 +18,27 @@
         "properties": {
           "enable_debug": {
             "name": "Enable Debug Logging",
-            "desc": "Show helpful debug messages in browser console (F12) to troubleshoot pathfinding issues. Disable for better performance in final game."
+            "desc": "Log navigation messages to the browser console (F12). Turn off for release."
           },
           "cell_size": {
             "name": "Tile Size",
-            "desc": "Size of each grid tile in pixels. MUST match your tilemap's tile size; a mismatch misaligns the graph and characters walk into walls. Set to 0 to auto-detect it (reads the solid tilemap's tile size). Smaller = more precise paths but slower performance."
+            "desc": "The grid tile size, in pixels. Match your tilemap's tile size. 0 = auto-detect."
           },
           "max_search_nodes": {
             "name": "Max Search Nodes",
-            "desc": "Maximum pathfinding effort before giving up. Higher = finds paths in larger levels but may cause lag. Lower = faster but may fail on complex paths."
+            "desc": "The most graph nodes a path search may visit before giving up. Higher finds longer paths but costs more."
           },
           "max_fall_distance": {
             "name": "Max Fall Distance",
-            "desc": "Maximum fall distance in pixels. 0 = auto-detect from Platform behavior. -1 = unlimited (any fall). Positive value = custom max in pixels."
+            "desc": "The longest fall allowed, in pixels. 0 = from the Platform behavior, -1 = unlimited."
           },
           "auto_control": {
             "name": "Auto-Control Movement",
-            "desc": "When enabled, AI automatically controls the character (moves left/right, jumps). When disabled, you handle movement yourself using the path data."
+            "desc": "Drive the Platform behavior automatically. Disable to move the character yourself from the path data."
           },
           "path_strategy": {
             "name": "Path Strategy",
-            "desc": "How the AI picks the best route when multiple paths exist. Balanced: weighs distance and difficulty equally, good for most platformers and adventure games. Shortest Distance: always takes the fastest route, using long momentum jumps to skip platforms, ideal for speedrunner games and time trials. Safest Route: prefers chains of short hops and drops over long leaps and falls, great for stealth games, escort missions, or fragile NPCs. Ground-Hugging: walks whenever a walking route exists and only jumps or falls when unavoidable, best for patrols, tower defense creeps, and predictable simple enemies. No Falling: never descends by jumping or falling at all, taking slopes and portals down instead, for heavy units and fall-damage games ('Set max traversal drop' raises the allowance). Walk Only: never jumps or falls in any direction, staying on its own platform (slopes and portals excepted) and getting as close to off-platform targets as its ground allows.",
+            "desc": "How the character chooses between routes. Balanced: weighs distance and difficulty. Shortest Distance: the shortest route. Safest Route: short hops over long leaps. Ground-Hugging: walks whenever it can. No Falling: never drops down. Walk Only: never leaves its platform.",
             "items": {
               "balanced": "Balanced (recommended for most games)",
               "shortest": "Shortest Distance (speedrunners, time trials)",
@@ -50,39 +50,39 @@
           },
           "smooth_paths": {
             "name": "Smooth Paths",
-            "desc": "Remove unnecessary waypoints for more natural movement. AI will take direct routes when possible instead of zigzagging."
+            "desc": "Skip unneeded waypoints so characters walk directly instead of tile by tile."
           },
           "max_waypoint_time": {
             "name": "Max Waypoint Time",
-            "desc": "How long (in seconds) AI tries to reach each waypoint before giving up and recalculating path. Prevents infinite loops when stuck."
+            "desc": "Seconds to reach each waypoint before giving up and triggering On waypoint stuck."
           },
           "coyote_time": {
             "name": "Coyote Time",
-            "desc": "Seconds after walking off a ledge where a jump can still be executed. Allows AI to walk off edges and jump mid-air for greater reach, making slightly out-of-range platforms reachable. Important: only works when 'Ledge Restriction' is disabled: if Ledge Restriction is enabled, characters won't walk off edges, so coyote jumps can never execute and the connections will go unused. 0 = disabled."
+            "desc": "Seconds after walking off a ledge in which a jump still works. Needs Ledge Restriction disabled. 0 = off."
           },
           "strict_positioning": {
             "name": "Strict Jump Positioning",
-            "desc": "When the AI is following a path and needs to jump or fall to another platform, it will slow down and carefully position itself on the tile before launching. This prevents characters from overshooting edges and missing jumps, like a chase enemy flying off a ledge instead of jumping across, or an escort NPC slipping off a narrow bridge mid-jump. Note: this only affects movement DURING pathfinding (jumps and falls that are part of the path). To stop characters from walking off edges entirely, use 'Ledge Restriction' instead. Recommended ON for most games."
+            "desc": "Slow down and line up on the take-off tile before each jump or fall, so jumps are not missed."
           },
           "ledge_restriction": {
             "name": "Ledge Restriction",
-            "desc": "Prevents AI characters from walking off platform edges when they have no reason to leave. Useful for patrol guards that should stay on their platform, or NPCs that shouldn't wander off rooftops. Note: this only stops characters from casually walking off edges: if the AI's path requires a jump or fall to reach its goal, it will still leave the platform. When enabled, 'Coyote Time' has no effect since characters won't walk off edges to trigger it. When disabled, characters can slide off edges freely, which also enables wall-adjacent jumps (walking to the platform edge to clear a wall before jumping). To make jumps and falls more precise, use 'Strict Jump Positioning' instead."
+            "desc": "Stop at platform edges unless the path needs a jump or fall."
           },
           "ledge_leniency": {
             "name": "Ledge Leniency",
-            "desc": "How many pixels past a platform edge the AI is allowed to walk before stopping (0 = strict stop at edge). Increase for more natural-looking movement near edges. Only used when Ledge Restriction is enabled."
+            "desc": "How far past an edge the character may walk before stopping, in pixels. Needs Ledge Restriction."
           },
           "repath_threshold": {
             "name": "Re-Path Threshold",
-            "desc": "How many tiles the character can deviate from its path before automatically recalculating. Useful when the character gets knocked off course. 0 = disabled."
+            "desc": "How far the character may drift from its path before re-pathing, in tiles. 0 = off."
           },
           "hazard_radius": {
             "name": "Hazard Radius",
-            "desc": "Tile radius for hazard cost falloff buffer zone. Nearby tiles within this radius of a hazard get cost penalties. 0 = no buffer, only exact hazard tiles affected."
+            "desc": "How far hazard costs spread around each hazard, in tiles. 0 = hazard tiles only."
           },
           "auto_build": {
             "name": "Auto-Build Graph",
-            "desc": "Zero-event startup: automatically build the obstacle map and navigation graph on startup, no events needed. Auto (default): scan all objects with Solid and Jump-thru behaviors. Explicit map-setup actions in 'On start of layout' always take precedence. Off: set the map up yourself with actions.",
+            "desc": "Auto: build the navigation map from Solid and Jump-thru objects at startup, with no events. Off: set the map up with actions.",
             "items": {
               "off": "Off (manual setup)",
               "auto": "Auto (recommended)"
@@ -90,27 +90,27 @@
           },
           "map_tag": {
             "name": "Map Tag",
-            "desc": "Instances with the same map tag on a layout share one navigation map and graph. Leave empty to share with everyone (recommended). Give special characters their own tag (e.g. 'ghost' for wall-phasing enemies, 'flyer' for airborne ones), then set up that tag's obstacle map, portals, and hazards on an instance carrying that tag. Each tag builds and stores its own map, so use few tags."
+            "desc": "Characters with the same tag on a layout share one navigation map. Leave empty to share with everyone."
           },
           "detect_slopes": {
             "name": "Detect Slopes",
-            "desc": "During solid scanning (including Auto-Build), probe each partially-solid tile's collision shape and automatically register 45° and 22.5° slope surfaces as slopes, with no tile ID lists needed. Tiles whose shape doesn't match a supported slope angle stay solid, so this is safe to leave on. Requires tiles/sprites to have actual sloped collision polygons. Turn off to register slopes yourself with the slope actions only."
+            "desc": "Detect 45° and 22.5° slopes from collision shapes when scanning Solid and Jump-thru objects."
           },
           "crowd_arrivals": {
             "name": "Crowd Arrivals",
-            "desc": "When several characters path to the same position, spread their arrivals: each claims a landing spot (goal node) so others automatically target neighboring spots instead of stacking on one pixel. Per map tag. Harmless with a single character."
+            "desc": "Spread characters heading to the same spot over neighbouring spots instead of stacking them."
           },
           "idle_separation": {
             "name": "Idle Separation",
-            "desc": "Personal space in pixels for characters with no active path: idle characters closer than this to another character on the same map gently push apart. 0 = off. The nudge is ledge-safe (never pushes off an edge or into a wall) and never interferes with path following. A good starting value is the character's width."
+            "desc": "Personal space for idle characters, in pixels. Overlapping idle characters step apart. 0 = off."
           },
           "separation_cooldown": {
             "name": "Separation Cooldown",
-            "desc": "How long (in seconds) characters rest after giving up on idle separation (when the crowd is too dense for the spacing to be satisfied) before trying again. 0 = never rest, keep trying continuously. Only used when Idle Separation is above 0."
+            "desc": "Seconds to rest after Idle Separation gives up in a tight crowd. 0 = never rest."
           },
           "enabled": {
             "name": "Enabled",
-            "desc": "Whether the behavior starts active. While disabled, the character stops following paths and Find path actions are ignored; the current path, graph, and settings are kept and everything resumes when re-enabled. Toggle at runtime with the 'Set enabled' action."
+            "desc": "Whether to initially have the behavior enabled or disabled."
           }
         },
         "actions": {
@@ -120,41 +120,26 @@
             "description": "Print navigation graph statistics to the browser console. Useful for debugging: shows node count, connection count, portal count, etc.",
             "params": {}
           },
-          "AddCircleHazard": {
-            "list-name": "Add circle hazard",
-            "display-text": "{my}: Add circle hazard at ({0}, {1}) [Radius: {2}] [Severity: {3}]",
-            "description": "Add a circular hazard area. The AI will avoid this area based on severity. Hazard avoidance is automatically enabled. Returns a hazard ID for later removal. Use for dynamic danger zones like explosions or enemy AOE.",
+          "AddHazard": {
+            "list-name": "Add hazard",
+            "display-text": "{my}: Add {0} hazard at ({1}, {2}) [Size: {3} x {4}] [Severity: {5}]",
+            "description": "Mark an area as dangerous, centred on a position. Characters prefer routes around it. For objects, use 'Add hazard from object' instead.",
             "params": {
+              "shape": {
+                "name": "Shape",
+                "desc": "Rectangle: the area fills Width x Height. Circle: a circle that fits inside Width x Height (its diameter is the smaller side), good for explosions.",
+                "items": {
+                  "rectangle": "Rectangle",
+                  "circle": "Circle"
+                }
+              },
               "x": {
                 "name": "X",
-                "desc": "The X co-ordinate of the center, in pixels."
+                "desc": "The X co-ordinate of the centre, in pixels."
               },
               "y": {
                 "name": "Y",
-                "desc": "The Y co-ordinate of the center, in pixels."
-              },
-              "radius": {
-                "name": "Radius",
-                "desc": "The radius, in pixels."
-              },
-              "severity": {
-                "name": "Severity",
-                "desc": "The hazard severity. Higher values are more dangerous."
-              }
-            }
-          },
-          "AddRectHazard": {
-            "list-name": "Add rectangle hazard",
-            "display-text": "{my}: Add rectangle hazard at ({0}, {1}) [Size: {2} x {3}] [Severity: {4}]",
-            "description": "Add a rectangular hazard area. The AI will avoid this area based on severity. Hazard avoidance is automatically enabled. Returns a hazard ID for later removal. Use for static danger zones like spike pits.",
-            "params": {
-              "x": {
-                "name": "X",
-                "desc": "The X co-ordinate of the center, in pixels."
-              },
-              "y": {
-                "name": "Y",
-                "desc": "The Y co-ordinate of the center, in pixels."
+                "desc": "The Y co-ordinate of the centre, in pixels."
               },
               "width": {
                 "name": "Width",
@@ -170,18 +155,14 @@
               }
             }
           },
-          "AddTrackedHazard": {
-            "list-name": "Add tracked hazard (follows object)",
-            "display-text": "{my}: Add tracked hazard following {0} [Radius: {1}] [Severity: {2}]",
-            "description": "Add a circular hazard that follows an object automatically, with no per-frame events. It removes itself when the object is destroyed. Read the new hazard's ID with LastHazardID.",
+          "AddHazardFromObject": {
+            "list-name": "Add hazard from object",
+            "display-text": "{my}: Add hazard from {0} [Severity: {1}]",
+            "description": "Turn objects into hazards. Every picked instance becomes a hazard matching its collision shape. One that moves covers the whole space it moves through. Removed when the object is destroyed.",
             "params": {
-              "target": {
-                "name": "Object to follow",
-                "desc": "The hazard follows this object's position (first picked instance)"
-              },
-              "radius": {
-                "name": "Radius",
-                "desc": "The radius, in pixels."
+              "object": {
+                "name": "Object",
+                "desc": "The objects to avoid. Every picked instance gets its own hazard."
               },
               "severity": {
                 "name": "Severity",
@@ -192,15 +173,15 @@
           "ClearHazards": {
             "list-name": "Clear hazards",
             "display-text": "{my}: Clear {0} hazards",
-            "description": "Clear hazards by kind: Shapes (circles and rects, tracked included), Tiles, Tracked only, or Everything.",
+            "description": "Remove hazards by kind.",
             "params": {
               "which": {
                 "name": "Which",
-                "desc": "Shapes: circles and rects, tracked included. Tiles: tile severities only. Tracked only: object-following hazards. Everything: all of them.",
+                "desc": "Areas: every hazard added with an action, including those from objects. Tiles: tile severities only. From objects: only hazards that follow objects. Everything: all of them.",
                 "items": {
-                  "shapes": "Shapes (circles and rects)",
+                  "shapes": "Areas",
                   "tiles": "Tiles",
-                  "tracked": "Tracked only",
+                  "tracked": "From objects",
                   "everything": "Everything"
                 }
               }
@@ -217,14 +198,25 @@
               }
             }
           },
+          "RemoveHazardFromObject": {
+            "list-name": "Remove hazard from object",
+            "display-text": "{my}: Remove hazard from {0}",
+            "description": "Remove the hazards of the picked objects without destroying them, for example spikes that retract. 'Add hazard from object' brings them back.",
+            "params": {
+              "object": {
+                "name": "Object",
+                "desc": "The objects whose hazards to remove. Every picked instance is cleared."
+              }
+            }
+          },
           "SetHazardRadius": {
             "list-name": "Set hazard radius",
             "display-text": "{my}: Set hazard radius to {0} tiles",
-            "description": "Set the radius in tiles for circular/rectangular hazard influence. Tiles within this radius of a hazard will have their pathfinding cost increased.",
+            "description": "Set how far hazard costs spread around each hazard. The cost fades out over this many tiles.",
             "params": {
               "tiles": {
                 "name": "Tiles",
-                "desc": "The radius, in tiles."
+                "desc": "The radius, in tiles. 0 = hazard tiles only."
               }
             }
           },
@@ -277,17 +269,6 @@
               }
             }
           },
-          "SetCoyoteTime": {
-            "list-name": "Set coyote time",
-            "display-text": "{my}: Set coyote time to {0} seconds",
-            "description": "Set the coyote time window in seconds. The AI can jump within this window after walking off a ledge. Set to 0 to disable coyote time.",
-            "params": {
-              "seconds": {
-                "name": "Seconds",
-                "desc": "The coyote time window, in seconds."
-              }
-            }
-          },
           "SetEnabled": {
             "list-name": "Set enabled",
             "display-text": "{my}: Set {0}",
@@ -300,17 +281,6 @@
                   "enabled": "Enabled",
                   "disabled": "Disabled"
                 }
-              }
-            }
-          },
-          "SetLedgeLeniency": {
-            "list-name": "Set ledge leniency",
-            "display-text": "{my}: Set ledge leniency to {0} pixels",
-            "description": "Set how many pixels past a platform edge the AI can walk before stopping (0 = strict stop). Increase for more natural-looking patrol movement near edges. Only used when ledge restriction is enabled.",
-            "params": {
-              "pixels": {
-                "name": "Pixels",
-                "desc": "How far past a ledge edge the character may walk, in pixels."
               }
             }
           },
@@ -330,22 +300,84 @@
             }
           },
           "SetMovementLimit": {
-            "list-name": "Set movement limit",
-            "display-text": "{my}: Set {0} limit to {1} px",
-            "description": "Override an auto-detected movement limit used to build graph connections. The value locks in and is no longer read from the Platform behavior; regenerate the graph afterwards.",
+            "list-name": "Set movement setting",
+            "display-text": "{my}: Set {0} to {1}",
+            "description": "Change a movement setting. Jump and fall limits override the values read from the Platform behavior and lock in; the navigation graph rebuilds automatically.",
             "params": {
               "limit": {
-                "name": "Limit",
-                "desc": "Jump height: the highest reachable jump. Jump distance: the widest standstill jump. Fall distance: the deepest safe drop.",
+                "name": "Setting",
+                "desc": "Jump height: the highest reachable jump, in pixels. Jump distance: the widest standstill jump, in pixels. Fall distance: the deepest safe drop, in pixels. Coyote time: how long after walking off a ledge a jump is still allowed, in seconds (0 = off). Ledge leniency: how far past a ledge edge the character may walk before stopping when Ledge Restriction is on, in pixels.",
                 "items": {
                   "jump_height": "Jump height",
                   "jump_distance": "Jump distance",
-                  "fall_distance": "Fall distance"
+                  "fall_distance": "Fall distance",
+                  "coyote_time": "Coyote time",
+                  "ledge_leniency": "Ledge leniency"
                 }
               },
               "value": {
                 "name": "Value",
-                "desc": "The limit, in pixels."
+                "desc": "The new value, in pixels (seconds for Coyote time)."
+              }
+            }
+          },
+          "SetMultiplayerMode": {
+            "list-name": "Set multiplayer mode",
+            "display-text": "{my}: Set multiplayer mode to {0}",
+            "description": "Choose where this character navigates in a multiplayer game. By default it runs only on the host and pauses itself on peers.",
+            "params": {
+              "mode": {
+                "name": "Mode",
+                "desc": "Host only: navigation runs on the host and pauses automatically on peers, which receive the synced positions instead (offline games are unaffected). Run everywhere: navigation always runs on this machine, for local-only characters that are never synced.",
+                "items": {
+                  "host_only": "Host only (automatic)",
+                  "everywhere": "Run everywhere"
+                }
+              }
+            }
+          },
+          "SetPatrolOption": {
+            "list-name": "Set patrol option",
+            "display-text": "{my}: Set patrol option {0}: {1}",
+            "description": "Turn one of the automatic patrol behaviors on or off. Both are on by default.",
+            "params": {
+              "option": {
+                "name": "Option",
+                "desc": "Turn at characters: turn around when another character stands in the way (two patrollers meeting head-on both turn). Turn before danger: turn around before stepping somewhere more hazardous than the current spot.",
+                "items": {
+                  "turn_at_characters": "Turn at characters",
+                  "turn_before_danger": "Turn before danger"
+                }
+              },
+              "state": {
+                "name": "State",
+                "desc": "Whether to enable or disable the option.",
+                "items": {
+                  "enabled": "Enabled",
+                  "disabled": "Disabled"
+                }
+              }
+            }
+          },
+          "SetPatrolSetting": {
+            "list-name": "Set patrol setting",
+            "display-text": "{my}: Set patrol {0} to {1}",
+            "description": "Tune patrolling. Settings belong to the character and apply to both Start patrol and Start patrol between objects.",
+            "params": {
+              "setting": {
+                "name": "Setting",
+                "desc": "Dwell time: the wait at each end or marker, in seconds. Edge distance: how far short of each platform edge to turn, in pixels (Start patrol only). Dwell variation: a random amount, in seconds, added to or taken from each wait so guards do not move in step. Speed: the walking speed while patrolling, as a percentage of the Platform behavior's max speed (chases and jumps use full speed). Resume after: how long, in seconds, the character waits after a Find path ends before resuming the patrol that Find path cancelled (0 = never).",
+                "items": {
+                  "dwell": "Dwell time",
+                  "edge_distance": "Edge distance",
+                  "dwell_variation": "Dwell variation",
+                  "speed": "Speed",
+                  "resume_after": "Resume after"
+                }
+              },
+              "value": {
+                "name": "Value",
+                "desc": "The new value: seconds for Dwell time, Dwell variation and Resume after, pixels for Edge distance, a percentage for Speed."
               }
             }
           },
@@ -379,27 +411,39 @@
               }
             }
           },
+          "StartPatrolBetweenObjects": {
+            "list-name": "Start patrol between objects",
+            "display-text": "{my}: Start patrol between {0} ({1}, dwell {2} s)",
+            "description": "Patrol a route: visit the picked instances of an object in order and wait at each, pathing between them with walks, jumps, falls, portals and moving platforms. Starts at the nearest marker. Any Find path call ends the patrol.",
+            "params": {
+              "markers": {
+                "name": "Markers",
+                "desc": "The marker objects to visit. Their picked instances are visited in instance order (the order they were created). Markers that move are followed; destroyed ones are skipped."
+              },
+              "order": {
+                "name": "Order",
+                "desc": "Ping-pong: visit the markers in order, then back in reverse (1, 2, 3, 2, 1). Loop: start again from the first marker after the last (1, 2, 3, 1, 2, 3).",
+                "items": {
+                  "ping_pong": "Ping-pong",
+                  "loop": "Loop"
+                }
+              },
+              "dwell": {
+                "name": "Dwell time",
+                "desc": "The wait time at each marker, in seconds. 0 moves on immediately."
+              }
+            }
+          },
           "StopPatrol": {
             "list-name": "Stop patrol",
             "display-text": "{my}: Stop patrol",
-            "description": "End the current patrol. The character simply stands where it is.",
+            "description": "End the current patrol (platform or route). The character simply stands where it is.",
             "params": {}
-          },
-          "AutoDetectSlopeTiles": {
-            "list-name": "Auto-detect slope tiles from tilemap",
-            "display-text": "{my}: Auto-detect slope tiles from {0} by collision shape",
-            "description": "Scan a Tilemap and register slope tiles by probing their collision shapes: 45° surfaces become slopes, 22.5° surfaces become gentle slopes, flipped placements are handled. Tiles need sloped collision polygons; unsupported angles stay solid.",
-            "params": {
-              "tilemap": {
-                "name": "Tilemap",
-                "desc": "The Tilemap object to scan"
-              }
-            }
           },
           "BuildObstacleMapFromLayout": {
             "list-name": "Build obstacle map from layout",
             "display-text": "{my}: Build obstacle map [{0}×{1} px]",
-            "description": "Create an empty obstacle map grid from layout pixel dimensions. Follow with ScanSolidObjectsIntoObstacleMap and ScanJumpThruObjectsIntoObstacleMap to fill it.",
+            "description": "Create a fresh, empty obstacle map grid of the given size, discarding the previous tiles and slopes. Follow with the Scan actions to fill it. The navigation graph rebuilds automatically. To simply rescan everything, use Regenerate obstacle map.",
             "params": {
               "layoutWidth": {
                 "name": "Layout width (px)",
@@ -414,7 +458,7 @@
           "ClearAllSlopes": {
             "list-name": "Clear all slope markings",
             "display-text": "{my}: Clear all slope markings",
-            "description": "Remove all slope markings from the obstacle map. Slopes will be treated as regular solid tiles. Use this to reset slope data.",
+            "description": "Remove all slope markings from the obstacle map. Slopes will be treated as regular solid tiles. Also forgets slope tiles registered with the Map and Auto-detect slope actions.",
             "params": {}
           },
           "ClearObstacleMap": {
@@ -452,7 +496,7 @@
           "MapSlopeTilesFromTilemap": {
             "list-name": "Map slope tiles from tilemap",
             "display-text": "{my}: Map slopes from {0}: left={1} right={2} gentle-left={3} gentle-right={4}",
-            "description": "Scan a Tilemap and mark tiles matching the given tile IDs as slopes. Pass tile IDs as comma-separated strings (e.g. '5,6,7'). Pass empty string to skip a slope type. Requires the obstacle map to be created first.",
+            "description": "Scan a Tilemap and mark tiles matching the given tile IDs as slopes. Pass tile IDs as comma-separated strings (e.g. '5,6,7'). Pass empty string to skip a slope type. Remembered and re-applied whenever the obstacle map is rebuilt.",
             "params": {
               "tilemap": {
                 "name": "Tilemap",
@@ -509,16 +553,50 @@
               }
             }
           },
-          "RegenerateGraph": {
-            "list-name": "Regenerate navigation graph",
-            "display-text": "{my}: Regenerate navigation graph",
-            "description": "Build or rebuild the navigation graph from the current obstacle map. Call after setting up tiles manually, and after modifying the level layout, adding/removing obstacles, or changing platform positions. Fires 'On navigation graph generated' when done.",
+          "RegenerateObstacleMap": {
+            "list-name": "Regenerate obstacle map",
+            "display-text": "{my}: Regenerate obstacle map",
+            "description": "Rescan every object with the Solid or Jump-thru behavior where it is now, including slopes, then rebuild the navigation graph. Use after moving, adding or removing obstacles. Fires 'On navigation graph generated' when done.",
             "params": {}
+          },
+          "RegenerateRegion": {
+            "list-name": "Regenerate region",
+            "display-text": "{my}: Regenerate region ({0}, {1}) to ({2}, {3})",
+            "description": "Rescan the obstacles inside a rectangle and update only the nearby part of the navigation graph. Much cheaper than Regenerate obstacle map for local changes. Spread across frames; a Find path in the same tick waits for it.",
+            "params": {
+              "x1": {
+                "name": "X1",
+                "desc": "The X co-ordinate of one corner of the area, in pixels."
+              },
+              "y1": {
+                "name": "Y1",
+                "desc": "The Y co-ordinate of one corner of the area, in pixels."
+              },
+              "x2": {
+                "name": "X2",
+                "desc": "The X co-ordinate of the opposite corner of the area, in pixels."
+              },
+              "y2": {
+                "name": "Y2",
+                "desc": "The Y co-ordinate of the opposite corner of the area, in pixels."
+              }
+            }
+          },
+          "RegenerateRegionByObject": {
+            "list-name": "Regenerate region by object",
+            "display-text": "{my}: Regenerate region by {0}",
+            "description": "Rescan the area covered by the picked instances of an object and update only the nearby part of the navigation graph. Use after changing an obstacle without moving it, such as enabling or disabling its Solid behavior.",
+            "params": {
+              "object": {
+                "name": "Object",
+                "desc": "The object whose picked instances' areas are regenerated."
+              }
+            }
           },
           "ScanJumpThruObjectsIntoObstacleMap": {
             "list-name": "Scan jump-thru objects into obstacle map",
             "display-text": "{my}: Scan {0} (jump-thru) into obstacle map",
-            "description": "Scan one-way platform objects into the obstacle map as jump-thru cells. Requires an existing obstacle map (call BuildObstacleMapFromLayout first). Objects must have the Jump-thru behavior enabled.",
+            "description": "Add one-way platform objects to the obstacle map as jump-thru cells, at their current positions. Requires an obstacle map (Build obstacle map from layout first). The navigation graph rebuilds automatically. Objects must have the Jump-thru behavior enabled.",
             "params": {
               "jumpThruObjects": {
                 "name": "Jump-thru objects",
@@ -529,11 +607,34 @@
           "ScanSolidObjectsIntoObstacleMap": {
             "list-name": "Scan solid objects into obstacle map",
             "display-text": "{my}: Scan {0} (solid) into obstacle map",
-            "description": "Scan solid objects into the obstacle map. Requires an existing obstacle map (call BuildObstacleMapFromLayout first). Tilemaps are scanned cell-by-cell; sprites use bounding box. Objects must have the Solid behavior enabled.",
+            "description": "Add solid objects to the obstacle map at their current positions, using their collision polygons. Requires an obstacle map (Build obstacle map from layout first). The navigation graph rebuilds automatically. Scans only add cells; after obstacles move, use Regenerate obstacle map.",
             "params": {
               "solidObjects": {
                 "name": "Solid objects",
                 "desc": "The objects to scan: tilemaps or sprites with the Solid behavior enabled."
+              }
+            }
+          },
+          "SetNavigationArea": {
+            "list-name": "Set navigation area",
+            "display-text": "{my}: Set navigation area ({0}, {1}) to ({2}, {3})",
+            "description": "Limit the navigation map to a rectangle, for streamed and endless worlds: keep it around the action and memory stays flat. Calling it again moves the window: only newly covered cells are scanned and cells left behind are dropped. Characters outside the area cannot find paths. Use the same value for both corners to go back to covering everything automatically.",
+            "params": {
+              "x1": {
+                "name": "X1",
+                "desc": "The X co-ordinate of one corner of the area, in pixels."
+              },
+              "y1": {
+                "name": "Y1",
+                "desc": "The Y co-ordinate of one corner of the area, in pixels."
+              },
+              "x2": {
+                "name": "X2",
+                "desc": "The X co-ordinate of the opposite corner of the area, in pixels."
+              },
+              "y2": {
+                "name": "Y2",
+                "desc": "The Y co-ordinate of the opposite corner of the area, in pixels."
               }
             }
           },
@@ -724,17 +825,25 @@
               }
             }
           },
-          "SetCrowdArrivals": {
-            "list-name": "Set crowd arrivals",
-            "display-text": "{my}: Set crowd arrivals: {0}",
-            "description": "Enable or disable crowd arrivals: characters pathing to the same position each claim a landing spot, so later arrivals target neighboring spots instead of stacking. Per map tag.",
+          "SetCrowdFeature": {
+            "list-name": "Set crowd feature",
+            "display-text": "{my}: Set {0}: {1}",
+            "description": "Enable or disable one of the features that help groups of characters share a map.",
             "params": {
-              "enabled": {
-                "name": "Enabled",
-                "desc": "Whether to enable or disable crowd arrivals.",
+              "feature": {
+                "name": "Feature",
+                "desc": "Crowd arrivals: characters pathing to the same position each claim their own landing spot instead of stacking (per map tag). Multi-agent avoidance: characters sharing a map try not to choose overlapping paths.",
                 "items": {
-                  "yes": "Enabled",
-                  "no": "Disabled"
+                  "crowd_arrivals": "Crowd arrivals",
+                  "avoidance": "Multi-agent avoidance"
+                }
+              },
+              "state": {
+                "name": "State",
+                "desc": "Whether to enable or disable the feature.",
+                "items": {
+                  "enabled": "Enabled",
+                  "disabled": "Disabled"
                 }
               }
             }
@@ -761,21 +870,6 @@
               }
             }
           },
-          "SetMultiAgentAvoidance": {
-            "list-name": "Set multi-agent avoidance",
-            "display-text": "{my}: Set multi-agent avoidance: {0}",
-            "description": "Enable or disable path-level multi-agent avoidance. When enabled, agents try to avoid choosing overlapping paths when multiple agents share the same navigation map.",
-            "params": {
-              "enabled": {
-                "name": "Enabled",
-                "desc": "Whether to enable or disable multi-agent avoidance.",
-                "items": {
-                  "yes": "Enabled",
-                  "no": "Disabled"
-                }
-              }
-            }
-          },
           "SetPathStrategy": {
             "list-name": "Set path strategy",
             "display-text": "{my}: Set path strategy to {0}",
@@ -783,7 +877,7 @@
             "params": {
               "strategy": {
                 "name": "Strategy",
-                "desc": "The path selection strategy preset",
+                "desc": "Balanced: weighs distance and difficulty. Shortest Distance: the shortest route. Safest Route: short hops over long leaps. Ground-Hugging: walks whenever it can. No Falling: never drops down. Walk Only: never leaves its platform.",
                 "items": {
                   "balanced": "Balanced",
                   "shortest": "Shortest Distance",
@@ -873,7 +967,7 @@
           "AddElevatorStopFromObject": {
             "list-name": "Add elevator stop from object",
             "display-text": "{my}: Add elevator stop to group {0} at {1} [Speed: {2}] [Tag: {3}]",
-            "description": "Add an elevator stop using an object's position. Same as 'Add elevator stop' but uses the object's current X/Y. The object serves as a floor marker.",
+            "description": "Add an elevator stop using an object as the floor marker. Same as 'Add elevator stop', but the stop follows the object if it moves.",
             "params": {
               "groupId": {
                 "name": "Group",
@@ -893,10 +987,10 @@
               }
             }
           },
-          "AddGradualPortal": {
-            "list-name": "Add gradual portal",
-            "display-text": "{my}: Add {0} gradual portal from ({1}, {2}) to ({3}, {4}) [Cost: {5}] [Speed: {6}] [Tag: {7}]",
-            "description": "Add a portal that gradually moves the AI from entry to exit at the given speed. The character moves in a straight line (any direction: vertical, horizontal, or diagonal). Platform behavior is disabled during movement. Use for: elevators, lifts, moving platforms, ziplines.",
+          "AddPortal": {
+            "list-name": "Add portal",
+            "display-text": "{my}: Add {0} {1} portal from ({2}, {3}) to ({4}, {5}) [Cost: {6}] [Speed: {7}] [Tag: {8}]",
+            "description": "Add a portal between two positions. Characters path through it like any other route. Use 'On portal entry' with 'Pause at portal' to play animations first.",
             "params": {
               "direction": {
                 "name": "Direction",
@@ -904,6 +998,14 @@
                 "items": {
                   "one_way": "One-way",
                   "two_way": "Two-way"
+                }
+              },
+              "type": {
+                "name": "Type",
+                "desc": "Instant: teleports the character from entry to exit (doors, warp pads). Gradual: moves the character in a straight line at the given speed with the Platform behavior paused (elevators, ziplines).",
+                "items": {
+                  "instant": "Instant",
+                  "gradual": "Gradual"
                 }
               },
               "entryX": {
@@ -924,11 +1026,11 @@
               },
               "cost": {
                 "name": "Cost",
-                "desc": "The movement cost. The default of 1 is calculated automatically from distance and speed; set it higher to make the AI avoid this portal."
+                "desc": "The movement cost. 1 is the default (for Gradual it is calculated from distance and speed); set it higher to make characters avoid this portal."
               },
               "speed": {
                 "name": "Speed",
-                "desc": "The movement speed, in pixels per second."
+                "desc": "The movement speed for Gradual portals, in pixels per second. Ignored for Instant portals."
               },
               "tag": {
                 "name": "Tag",
@@ -936,10 +1038,10 @@
               }
             }
           },
-          "AddGradualPortalFromObjects": {
-            "list-name": "Add gradual portal from objects",
-            "display-text": "{my}: Add {0} gradual portal from {1} to {2} [Cost: {3}] [Speed: {4}] [Tag: {5}]",
-            "description": "Add a gradual portal using two objects. Character moves from entry object to exit object at the given speed. Use for: linking elevator sprites, rope endpoints, etc.",
+          "AddPortalFromObjects": {
+            "list-name": "Add portal from objects",
+            "display-text": "{my}: Add {0} {1} portal from {2} to {3} [Cost: {4}] [Speed: {5}] [Tag: {6}]",
+            "description": "Add a portal between two objects. The portal follows the objects as they move and is removed if either object is destroyed.",
             "params": {
               "direction": {
                 "name": "Direction",
@@ -947,93 +1049,31 @@
                 "items": {
                   "one_way": "One-way",
                   "two_way": "Two-way"
+                }
+              },
+              "type": {
+                "name": "Type",
+                "desc": "Instant: teleports the character from entry to exit (doors, warp pads). Gradual: moves the character in a straight line at the given speed with the Platform behavior paused (elevators, ziplines).",
+                "items": {
+                  "instant": "Instant",
+                  "gradual": "Gradual"
                 }
               },
               "entryObject": {
                 "name": "Entry object",
-                "desc": "The object to use as the portal entry point"
+                "desc": "The object to use as the portal entry."
               },
               "exitObject": {
                 "name": "Exit object",
-                "desc": "The object to use as the portal exit point"
+                "desc": "The object to use as the portal exit."
               },
               "cost": {
                 "name": "Cost",
-                "desc": "The movement cost. The default of 1 is calculated automatically."
+                "desc": "The movement cost. 1 is the default (for Gradual it is calculated from distance and speed); set it higher to make characters avoid this portal."
               },
               "speed": {
                 "name": "Speed",
-                "desc": "The movement speed, in pixels per second."
-              },
-              "tag": {
-                "name": "Tag",
-                "desc": "An optional tag for grouping portals. Use commas for multiple tags (e.g. \"door,room_A\"). Leave empty for no tag."
-              }
-            }
-          },
-          "AddInstantPortal": {
-            "list-name": "Add instant portal",
-            "display-text": "{my}: Add {0} instant portal from ({1}, {2}) to ({3}, {4}) [Cost: {5}] [Tag: {6}]",
-            "description": "Add a portal that instantly teleports the character from entry to exit. Use 'On portal entry' with 'Pause at portal' to play animations before the teleport.",
-            "params": {
-              "direction": {
-                "name": "Direction",
-                "desc": "One-way: entry to exit only. Two-way: works in both directions.",
-                "items": {
-                  "one_way": "One-way",
-                  "two_way": "Two-way"
-                }
-              },
-              "entryX": {
-                "name": "Entry X",
-                "desc": "The X co-ordinate of the portal entry, in pixels."
-              },
-              "entryY": {
-                "name": "Entry Y",
-                "desc": "The Y co-ordinate of the portal entry, in pixels."
-              },
-              "exitX": {
-                "name": "Exit X",
-                "desc": "The X co-ordinate of the portal exit, in pixels."
-              },
-              "exitY": {
-                "name": "Exit Y",
-                "desc": "The Y co-ordinate of the portal exit, in pixels."
-              },
-              "cost": {
-                "name": "Cost",
-                "desc": "The cost of using this portal. The default of 1 is the same as walking one tile; lower costs are preferred and higher costs avoided."
-              },
-              "tag": {
-                "name": "Tag",
-                "desc": "An optional tag for grouping portals. Use commas for multiple tags (e.g. \"door,room_A\"). Leave empty for no tag."
-              }
-            }
-          },
-          "AddInstantPortalFromObjects": {
-            "list-name": "Add instant portal from objects",
-            "display-text": "{my}: Add {0} instant portal from {1} to {2} [Cost: {3}] [Tag: {4}]",
-            "description": "Add an instant portal using two objects as entry and exit positions. The objects' current X/Y positions are used. Use for: linking door sprites, warp pad objects, etc.",
-            "params": {
-              "direction": {
-                "name": "Direction",
-                "desc": "One-way: entry to exit only. Two-way: works in both directions.",
-                "items": {
-                  "one_way": "One-way",
-                  "two_way": "Two-way"
-                }
-              },
-              "entryObject": {
-                "name": "Entry object",
-                "desc": "The object to use as the portal entry point"
-              },
-              "exitObject": {
-                "name": "Exit object",
-                "desc": "The object to use as the portal exit point"
-              },
-              "cost": {
-                "name": "Cost",
-                "desc": "The movement cost. Lower costs are preferred; the default is 1."
+                "desc": "The movement speed for Gradual portals, in pixels per second. Ignored for Instant portals."
               },
               "tag": {
                 "name": "Tag",
@@ -1129,7 +1169,7 @@
           "SetPortalPosition": {
             "list-name": "Set portal position",
             "display-text": "{my}: Move portal {0} to entry ({1}, {2}) exit ({3}, {4})",
-            "description": "Move a portal's entry and exit in place, keeping its ID, type, cost, speed, and tags; graph connections re-wire immediately. A character mid-traversal keeps its original destination.",
+            "description": "Move a portal's entry and exit in place, keeping its ID, type, cost, speed, and tags; graph connections re-wire immediately. A character mid-traversal keeps its original destination. A portal that was following objects stops following them.",
             "params": {
               "id": {
                 "name": "Portal ID",
@@ -1156,7 +1196,7 @@
           "SetPortalPositionFromObjects": {
             "list-name": "Set portal position from objects",
             "display-text": "{my}: Move portal {0} to {1} -> {2}",
-            "description": "Move an existing portal to two objects' current positions (first picked instances), preserving its ID, type, cost, speed, and tags. Combine with an Every X seconds event to make a portal follow moving objects, such as a teleporter drone.",
+            "description": "Attach an existing portal to two objects (first picked instances), preserving its ID, type, cost, speed, and tags. The portal then follows those objects as they move.",
             "params": {
               "id": {
                 "name": "Portal ID",
@@ -1300,7 +1340,7 @@
           "IsPatrolling": {
             "list-name": "Is patrolling",
             "display-text": "{my}: Is patrolling",
-            "description": "True while a ledge-to-ledge patrol is active.",
+            "description": "True while a patrol is active (Start patrol or Start patrol between objects).",
             "params": {}
           },
           "IsPlatformEnabled": {
@@ -1324,19 +1364,19 @@
           "OnPatrolDwellFinished": {
             "list-name": "On patrol dwell finished",
             "display-text": "{my}: On patrol dwell finished",
-            "description": "Triggered when a patrolling character finishes its wait at a patrol end and turns to walk again. PatrolDirection already reports the new walk direction inside this trigger. Not fired when the dwell time is 0; use 'On patrol end reached' there.",
+            "description": "Triggered when a patrolling character finishes its wait at a patrol end or marker and walks on. PatrolDirection already reports the new walk direction inside this trigger. Not fired when the dwell time is 0; use 'On patrol end reached' there.",
             "params": {}
           },
           "OnPatrolDwellStarted": {
             "list-name": "On patrol dwell started",
             "display-text": "{my}: On patrol dwell started",
-            "description": "Triggered when a patrolling character begins its wait at a patrol end, right after 'On patrol end reached'. Use it to start idle or look-around animations. Not fired when the dwell time is 0.",
+            "description": "Triggered when a patrolling character begins its wait at a patrol end or marker, right after 'On patrol end reached'. Use it to start idle or look-around animations. Not fired when the dwell time is 0.",
             "params": {}
           },
           "OnPatrolEndReached": {
             "list-name": "On patrol end reached",
             "display-text": "{my}: On patrol end reached",
-            "description": "Triggered each time a patrolling character reaches an end of its patrol and is about to turn. Use it for look-around animations during the dwell.",
+            "description": "Triggered each time a patrolling character reaches an end of its patrol (or a marker, with 'Start patrol between objects') and is about to turn or move on. Use it for look-around animations during the dwell.",
             "params": {}
           },
           "OnWaypointReached": {
@@ -1423,17 +1463,20 @@
             "description": "Check if the character currently has an active pathfinding path. Returns true while navigating, false when idle or path is complete. Matches the built-in Pathfinding behavior's 'Is moving along path'.",
             "params": {}
           },
-          "IsCrowdArrivalsEnabled": {
-            "list-name": "Is crowd arrivals enabled",
-            "display-text": "{my}: Is crowd arrivals enabled",
-            "description": "True if crowd arrivals (goal reservation) is currently active.",
-            "params": {}
-          },
-          "IsMultiAgentAvoidanceEnabled": {
-            "list-name": "Is multi-agent avoidance enabled",
-            "display-text": "{my}: Is multi-agent avoidance enabled",
-            "description": "True if multi-agent avoidance is currently active.",
-            "params": {}
+          "IsCrowdFeatureEnabled": {
+            "list-name": "Is crowd feature enabled",
+            "display-text": "{my}: {0} is enabled",
+            "description": "True if the chosen crowd feature is currently enabled.",
+            "params": {
+              "feature": {
+                "name": "Feature",
+                "desc": "Crowd arrivals: characters claim their own landing spot at a shared destination. Multi-agent avoidance: characters avoid choosing overlapping paths.",
+                "items": {
+                  "crowd_arrivals": "Crowd arrivals",
+                  "avoidance": "Multi-agent avoidance"
+                }
+              }
+            }
           },
           "IsOnSamePlatform": {
             "list-name": "Is on same platform as object",
@@ -1941,6 +1984,11 @@
             "description": "The patrol walk direction: -1 walking left, 1 walking right, 0 when not patrolling or dwelling at an end. Useful for mirroring the sprite.",
             "params": {}
           },
+          "PatrolPointIndex": {
+            "translated-name": "PatrolPointIndex",
+            "description": "During 'Start patrol between objects': the marker the character is at or heading to, counting from 0 in instance order. -1 when no route patrol is active.",
+            "params": {}
+          },
           "StoppingDistance": {
             "translated-name": "StoppingDistance",
             "description": "Get the calculated stopping distance in pixels based on the Platform behavior's current speed. Used for waypoint arrival detection.",
@@ -1954,6 +2002,16 @@
           "GridHeight": {
             "translated-name": "GridHeight",
             "description": "Get the height of the obstacle map in tiles. Returns 0 if no map exists.",
+            "params": {}
+          },
+          "GridOriginX": {
+            "translated-name": "GridOriginX",
+            "description": "The world X co-ordinate of grid tile 0, in pixels. 0 unless the obstacle map covers content left of the layout or grew to include it. World X = GridOriginX + tile X * GridTileSize.",
+            "params": {}
+          },
+          "GridOriginY": {
+            "translated-name": "GridOriginY",
+            "description": "The world Y co-ordinate of grid tile 0, in pixels. 0 unless the obstacle map covers content above the layout or grew to include it. World Y = GridOriginY + tile Y * GridTileSize.",
             "params": {}
           },
           "GridTileSize": {
